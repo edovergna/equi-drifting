@@ -154,39 +154,3 @@ class LitFlowMatching(pl.LightningModule):
 
     def test_step(self, batch, batch_idx):
         self._shared_step(batch, "test")
-
-
-def main():
-    pl.seed_everything(42)
-
-    datamodule = QM9DataModule()
-    model = LitFlowMatching()
-
-    callbacks = [
-        ModelCheckpoint(
-            monitor="val/loss",
-            mode="min",
-            save_top_k=1,
-            filename="best-{epoch:02d}-{val_loss:.4f}",
-        ),
-        EarlyStopping(
-            monitor="val/loss",
-            mode="min",
-            patience=10,
-        ),
-    ]
-
-    trainer = pl.Trainer(
-        max_epochs=MAX_EPOCHS,
-        accelerator="auto",
-        devices=1,
-        callbacks=callbacks,
-        log_every_n_steps=10,
-    )
-
-    trainer.fit(model, datamodule=datamodule)
-    trainer.test(model, datamodule=datamodule, ckpt_path="best")
-
-
-if __name__ == "__main__":
-    main()
