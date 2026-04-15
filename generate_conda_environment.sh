@@ -39,7 +39,7 @@ echo "uv pip list --format freeze"
 PIP_FREEZE=$(uv pip list --format freeze)
 
 # Remove problematic packages
-# PIP_FREEZE=$(echo "$PIP_FREEZE" | grep -v '^torch==')
+PIP_FREEZE=$(echo "$PIP_FREEZE" | grep -v '^torch==')
 # PIP_FREEZE=$(echo "$PIP_FREEZE" | grep -v '^dgl==')
 # PIP_FREEZE=$(echo "$PIP_FREEZE" | grep -v '^pyg-lib==')
 # PIP_FREEZE=$(echo "$PIP_FREEZE" | grep -v '^torch-scatter==')
@@ -59,10 +59,10 @@ CONDA_YAML_PATH="$REPO_DIR/conda_environment.yaml"
   echo "  - python=$PY_VER"
   echo "  - pip"
   echo "  - pip:"
-#   # ---- PyTorch (CUDA 12.4) ----
-#   echo '    - "torch==2.4.0"'
-#   echo '    - "--index-url=https://download.pytorch.org/whl/cu124"'
-#   echo '    - "--extra-index-url=https://pypi.org/simple"'
+  # ---- PyTorch (CUDA 12.4) ----
+  echo '    - "torch==2.4.0"'
+  echo '    - "--index-url=https://download.pytorch.org/whl/cu124"'
+  echo '    - "--extra-index-url=https://pypi.org/simple"'
 #   # ---- DGL (Torch 2.4, CUDA 12.4) ----
 #   echo '    - "dgl==2.4.0"'
 #   echo '    - "--find-links=https://data.dgl.ai/wheels/torch-2.4/cu124/repo.html"'

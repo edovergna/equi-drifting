@@ -3,5 +3,17 @@ name = "Equi"
 version = "0.1.0"
 requires-python = ">=3.11,<3.13"
 dependencies = [
+    "black>=26.3.1",
+    "tqdm>=4.67.3",
     "wandb>=0.26.0",
+    "torch==2.4",
+    "isort>=8.0.1",
 ]
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch" }
