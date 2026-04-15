@@ -1,30 +1,18 @@
-# train_qm9_lightning.py
-
+import lightning.pytorch as pl
 import torch
 import torch.nn.functional as F
 from torch.utils.data import random_split
-
-import lightning.pytorch as pl
-from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
-
 from torch_geometric.datasets import QM9
 from torch_geometric.loader import DataLoader
 from torch_geometric.utils import scatter
 
-from EGNN import EGNNVelocity
-
-
-ROOT = "data/QM9"
-BATCH_SIZE = 128
-NUM_WORKERS = 4
-MAX_EPOCHS = 50
-LR = 1e-3
-WEIGHT_DECAY = 1e-6
-TYPE_LOSS_WEIGHT = 0.1
+from model.EGNN import EGNNVelocity
 
 
 class QM9DataModule(pl.LightningDataModule):
-    def __init__(self, root=ROOT, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS):
+    def __init__(
+        self, root: str = "data/QM9", batch_size: int = 128, num_workers: int = 4
+    ):
         super().__init__()
         self.root = root
         self.batch_size = batch_size
@@ -44,7 +32,7 @@ class QM9DataModule(pl.LightningDataModule):
             generator=torch.Generator().manual_seed(42),
         )
 
-    def train_dataloader(self):
+    def train_dataloader(self) -> DataLoader:
         return DataLoader(
             self.train_set,
             batch_size=self.batch_size,
@@ -53,7 +41,7 @@ class QM9DataModule(pl.LightningDataModule):
             pin_memory=True,
         )
 
-    def val_dataloader(self):
+    def val_dataloader(self) -> DataLoader:
         return DataLoader(
             self.val_set,
             batch_size=self.batch_size,
@@ -62,7 +50,7 @@ class QM9DataModule(pl.LightningDataModule):
             pin_memory=True,
         )
 
-    def test_dataloader(self):
+    def test_dataloader(self) -> DataLoader:
         return DataLoader(
             self.test_set,
             batch_size=self.batch_size,
@@ -75,14 +63,14 @@ class QM9DataModule(pl.LightningDataModule):
 class LitFlowMatching(pl.LightningModule):
     def __init__(
         self,
-        hidden_dim=64,
-        num_layers=4,
-        lr=LR,
-        weight_decay=WEIGHT_DECAY,
-        type_loss_weight=TYPE_LOSS_WEIGHT,
+        hidden_dim: int = 64,
+        num_layers: int = 4,
+        lr: float = 1e-3,
+        weight_decay: float = 1e-6,
+        type_loss_weight: float = 0.1,
     ):
         super().__init__()
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=["model"])
 
         self.model = EGNNVelocity(
             hidden_dim=hidden_dim,
