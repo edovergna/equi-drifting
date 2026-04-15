@@ -15,7 +15,7 @@ dependencies = [
     "torch-scatter",
     "torch-sparse",
     "torch-cluster",
-
+    "lightning>=2.6.1",
 ]
 
 [tool.uv]
