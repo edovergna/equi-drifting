@@ -8,6 +8,7 @@ dependencies = [
     "wandb>=0.26.0",
     "torch==2.4",
     "isort>=8.0.1",
+    "numpy>=2.4.4",
 ]
 
 [[tool.uv.index]]
