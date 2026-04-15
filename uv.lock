@@ -207,6 +207,7 @@ dependencies = [
     { name = "black" },
     { name = "isort" },
     { name = "lightning" },
+    { name = "lightning" },
     { name = "numpy" },
     { name = "pyg-lib" },
     { name = "torch" },
@@ -222,6 +223,7 @@ dependencies = [
 requires-dist = [
     { name = "black", specifier = ">=26.3.1" },
     { name = "isort", specifier = ">=8.0.1" },
+    { name = "lightning", specifier = ">=2.6.1" },
     { name = "lightning", specifier = ">=2.6.1" },
     { name = "numpy", specifier = ">=2.4.4" },
     { name = "pyg-lib" },
