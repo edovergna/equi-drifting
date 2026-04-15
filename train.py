@@ -1,25 +1,58 @@
-import pytorch_lightning as pl
+import argparse
 
-from model.lit_modules import QM9DataModule, LitFlowMatching
+import lightning.pytorch as pl
+import torch
+from lightning.pytorch.loggers import WandbLogger
 
-def main():
-    pl.seed_everything(42)
+import wandb
+from model.lit_modules import LitFlowMatching, QM9DataModule
+from parse_args import parse_args
+from utils import get_device, set_seed
 
-    datamodule = QM9DataModule()
-    model = LitFlowMatching()
+
+def main(args: argparse.Namespace):
+    set_seed(args.seed)
+    torch.set_float32_matmul_precision("medium")
+    device = get_device()
+
+    run = wandb.init(
+        entity="equivariant-drifting",
+        project="tests",
+        group=args.group_tag,
+        mode="offline" if args.offline else "online",
+        config=vars(args),
+    )
+
+    datamodule = QM9DataModule(
+        root=args.root, batch_size=args.batch_size, num_workers=args.num_workers
+    )
+    model = LitFlowMatching(
+        hidden_dim=args.hidden_dim,
+        num_layers=args.num_layers,
+        lr=args.lr,
+        weight_decay=args.weight_decay,
+        type_loss_weight=args.type_loss_weight,
+    )
     callbacks = []
 
     trainer = pl.Trainer(
-        max_epochs=MAX_EPOCHS,
-        accelerator="auto",
+        max_epochs=args.max_epochs,
         devices=1,
+        deterministic=True,
+        check_val_every_n_epoch=args.check_val_every_n_epoch,
         callbacks=callbacks,
-        log_every_n_steps=10,
+        logger=WandbLogger(experiment=run, save_dir="."),
+        log_every_n_steps=args.log_every_n_steps,
+        enable_checkpointing=False,
     )
 
+    breakpoint()
     trainer.fit(model, datamodule=datamodule)
-    trainer.test(model, datamodule=datamodule, ckpt_path="best")
+    trainer.test(model, datamodule=datamodule)
+
+    wandb.finish()
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(args)
