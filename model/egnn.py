@@ -150,36 +150,82 @@ class EquivariantBlock(nn.Module):
         return x, pos
 
 
+class AtomHead(nn.Module):
+    def __init__(self, hidden_nf: int, num_atom_types: int):
+        super().__init__()
+        self.mlp = nn.Sequential(
+            nn.Linear(hidden_nf, hidden_nf),
+            nn.SiLU(),
+            nn.Linear(hidden_nf, num_atom_types),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.mlp(x)  # (N, num_atom_types)
+
+
+class BondHead(nn.Module):
+    def __init__(self, hidden_nf: int, num_bond_types: int):
+        super().__init__()
+        self.mlp = nn.Sequential(
+            nn.Linear(hidden_nf * 2 + 1, hidden_nf),
+            nn.SiLU(),
+            nn.Linear(hidden_nf, num_bond_types),
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        edge_index: torch.Tensor,
+        edge_attr: torch.Tensor,  # radial
+    ) -> torch.Tensor:
+        src, dst = edge_index
+        edge_input = torch.cat([x[src], x[dst], edge_attr], dim=-1)
+        return self.mlp(edge_input)  # (E, num_bond_types)
+
+
 class EGNN(nn.Module):
-    def __init__(self, in_node_nf: int, hidden_nf: int, n_layers: int = 4):
+    def __init__(
+        self,
+        in_node_nf: int,
+        hidden_nf: int,
+        num_atom_types: int,
+        num_bond_types: int,
+        n_layers: int = 4,
+    ):
         super().__init__()
 
         self.embedding = nn.Linear(in_node_nf, hidden_nf)
-        self.embedding_out = nn.Linear(hidden_nf, in_node_nf)
 
         self.blocks = nn.ModuleList(
             [EquivariantBlock(hidden_nf) for _ in range(n_layers)]
         )
 
+        # Heads
+        self.atom_head = AtomHead(hidden_nf, num_atom_types)
+        self.bond_head = BondHead(hidden_nf, num_bond_types)
+
     def compute_edge_features(
         self, pos: torch.Tensor, edge_index: torch.Tensor, eps: float = 1e-8
-    ) -> torch.Tensor:
-        # Get edge directions
+    ):
         src, dst = edge_index
-        # Compute relative distance
         coord_diff = pos[src] - pos[dst]
         radial = (coord_diff**2).sum(dim=-1, keepdim=True)
         norm = radial.sqrt() + eps
         return radial, coord_diff / norm
 
-    def forward(
-        self, x: torch.Tensor, pos: torch.Tensor, edge_index: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor, pos: torch.Tensor, edge_index: torch.Tensor):
         x = self.embedding(x)
 
         for block in self.blocks:
             edge_attr, coord_diff = self.compute_edge_features(pos, edge_index)
             x, pos = block(x, pos, edge_index, edge_attr, coord_diff)
 
-        x = self.embedding_out(x)
-        return x, pos
+        # Final edge features (for bond head)
+        edge_attr, _ = self.compute_edge_features(pos, edge_index)
+
+        atom_logits = self.atom_head(x)
+        bond_logits = self.bond_head(x, edge_index, edge_attr)
+
+        breakpoint()
+
+        return atom_logits, bond_logits, pos

@@ -27,6 +27,8 @@ class DriftingMoleculeGenerator(LightningModule):
             in_node_nf=7,  # Example: 5 for one-hot atom type + 2 for other features
             hidden_nf=128,
             n_layers=2,
+            num_atom_types=5,  # Example: C, O, N, S, H
+            num_bond_types=5,  # Example: single, double, triple, aromatic, no bond
         )
 
     def _init_feature_extractor(self):
@@ -60,9 +62,7 @@ class DriftingMoleculeGenerator(LightningModule):
         v_field = torch.zeros_like(x)  # Placeholder
         return v_field
 
-    def sample_prior(self, batch: Batch) -> Batch:
-
-        num_nodes = batch.num_nodes
+    def sample_prior(self, num_nodes: int) -> tuple[torch.Tensor, torch.Tensor]:
 
         # Sample positions
         pos = torch.randn(num_nodes, 3, device=self.device)
@@ -75,30 +75,20 @@ class DriftingMoleculeGenerator(LightningModule):
         # hence, we sample 7 dimensions to cover all the node features
         x = torch.randn(num_nodes, 7, device=self.device)
 
-        # Sample edge attributes
-        edge_attr = torch.randn(batch.dense_edge_index.size(1), 4, device=self.device)
-
-        return Batch(
-            x=x,
-            pos=pos,
-            edge_index=batch.dense_edge_index,
-            edge_attr=edge_attr,
-            batch=batch.batch,
-            ptr=batch.ptr,
-        )
+        return x, pos
 
     def training_step(self, batch, batch_idx):
         """
         Training-time evolution of the pushforward distribution.
         """
         # Sample from the prior distribution
-        sampled_prior_batch = self.sample_prior(batch)
+        x, pos = self.sample_prior(batch.num_nodes)
 
         # Forward Pass: Map Prior (e) to Generated (x)
         x_gen, pos_gen = self.generator(
-            sampled_prior_batch.x,
-            sampled_prior_batch.pos,
-            sampled_prior_batch.edge_index,
+            x,
+            pos,
+            batch.edge_index,
         )
 
         # Extract Features for the Drift Calculation
