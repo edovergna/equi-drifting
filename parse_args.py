@@ -10,6 +10,11 @@ def parse_args():
         help="Root directory for the QM9 dataset.",
     )
     parser.add_argument(
+        "--force_reload",
+        action="store_true",
+        help="Whether to force reload the QM9 dataset (required after modifying pre_transform).",
+    )
+    parser.add_argument(
         "--seed", type=int, default=42, help="Random seed for reproducibility."
     )
     parser.add_argument(

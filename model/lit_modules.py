@@ -1,144 +1,126 @@
-import lightning.pytorch as pl
 import torch
 import torch.nn.functional as F
-from torch.utils.data import random_split
-from torch_geometric.datasets import QM9
-from torch_geometric.loader import DataLoader
-from torch_geometric.utils import scatter
+from lightning.pytorch import LightningModule
+from torch_geometric.data import Batch
 
-from model.EGNN import EGNNVelocity
+from .egnn import EGNN
 
 
-class QM9DataModule(pl.LightningDataModule):
-    def __init__(
-        self, root: str = "data/QM9", batch_size: int = 128, num_workers: int = 4
-    ):
+class DriftingMoleculeGenerator(LightningModule):
+    def __init__(self, generator_cfg, drift_cfg):
         super().__init__()
-        self.root = root
-        self.batch_size = batch_size
-        self.num_workers = num_workers
+        self.save_hyperparameters()
 
-    def setup(self, stage=None):
-        dataset = QM9(self.root)
+        # Generator: Your EGNN or GNN architecture
+        self.generator = self._init_generator(generator_cfg)
 
-        n = len(dataset)
-        n_train = int(0.9 * n)
-        n_val = int(0.05 * n)
-        n_test = n - n_train - n_val
+        # Feature Space: The paper suggests drifting in a feature space
+        # For now, this can be a simple linear layer or a small GNN encoder
+        self.feature_extractor = self._init_feature_extractor()
 
-        self.train_set, self.val_set, self.test_set = random_split(
-            dataset,
-            [n_train, n_val, n_test],
-            generator=torch.Generator().manual_seed(42),
+        # Hyperparameters for Drifting Field V
+        self.temperatures = [0.02, 0.05, 0.2]
+
+    def _init_generator(self, cfg) -> EGNN:
+        # Placeholder for your EGNN initialization
+        return EGNN(
+            in_node_nf=7,  # Example: 5 for one-hot atom type + 2 for other features
+            hidden_nf=128,
+            n_layers=2,
         )
 
-    def train_dataloader(self) -> DataLoader:
-        return DataLoader(
-            self.train_set,
-            batch_size=self.batch_size,
-            shuffle=True,
-            num_workers=self.num_workers,
-            pin_memory=True,
+    def _init_feature_extractor(self):
+        # Placeholder: Drifting in feature space prevents "flat" kernels
+        return torch.nn.Identity()  # Placeholder
+
+    def compute_v(self, x, y_pos, y_neg, tau):
+        """
+        Implements Algorithm 2: Computing the drifting field V.
+        x: Generated features (q)
+        y_pos: Real data features (p)
+        y_neg: Other generated samples (q) for repulsion
+        """
+        # 1. Compute Pairwise Distances
+        dist_pos = torch.cdist(x, y_pos)
+        dist_neg = torch.cdist(x, y_neg)
+
+        # Ignore self in repulsion (if y_neg is x)
+        # dist_neg += torch.eye(x.size(0)).to(x.device) * 1e6
+
+        # 2. Compute Logits and Kernels
+        logit_pos = -dist_pos / tau
+        logit_neg = -dist_neg / tau
+
+        # 3. Normalization along both dimensions (Anti-symmetry)
+        # Normalized kernels (A_pos, A_neg)
+        # Placeholder for softmax/sqrt normalization logic from Alg 2
+
+        # 4. Compute Weighted Drift
+        # V = V_attraction (from p) - V_repulsion (from q)
+        v_field = torch.zeros_like(x)  # Placeholder
+        return v_field
+
+    def sample_prior(self, batch: Batch) -> Batch:
+
+        num_nodes = batch.num_nodes
+
+        # Sample positions
+        pos = torch.randn(num_nodes, 3, device=self.device)
+
+        # Sample node features
+        # We sample a 7-dimensional feature space, because the
+        # node features are composed by a 5-dim one-hot encoding
+        # of the atom type + 6 more dimensions for the other features (charge, etc.).
+        # We can summarize the 5-dim one-hot encoding in a single dimension,
+        # hence, we sample 7 dimensions to cover all the node features
+        x = torch.randn(num_nodes, 7, device=self.device)
+
+        # Sample edge attributes
+        edge_attr = torch.randn(batch.dense_edge_index.size(1), 4, device=self.device)
+
+        return Batch(
+            x=x,
+            pos=pos,
+            edge_index=batch.dense_edge_index,
+            edge_attr=edge_attr,
+            batch=batch.batch,
+            ptr=batch.ptr,
         )
-
-    def val_dataloader(self) -> DataLoader:
-        return DataLoader(
-            self.val_set,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            pin_memory=True,
-        )
-
-    def test_dataloader(self) -> DataLoader:
-        return DataLoader(
-            self.test_set,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            pin_memory=True,
-        )
-
-
-class LitFlowMatching(pl.LightningModule):
-    def __init__(
-        self,
-        hidden_dim: int = 64,
-        num_layers: int = 4,
-        lr: float = 1e-3,
-        weight_decay: float = 1e-6,
-        type_loss_weight: float = 0.1,
-    ):
-        super().__init__()
-        self.save_hyperparameters(ignore=["model"])
-
-        self.model = EGNNVelocity(
-            hidden_dim=hidden_dim,
-            num_layers=num_layers,
-            num_atom_types=5,  # H, C, N, O, F
-            num_bond_types=4,  # single, double, triple, aromatic
-            space_dim=3,
-        )
-
-    def configure_optimizers(self):
-        return torch.optim.AdamW(
-            self.parameters(),
-            lr=self.hparams.lr,
-            weight_decay=self.hparams.weight_decay,
-        )
-
-    def _sample_flow_batch(self, batch):
-        # Original molecule positions
-        X1 = batch.pos.float()
-        batch_idx = batch.batch
-
-        # Gaussian source, zero-centered per graph
-        X0 = torch.randn_like(X1)
-        X0 = X0 - scatter(X0, batch_idx, dim=0, reduce="mean")[batch_idx]
-
-        # One time per graph
-        t_graph = torch.rand(batch.num_graphs, device=X1.device)
-        t_node = t_graph[batch_idx].unsqueeze(-1)
-
-        # Linear interpolation path x_t = (1-t)x0 + t x1
-        Xt = (1.0 - t_node) * X0 + t_node * X1
-
-        # Conditional flow matching target
-        Vt = X1 - X0
-
-        return Xt, Vt, t_graph
-
-    def _shared_step(self, batch, stage: str):
-        # Convert QM9 batch fields
-        _, A, C, edge_index, E, batch_idx = self.model.qm9_to_inputs(batch)
-
-        Xt, Vt, t = self._sample_flow_batch(batch)
-
-        out = self.model(
-            X=Xt,
-            A=A,
-            C=C,
-            edge_index=edge_index,
-            E=E,
-            time=t,
-            batch=batch_idx,
-        )
-
-        loss_v = F.mse_loss(out["velocity"], Vt)
-        loss_type = F.cross_entropy(out["type_logits"], A)
-        loss = loss_v + self.hparams.type_loss_weight * loss_type
-
-        self.log(f"{stage}/loss", loss, prog_bar=True, batch_size=batch.num_graphs)
-        self.log(f"{stage}/loss_v", loss_v, batch_size=batch.num_graphs)
-        self.log(f"{stage}/loss_type", loss_type, batch_size=batch.num_graphs)
-
-        return loss
 
     def training_step(self, batch, batch_idx):
-        return self._shared_step(batch, "train")
+        """
+        Training-time evolution of the pushforward distribution.
+        """
+        # Sample from the prior distribution
+        sampled_prior_batch = self.sample_prior(batch)
 
-    def validation_step(self, batch, batch_idx):
-        self._shared_step(batch, "val")
+        # Forward Pass: Map Prior (e) to Generated (x)
+        x_gen, pos_gen = self.generator(
+            sampled_prior_batch.x,
+            sampled_prior_batch.pos,
+            sampled_prior_batch.edge_index,
+        )
 
-    def test_step(self, batch, batch_idx):
-        self._shared_step(batch, "test")
+        # Extract Features for the Drift Calculation
+        phi_gen = self.feature_extractor(x_gen, pos_gen)
+        phi_real = self.feature_extractor(batch.x_true, batch.pos_true)
+
+        # Compute the Aggregated Drifting Field V
+        # Usually summed across multiple temperatures
+        total_v = torch.zeros_like(phi_gen)
+        for t in self.temperatures:
+            total_v += self.compute_v(phi_gen, phi_real, phi_gen, t)
+
+        # Stop-Gradient Loss
+        # We move x towards (x + V) without backpropping through V itself
+        target = (phi_gen + total_v).detach()
+
+        # Equation 6
+        loss = F.mse_loss(phi_gen, target)
+
+        self.log("train_loss", loss)
+        return loss
+
+    def configure_optimizers(self):
+        # The paper uses AdamW with specific beta values
+        return torch.optim.AdamW(self.parameters(), lr=4e-4, betas=(0.9, 0.95))

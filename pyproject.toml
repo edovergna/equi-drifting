@@ -16,6 +16,7 @@ dependencies = [
     "torch-sparse",
     "torch-cluster",
     "lightning>=2.6.1",
+    "einops>=0.8.2",
 ]
 
 [tool.uv]

@@ -5,7 +5,8 @@ import torch
 from lightning.pytorch.loggers import WandbLogger
 
 import wandb
-from model.lit_modules import LitFlowMatching, QM9DataModule
+from model.datamodule import QM9DataModule
+from model.lit_modules import DriftingMoleculeGenerator
 from parse_args import parse_args
 from utils import get_device, set_seed
 
@@ -26,13 +27,7 @@ def main(args: argparse.Namespace):
     datamodule = QM9DataModule(
         root=args.root, batch_size=args.batch_size, num_workers=args.num_workers
     )
-    model = LitFlowMatching(
-        hidden_dim=args.hidden_dim,
-        num_layers=args.num_layers,
-        lr=args.lr,
-        weight_decay=args.weight_decay,
-        type_loss_weight=args.type_loss_weight,
-    )
+    model = DriftingMoleculeGenerator(None, None).to(device)
     callbacks = []
 
     trainer = pl.Trainer(
@@ -46,7 +41,6 @@ def main(args: argparse.Namespace):
         enable_checkpointing=False,
     )
 
-    breakpoint()
     trainer.fit(model, datamodule=datamodule)
     trainer.test(model, datamodule=datamodule)
 
