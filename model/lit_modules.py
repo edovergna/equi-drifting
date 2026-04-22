@@ -84,7 +84,7 @@ class DriftingMoleculeGenerator(LightningModule):
         x, pos = self.sample_prior(batch.num_nodes)
 
         # Forward Pass: Map Prior (e) to Generated (x)
-        x_gen, pos_gen = self.generator(
+        x_gen, edge_bond_logits, pos_gen  = self.generator(
             x,
             pos,
             batch.edge_index,
