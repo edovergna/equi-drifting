@@ -3,5 +3,34 @@ name = "Equi"
 version = "0.1.0"
 requires-python = ">=3.11,<3.13"
 dependencies = [
+    "black>=26.3.1",
+    "tqdm>=4.67.3",
     "wandb>=0.26.0",
+    "torch==2.8.0",
+    "isort>=8.0.1",
+    "numpy>=2.4.4",
+    "torch-geometric>=2.7.0",
+    # We remove version pins for these 4 so uv picks the binaries from find-links
+    "pyg-lib",
+    "torch-scatter",
+    "torch-sparse",
+    "torch-cluster",
+    "torch-spline-conv",
+    "lightning>=2.6.1",
+    "einops>=0.8.2",
 ]
+
+[tool.uv]
+# Tells uv where to look for the specialized wheels
+find-links = ["https://data.pyg.org/whl/torch-2.8.0+cu126.html"]
+
+# Prevents uv from trying to build these from source if it can't find a wheel
+no-build-package = ["pyg-lib", "torch-scatter", "torch-sparse", "torch-cluster", "torch-spline-conv"]
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch" }

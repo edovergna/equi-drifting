@@ -3,6 +3,12 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# data
+data/
+
+# experiment logs
+wandb/
+
 # C extensions
 *.so
 

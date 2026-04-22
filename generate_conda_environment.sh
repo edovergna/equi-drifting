@@ -39,13 +39,12 @@ echo "uv pip list --format freeze"
 PIP_FREEZE=$(uv pip list --format freeze)
 
 # Remove problematic packages
-# PIP_FREEZE=$(echo "$PIP_FREEZE" | grep -v '^torch==')
-# PIP_FREEZE=$(echo "$PIP_FREEZE" | grep -v '^dgl==')
-# PIP_FREEZE=$(echo "$PIP_FREEZE" | grep -v '^pyg-lib==')
-# PIP_FREEZE=$(echo "$PIP_FREEZE" | grep -v '^torch-scatter==')
-# PIP_FREEZE=$(echo "$PIP_FREEZE" | grep -v '^torch-sparse==')
-# PIP_FREEZE=$(echo "$PIP_FREEZE" | grep -v '^torch-cluster==')
-# PIP_FREEZE=$(echo "$PIP_FREEZE" | grep -v '^torch-spline-conv==')
+PIP_FREEZE=$(echo "$PIP_FREEZE" | grep -v '^torch==')
+PIP_FREEZE=$(echo "$PIP_FREEZE" | grep -v '^pyg-lib==')
+PIP_FREEZE=$(echo "$PIP_FREEZE" | grep -v '^torch-scatter==')
+PIP_FREEZE=$(echo "$PIP_FREEZE" | grep -v '^torch-sparse==')
+PIP_FREEZE=$(echo "$PIP_FREEZE" | grep -v '^torch-cluster==')
+PIP_FREEZE=$(echo "$PIP_FREEZE" | grep -v '^torch-spline-conv==')
 
 CONDA_YAML_PATH="$REPO_DIR/conda_environment.yaml"
 
@@ -59,20 +58,17 @@ CONDA_YAML_PATH="$REPO_DIR/conda_environment.yaml"
   echo "  - python=$PY_VER"
   echo "  - pip"
   echo "  - pip:"
-#   # ---- PyTorch (CUDA 12.4) ----
-#   echo '    - "torch==2.4.0"'
-#   echo '    - "--index-url=https://download.pytorch.org/whl/cu124"'
-#   echo '    - "--extra-index-url=https://pypi.org/simple"'
-#   # ---- DGL (Torch 2.4, CUDA 12.4) ----
-#   echo '    - "dgl==2.4.0"'
-#   echo '    - "--find-links=https://data.dgl.ai/wheels/torch-2.4/cu124/repo.html"'
-#   # ---- PyG ecosystem (Torch 2.4, CUDA 12.4) ----
-#   echo '    - "pyg-lib"'
-#   echo '    - "torch-scatter"'
-#   echo '    - "torch-sparse"'
-#   echo '    - "torch-cluster"'
-#   echo '    - "torch-spline-conv"'
-#   echo '    - "--find-links=https://data.pyg.org/whl/torch-2.4.0+cu124.html"'
+  # ---- PyTorch (CUDA 12.6) ----
+  echo '    - "torch==2.8.0"'
+  echo '    - "--index-url=https://download.pytorch.org/whl/cu126"'
+  echo '    - "--extra-index-url=https://pypi.org/simple"'
+  # ---- PyG ecosystem (Torch 2.8, CUDA 12.6) ----
+  echo '    - "pyg-lib"'
+  echo '    - "torch-scatter"'
+  echo '    - "torch-sparse"'
+  echo '    - "torch-cluster"'
+  echo '    - "torch-spline-conv"'
+  echo '    - "--find-links=https://data.pyg.org/whl/torch-2.8.0+cu126.html"'
 
   if [ -z "$PIP_FREEZE" ]; then
     echo "    # no additional pip packages detected"
