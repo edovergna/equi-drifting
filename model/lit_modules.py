@@ -6,7 +6,8 @@ import torch
 import torch.nn.functional as F
 from lightning.pytorch import LightningModule
 
-from ept.ept import EPTFeatureExtractor
+from ept import EPTFeatureExtractor
+from model.egnn import EGNN
 
 from .egnn import EGNN
 
@@ -120,7 +121,7 @@ class DriftingMoleculeGenerator(LightningModule):
             batch.edge_index,
         )
 
-        breakpoint()
+        # breakpoint()
 
         # Extract Features for the Drift Calculation
         phi_gen = self.feature_extractor(x_gen, pos_gen)

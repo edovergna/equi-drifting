@@ -1,5 +1,11 @@
 import argparse
 import random
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import lightning.pytorch as pl
 import numpy as np
@@ -43,7 +49,7 @@ def main(args: argparse.Namespace):
     set_seed(args.seed)
     torch.set_float32_matmul_precision("medium")
     device = get_device()
-
+    print(f"Using device: {device}")
     run = wandb.init(
         entity="equivariant-drifting",
         project="tests",
