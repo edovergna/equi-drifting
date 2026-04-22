@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-
+from torch_geometric.nn import global_mean_pool
 
 class EPTFeatureExtractor(nn.Module):
     def __init__(self, ckpt_path, device):
@@ -18,9 +18,7 @@ class EPTFeatureExtractor(nn.Module):
             if hasattr(self.ept_model.encoder, "encoder")
             else self.ept_model.encoder
         )
-        if not hasattr(
-            encoder_target, "use_ieconv"
-        ):  # because we use fully connected graph
+        if not hasattr(encoder_target, "use_ieconv"):
             encoder_target.use_ieconv = False
         if not hasattr(encoder_target, "zero_conv"):
             encoder_target.zero_conv = False
@@ -36,51 +34,45 @@ class EPTFeatureExtractor(nn.Module):
         # Locate the continuous embedding weights
         self.embed_weights = None
         for module in self.ept_model.graph_constructor.node_modules:
-            if (
-                type(module).__name__ == "ContinuousEmbedding"
-                and module.level == "unit"
-            ):  # prep for gradient flow
+            if type(module).__name__ == "ContinuousEmbedding" and module.level == "unit":
                 self.embed_weights = module.embedding.weight
                 break
 
         if self.embed_weights is None:
-            raise ValueError("Could not find the atom (unit) embedding layer!")
+            raise ValueError("Could not find the atom embedding layer!")
 
         print("EPT Initialized.")
 
-    def encode(self, x_pred, a_soft, c_pred, batch_vec, fc_edges):
+    def forward(self, pos, a_soft, batch_vec, dense_edge_index): 
         """
-        Universal Encoding Pass:
-        Works for a single molecule or a large batch.
+        pos: [N, 3] 3D coordinates
+        a_soft: [N, 5] Continuous atom probabilities
+        batch_vec: [N] PyG batch assignments
+        dense_edge_index: [2, E] Fully connected edges
         """
-        N_total = x_pred.shape[0]
+        N_total = pos.shape[0]
+        current_device = pos.device # fix errors for init
+        com = global_mean_pool(pos, batch_vec) # this is redundant with the Center() but EGNN output does not have that
+        pos_centered = pos - com[batch_vec]
 
-        # 1. Differentiable Continuous Node Embeddings
-        h_continuous = a_soft @ self.embed_weights[:5, :]
+        # This is to bypass the non-differentiable nn.Embedding layer (need for self.embed_weigths)
+        h_continuous = a_soft @ self.embed_weights[:5, :] 
 
-        # 2. Assign unique Block IDs for the attention hierarchy
-        block_vec = torch.arange(N_total, device=self.device)
+       
+        # block_vec needed to split 
+        block_vec = torch.arange(N_total, device=current_device) 
+        
+        # dummy_edge_attr fills the 64-dim requirement the EPT expects for bonds
+        dummy_edge_attr = torch.zeros((dense_edge_index.shape[1], 64), device=current_device) 
 
-        # 3. 64-dim dummy edges to satisfy the Transformer MLP
-        dummy_edge_attr = torch.zeros((fc_edges.shape[1], 64), device=self.device)
-
-        # 4. Forward pass through EPT Backbone
         _, _, graph_repr, _ = self.ept_model.encoder(
             H=h_continuous,
-            Z=x_pred,
+            Z=pos_centered,       
             block_id=block_vec,
             batch_id=batch_vec,
-            edges=fc_edges,
+            edges=dense_edge_index, 
             edge_attr=dummy_edge_attr,
         )
 
-        # 5. Charge Polarity Feature (Std Dev per molecule)
-        num_mols = batch_vec.max().item() + 1
-        c_std = torch.zeros(num_mols, 1, device=self.device)
-        for i in range(num_mols):
-            mask = batch_vec == i
-            if mask.sum() > 1:
-                c_std[i] = c_pred[mask].std()
-
-        # Final phi vector [Batch_Size, 513]
-        return torch.cat([graph_repr, c_std], dim=-1)
+        # Returns a [Batch_Size, 512] vector purely representing 3D structure and chemistry
+        return graph_repr

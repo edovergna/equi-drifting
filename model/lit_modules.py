@@ -112,20 +112,33 @@ class DriftingMoleculeGenerator(LightningModule):
         Training-time evolution of the pushforward distribution.
         """
         # Sample from the prior distribution
-        x, pos = self.sample_prior(batch.num_nodes)
+        x_prior, pos_prior = self.sample_prior(batch.num_nodes)
 
         # Forward Pass: Map Prior (e) to Generated (x)
         x_gen, edge_bond_logits, pos_gen = self.generator(
-            x,
-            pos,
+            x_prior,
+            pos_prior,
             batch.edge_index,
         )
 
         # breakpoint()
 
-        # Extract Features for the Drift Calculation
-        phi_gen = self.feature_extractor(x_gen, pos_gen)
-        phi_real = self.feature_extractor(batch.x_true, batch.pos_true)
+        a_soft_gen = F.gumbel_softmax(x_gen, tau=1.0, hard=False, dim=-1)
+        
+        phi_gen = self.feature_extractor(
+            pos=pos_gen, 
+            a_soft=a_soft_gen, 
+            batch_vec=batch.batch, 
+            dense_edge_index=batch.dense_edge_index # <--- FIXED: Must be dense!
+        )
+
+        with torch.no_grad(): 
+            phi_real = self.feature_extractor(
+                pos=batch.pos, 
+                a_soft=batch.a_soft_real, # <--- Cleanly pulled straight from the batch!
+                batch_vec=batch.batch, 
+                dense_edge_index=batch.dense_edge_index # <--- Matches the generated side perfectly.
+            )
 
         # Compute the Aggregated Drifting Field V
         # Usually summed across multiple temperatures

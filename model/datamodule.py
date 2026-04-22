@@ -6,7 +6,21 @@ from torch_geometric.datasets import QM9
 from torch_geometric.loader import DataLoader
 from torch_geometric.transforms import Center, Compose
 
+import torch.nn.functional as F
 
+class EncodeAtomTypesTransform:
+    """A PyG transform that converts atomic numbers to one-hot vectors."""
+    def __call__(self, data):
+        z_to_index = {1: 0, 6: 1, 7: 2, 8: 3, 9: 4}
+        
+        # We use data.z.device to ensure it stays on the right hardware
+        real_indices = torch.tensor([z_to_index[int(v.item())] for v in data.z], device=data.z.device)
+        
+        # Attach the result directly to the PyG Data object
+        data.a_soft_real = F.one_hot(real_indices, num_classes=5).float()
+        
+        return data
+    
 class FullyConnectedTransform:
     """A PyG transform that adds a fully connected dense_edge_index to the data."""
 
@@ -53,7 +67,11 @@ class QM9DataModule(pl.LightningDataModule):
         # to each graph.
         dataset = QM9(
             self.root,
-            pre_transform=Compose([Center(), FullyConnectedTransform()]),
+            pre_transform=Compose([
+                Center(), 
+                FullyConnectedTransform(),
+                EncodeAtomTypesTransform()
+            ]),
             force_reload=self.force_reload,
         )
 
