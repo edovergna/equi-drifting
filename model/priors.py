@@ -1,4 +1,6 @@
 import torch
+# Scipy is not currently in the reqs. We are not using this file at the
+# moment so we can leave it out for now.
 from scipy.optimize import linear_sum_assignment
 from torch.distributions import Exponential
 from torch.nn.functional import one_hot, softmax
