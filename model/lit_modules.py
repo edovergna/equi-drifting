@@ -1,7 +1,6 @@
 import torch
 import torch.nn.functional as F
 from lightning.pytorch import LightningModule
-from torch_geometric.data import Batch
 
 from .egnn import EGNN
 
