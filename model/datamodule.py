@@ -8,7 +8,7 @@ from torch_geometric.transforms import Center, Compose
 
 
 class FullyConnectedTransform:
-    """A PyG transform that adds a fully connected pos_edge_index to the data."""
+    """A PyG transform that adds a fully connected dense_edge_index to the data."""
 
     def __call__(self, data: Data) -> Data:
         # Get device and number of nodes
