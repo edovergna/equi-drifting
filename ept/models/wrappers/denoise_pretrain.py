@@ -8,12 +8,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import grad
 from torch_scatter import scatter_mean, scatter_sum
-from vocab.format import VOCAB
 
-import utils.register as R
-from utils.nn_utils import stable_norm
-from utils.so3 import (ApproxAngularDistribution, random_normal_so3,
-                       so3vec_to_rotation)
+import ept.utils.register as R
+from ept.utils.nn_utils import stable_norm
+from ept.utils.so3 import (ApproxAngularDistribution, random_normal_so3,
+                           so3vec_to_rotation)
+from ept.vocab.format import VOCAB
 
 ReturnValue = namedtuple(
     "ReturnValue",

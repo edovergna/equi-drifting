@@ -9,7 +9,7 @@ import torch.nn as nn
 from torch import Tensor
 from vocab.format import VOCAB
 
-import utils.register as R
+import ept.utils.register as R
 
 from .utils import _block_edge_dist
 

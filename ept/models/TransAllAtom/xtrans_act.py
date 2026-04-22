@@ -7,8 +7,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_scatter import scatter_mean, scatter_sum
 
-import utils.register as R
-from utils.nn_utils import graph_to_batch_nx, std_conserve_scatter_sum
+import ept.utils.register as R
+from ept.utils.nn_utils import graph_to_batch_nx, std_conserve_scatter_sum
 
 from ..GET.radial_basis import RadialBasis
 from ..utils import _unit_edges_from_block_edges
