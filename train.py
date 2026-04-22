@@ -2,9 +2,9 @@ import argparse
 
 import lightning.pytorch as pl
 import torch
+import wandb
 from lightning.pytorch.loggers import WandbLogger
 
-import wandb
 from model.datamodule import QM9DataModule
 from model.lit_modules import DriftingMoleculeGenerator
 from parse_args import parse_args
@@ -25,7 +25,10 @@ def main(args: argparse.Namespace):
     )
 
     datamodule = QM9DataModule(
-        root=args.root, batch_size=args.batch_size, num_workers=args.num_workers
+        root=args.root,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        force_download=args.force_download,
     )
     model = DriftingMoleculeGenerator(None, None).to(device)
     callbacks = []
