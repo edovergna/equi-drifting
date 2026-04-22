@@ -6,6 +6,9 @@ __pycache__/
 # data
 data/
 
+# Encoder checkpoint
+hybrid_noaf/
+
 # experiment logs
 wandb/
 
