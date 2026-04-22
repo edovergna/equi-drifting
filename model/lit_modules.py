@@ -1,6 +1,12 @@
+import os
+import sys
+from pathlib import Path
+
 import torch
 import torch.nn.functional as F
 from lightning.pytorch import LightningModule
+
+from ept.ept import EPTFeatureExtractor
 
 from .egnn import EGNN
 
@@ -22,6 +28,7 @@ class DriftingMoleculeGenerator(LightningModule):
 
     def _init_generator(self, cfg) -> EGNN:
         # Placeholder for your EGNN initialization
+        # TODO: add configuration options to parse args.
         return EGNN(
             in_node_nf=7,  # Example: 5 for one-hot atom type + 2 for other features
             hidden_nf=128,
@@ -31,8 +38,31 @@ class DriftingMoleculeGenerator(LightningModule):
         )
 
     def _init_feature_extractor(self):
-        # Placeholder: Drifting in feature space prevents "flat" kernels
-        return torch.nn.Identity()  # Placeholder
+        # Check if the checkpoint has been downloaded and download it if not
+        root_path = Path(__file__).parents[1]
+
+        # Hard coding path for now, unsure if making it configurable is worth it.
+        ckpt_path = "hybrid_noaf/epoch49_step215752.ckpt"
+
+        full_ckpt_path = root_path / ckpt_path
+
+        if not full_ckpt_path.exists():
+            print(f"Checkpoint not found at {full_ckpt_path}. Downloading...")
+            print("Downloading EPT from google drive...")
+            print(
+                "os.system('gdown --folder https://drive.google.com/drive/folders/1tBqGwC_jcTdq3QArFZox_auSCzxDjA0P')"
+            )
+            os.system(
+                "gdown --folder https://drive.google.com/drive/folders/1tBqGwC_jcTdq3QArFZox_auSCzxDjA0P"
+            )
+            print("Download complete.")
+
+        # Add the "ept" directory to sys.path so that torch.load finds the EPT modules
+        ept_path = str(root_path / "ept")
+        if ept_path not in sys.path:
+            sys.path.append(ept_path)
+
+        return EPTFeatureExtractor(ckpt_path, self.device)
 
     def compute_v(self, x, y_pos, y_neg, tau):
         """
@@ -84,11 +114,13 @@ class DriftingMoleculeGenerator(LightningModule):
         x, pos = self.sample_prior(batch.num_nodes)
 
         # Forward Pass: Map Prior (e) to Generated (x)
-        x_gen, edge_bond_logits, pos_gen  = self.generator(
+        x_gen, edge_bond_logits, pos_gen = self.generator(
             x,
             pos,
             batch.edge_index,
         )
+
+        breakpoint()
 
         # Extract Features for the Drift Calculation
         phi_gen = self.feature_extractor(x_gen, pos_gen)
