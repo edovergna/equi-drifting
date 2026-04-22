@@ -224,6 +224,7 @@ dependencies = [
     { name = "torch-geometric" },
     { name = "torch-scatter" },
     { name = "torch-sparse" },
+    { name = "torch-spline-conv" },
     { name = "tqdm" },
     { name = "wandb" },
 ]
@@ -241,6 +242,7 @@ requires-dist = [
     { name = "torch-geometric", specifier = ">=2.7.0" },
     { name = "torch-scatter" },
     { name = "torch-sparse" },
+    { name = "torch-spline-conv" },
     { name = "tqdm", specifier = ">=4.67.3" },
     { name = "wandb", specifier = ">=0.26.0" },
 ]
@@ -1095,6 +1097,17 @@ wheels = [
     { url = "https://data.pyg.org/whl/torch-2.8.0%2Bcu126/torch_sparse-0.6.18%2Bpt28cu126-cp311-cp311-win_amd64.whl" },
     { url = "https://data.pyg.org/whl/torch-2.8.0%2Bcu126/torch_sparse-0.6.18%2Bpt28cu126-cp312-cp312-linux_x86_64.whl" },
     { url = "https://data.pyg.org/whl/torch-2.8.0%2Bcu126/torch_sparse-0.6.18%2Bpt28cu126-cp312-cp312-win_amd64.whl" },
+]
+
+[[package]]
+name = "torch-spline-conv"
+version = "1.2.2+pt28cu126"
+source = { registry = "https://data.pyg.org/whl/torch-2.8.0+cu126.html" }
+wheels = [
+    { url = "https://data.pyg.org/whl/torch-2.8.0%2Bcu126/torch_spline_conv-1.2.2%2Bpt28cu126-cp311-cp311-linux_x86_64.whl" },
+    { url = "https://data.pyg.org/whl/torch-2.8.0%2Bcu126/torch_spline_conv-1.2.2%2Bpt28cu126-cp311-cp311-win_amd64.whl" },
+    { url = "https://data.pyg.org/whl/torch-2.8.0%2Bcu126/torch_spline_conv-1.2.2%2Bpt28cu126-cp312-cp312-linux_x86_64.whl" },
+    { url = "https://data.pyg.org/whl/torch-2.8.0%2Bcu126/torch_spline_conv-1.2.2%2Bpt28cu126-cp312-cp312-win_amd64.whl" },
 ]
 
 [[package]]
