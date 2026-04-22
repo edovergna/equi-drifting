@@ -226,6 +226,4 @@ class EGNN(nn.Module):
         atom_logits = self.atom_head(x)
         bond_logits = self.bond_head(x, edge_index, edge_attr)
 
-        breakpoint()
-
         return atom_logits, bond_logits, pos
