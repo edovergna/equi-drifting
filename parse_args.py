@@ -70,4 +70,16 @@ def parse_args():
         default=1,
         help="Check validation every n epochs.",
     )
+    parser.add_argument(
+        "--deterministic",
+        action="store_true",
+        help="Force deterministic kernels (slower, more reproducible).",
+    )
+    parser.add_argument(
+        "--precision",
+        type=str,
+        default="auto",
+        choices=["auto", "32-true", "16-mixed", "bf16-mixed"],
+        help="Trainer precision mode. Use auto to pick fast safe defaults.",
+    )
     return parser.parse_args()

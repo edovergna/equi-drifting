@@ -63,7 +63,15 @@ class DriftingMoleculeGenerator(LightningModule):
         if ept_path not in sys.path:
             sys.path.append(ept_path)
 
-        return EPTFeatureExtractor(ckpt_path, self.device)
+        return EPTFeatureExtractor(ckpt_path, torch.device("cpu")) # start it on cpu bc lightning will fix it in next helper funcs
+
+    def on_fit_start(self):
+        self.feature_extractor.to(self.device) # here
+        self.feature_extractor.eval()
+
+    def on_test_start(self):
+        self.feature_extractor.to(self.device)
+        self.feature_extractor.eval()
 
     def compute_v(self, x, y_pos, y_neg, tau):
         """

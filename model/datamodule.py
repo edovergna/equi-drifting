@@ -60,6 +60,7 @@ class QM9DataModule(pl.LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.force_reload = force_reload
+        self.pin_memory = torch.cuda.is_available()
 
     def setup(self, stage=None):
         # Note that the pre_transform is applied once when loading the dataset.
@@ -92,7 +93,8 @@ class QM9DataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
-            pin_memory=True,
+            pin_memory=self.pin_memory,
+            persistent_workers=self.num_workers > 0,
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -102,6 +104,7 @@ class QM9DataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,
+            persistent_workers=self.num_workers > 0,
         )
 
     def test_dataloader(self) -> DataLoader:
@@ -111,4 +114,5 @@ class QM9DataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,
+            persistent_workers=self.num_workers > 0,
         )

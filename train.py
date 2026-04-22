@@ -25,8 +25,6 @@ def set_seed(seed: int):
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
 
 
 def get_device() -> torch.device:
@@ -48,8 +46,21 @@ def get_device() -> torch.device:
 def main(args: argparse.Namespace):
     set_seed(args.seed)
     torch.set_float32_matmul_precision("medium")
+    pl.seed_everything(args.seed, workers=True)
     device = get_device()
-    print(f"Using device: {device}")
+    print(f"Detected best torch device: {device}")
+
+    if args.precision == "auto":
+        precision = "16-mixed" if torch.cuda.is_available() else "32-true"
+    else:
+        precision = args.precision
+
+    deterministic = bool(args.deterministic)
+    benchmark = torch.cuda.is_available() and not deterministic
+
+    print(
+        f"Trainer config: Using {device}with precision={precision}, deterministic={deterministic}, benchmark={benchmark}"
+    )
     run = wandb.init(
         entity="equivariant-drifting",
         project="tests",
@@ -64,13 +75,16 @@ def main(args: argparse.Namespace):
         num_workers=args.num_workers,
         force_reload=args.force_reload,
     )
-    model = DriftingMoleculeGenerator(None, None).to(device)
+    model = DriftingMoleculeGenerator(None, None)
     callbacks = []
 
     trainer = pl.Trainer(
+        accelerator="auto",
         max_epochs=args.max_epochs,
         devices=1,
-        deterministic=True,
+        deterministic=deterministic,
+        benchmark=benchmark,
+        precision=precision,
         check_val_every_n_epoch=args.check_val_every_n_epoch,
         callbacks=callbacks,
         logger=WandbLogger(experiment=run, save_dir="."),
