@@ -59,7 +59,7 @@ def main(args: argparse.Namespace):
     benchmark = torch.cuda.is_available() and not deterministic
 
     print(
-        f"Trainer config: Using {device}with precision={precision}, deterministic={deterministic}, benchmark={benchmark}"
+        f"Trainer config: deterministic={deterministic}, benchmark={benchmark}"
     )
     run = wandb.init(
         entity="equivariant-drifting",
