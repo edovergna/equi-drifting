@@ -115,6 +115,15 @@ class DriftingMoleculeGenerator(LightningModule):
 
         return x, pos
 
+    def _batch_size_for_logging(self, batch) -> int:
+        if hasattr(batch, "num_graphs") and batch.num_graphs is not None:
+            return int(batch.num_graphs)
+
+        if hasattr(batch, "batch") and batch.batch is not None:
+            return int(batch.batch.max().item()) + 1
+
+        return 1
+
     def training_step(self, batch, batch_idx):
         """
         Training-time evolution of the pushforward distribution.
@@ -161,8 +170,95 @@ class DriftingMoleculeGenerator(LightningModule):
         # Equation 6
         loss = F.mse_loss(phi_gen, target)
 
-        self.log("train_loss", loss)
+        batch_size = self._batch_size_for_logging(batch) # problem with progressbar fix
+        self.log(
+            "train_loss",
+            loss,
+            batch_size=batch_size,
+            prog_bar=True,
+            on_step=True,
+            on_epoch=True,
+        )
+        self.log(
+            "train_batch_size",
+            float(batch_size),
+            batch_size=batch_size,
+            on_step=True,
+            on_epoch=True,
+        )
+ 
         return loss
+
+    def test_step(self, batch, batch_idx):
+        x_prior, pos_prior = self.sample_prior(batch.num_nodes)
+        x_gen, edge_bond_logits, pos_gen = self.generator(
+            x_prior,
+            pos_prior,
+            batch.edge_index,
+        )
+        a_soft_gen = F.gumbel_softmax(x_gen, tau=1.0, hard=False, dim=-1)
+        phi_gen = self.feature_extractor(
+            pos=pos_gen, 
+            a_soft=a_soft_gen, 
+            batch_vec=batch.batch, 
+            dense_edge_index=batch.dense_edge_index
+        )
+        phi_real = self.feature_extractor(
+            pos=batch.pos, 
+            a_soft=batch.a_soft_real, 
+            batch_vec=batch.batch, 
+            dense_edge_index=batch.dense_edge_index
+        )           
+        test_loss = F.mse_loss(phi_gen, phi_real)
+        batch_size = self._batch_size_for_logging(batch)
+        self.log(
+            "test_loss",
+            test_loss,
+            batch_size=batch_size,
+            prog_bar=True,
+            on_step=False,
+            on_epoch=True,
+        )
+        self.log(
+            "test_batch_size",
+            float(batch_size),
+            batch_size=batch_size,
+            on_step=False,
+            on_epoch=True,
+        )
+
+
+    # def validation_step(self, batch, batch_idx): # commented out for quick train-test loop testing
+    #     x_prior, pos_prior = self.sample_prior(batch.num_nodes)
+    #     x_gen, edge_bond_logits, pos_gen = self.generator(
+    #         x_prior,
+    #         pos_prior,
+    #         batch.edge_index,
+    #     )
+    #     a_soft_gen = F.gumbel_softmax(x_gen, tau=1.0, hard=False, dim=-1)
+    #     phi_gen = self.feature_extractor(
+    #         pos=pos_gen,
+    #         a_soft=a_soft_gen,
+    #         batch_vec=batch.batch,
+    #         dense_edge_index=batch.dense_edge_index,
+    #     )
+    #     phi_real = self.feature_extractor(
+    #         pos=batch.pos,
+    #         a_soft=batch.a_soft_real,
+    #         batch_vec=batch.batch,
+    #         dense_edge_index=batch.dense_edge_index,
+    #     )
+    #     val_loss = F.mse_loss(phi_gen, phi_real)
+    #     batch_size = self._batch_size_for_logging(batch)
+    #     self.log(
+    #         "val_loss",
+    #         val_loss,
+    #         batch_size=batch_size,
+    #         prog_bar=True,
+    #         on_step=False,
+    #         on_epoch=True,
+    #     )
+  
 
     def configure_optimizers(self):
         # The paper uses AdamW with specific beta values
