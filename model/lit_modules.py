@@ -81,31 +81,57 @@ class DriftingMoleculeGenerator(LightningModule):
         self.feature_extractor.to(self.device)
         self.feature_extractor.eval()
 
-    def compute_v(self, x, y_pos, y_neg, tau):
+    def compute_v(self, x, y_pos, y_neg, tau): # chat generated
         """
         Implements Algorithm 2: Computing the drifting field V.
-        x: Generated features (q)
-        y_pos: Real data features (p)
-        y_neg: Other generated samples (q) for repulsion
+        x: [B, D] Generated graph-level features
+        y_pos: [B_pos, D] Real data graph-level features
+        y_neg: [B_neg, D] Generated graph-level features (usually identical to x)
+        tau: Temperature scaling factor
         """
+        N = x.size(0)
+        
         # 1. Compute Pairwise Distances
-        dist_pos = torch.cdist(x, y_pos)
-        dist_neg = torch.cdist(x, y_neg)
+        dist_pos = torch.cdist(x, y_pos)  # [N, B_pos]
+        dist_neg = torch.cdist(x, y_neg)  # [N, B_neg]
 
-        # Ignore self in repulsion (if y_neg is x)
-        # dist_neg += torch.eye(x.size(0)).to(x.device) * 1e6
+        # Ignore self in repulsion. 
+        # If y_neg is x, the diagonal distance is 0. We artificially inflate it
+        # so a sample doesn't infinitely repulse itself.
+        if x is y_neg or (N == y_neg.size(0) and torch.allclose(x, y_neg)):
+            dist_neg = dist_neg + torch.eye(N, device=x.device) * 1e6
 
-        # 2. Compute Logits and Kernels
-        logit_pos = -dist_pos / tau
+        # 2. Compute Logits
+        logit_pos = -dist_pos / tau # might need to scale this when getting NaN
         logit_neg = -dist_neg / tau
 
+        # Concatenate for joint normalization along the sample axis
+        logit = torch.cat([logit_pos, logit_neg], dim=1)  # [N, B_pos + B_neg]
+
         # 3. Normalization along both dimensions (Anti-symmetry)
-        # Normalized kernels (A_pos, A_neg)
-        # Placeholder for softmax/sqrt normalization logic from Alg 2
+        # Softmax over the sample axis (columns)
+        A_row = F.softmax(logit, dim=-1)  
+        # Softmax over the x axis (rows)
+        A_col = F.softmax(logit, dim=-2)  
+        
+        # Geometric mean to balance the normalizations
+        A = torch.sqrt(A_row * A_col)
+
+        # Split back into positive and negative attention matrices
+        A_pos, A_neg = torch.split(A, [y_pos.size(0), y_neg.size(0)], dim=1)
 
         # 4. Compute Weighted Drift
-        # V = V_attraction (from p) - V_repulsion (from q)
-        v_field = torch.zeros_like(x)  # Placeholder
+        # Normalize weights so they sum to 1.0 for each row to compute a valid expectation
+        W_pos = A_pos / (A_pos.sum(dim=1, keepdim=True) + 1e-8)
+        W_neg = A_neg / (A_neg.sum(dim=1, keepdim=True) + 1e-8)
+
+        # Multiply weights by the actual feature vectors
+        drift_pos = W_pos @ y_pos  # [N, D]
+        drift_neg = W_neg @ y_neg  # [N, D]
+
+        # Final vector field
+        v_field = drift_pos - drift_neg
+        
         return v_field
 
     def sample_prior(self, num_nodes: int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -143,7 +169,7 @@ class DriftingMoleculeGenerator(LightningModule):
         x_gen, edge_bond_logits, pos_gen = self.generator(
             x_prior,
             pos_prior,
-            batch.edge_index,
+            batch.dense_edge_index,
         )
 
         # breakpoint()
