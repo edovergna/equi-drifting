@@ -52,7 +52,13 @@ def main(args: argparse.Namespace):
     print(f"Detected best torch device: {device}")
 
     if args.precision == "auto":
-        precision = "16-mixed" if torch.cuda.is_available() else "32-true"
+        # Check if the hardware supports bfloat16 natively (Ampere architectures and newer)
+        if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+            precision = "bf16-mixed"
+        elif torch.cuda.is_available():
+            precision = "16-mixed"
+        else:
+            precision = "32-true"
     else:
         precision = args.precision
 
@@ -100,6 +106,8 @@ def main(args: argparse.Namespace):
         deterministic=deterministic,
         benchmark=benchmark,
         precision=precision,
+        gradient_clip_val=1.0, 
+        gradient_clip_algorithm="norm",
         check_val_every_n_epoch=args.check_val_every_n_epoch,
         callbacks=callbacks,
         logger=WandbLogger(experiment=run, save_dir="."),

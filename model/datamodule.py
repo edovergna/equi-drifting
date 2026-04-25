@@ -77,20 +77,19 @@ class QM9DataModule(pl.LightningDataModule):
         )
 
         n = len(dataset)
-        # n_train = int(0.9 * n)
-        # n_train_test = int(0.05 * n)
-        # n_val = int(0.05 * n)
-        # n_test = n - n_train - n_val
-
-        # self.train_set, self.val_set, self.test_set = random_split(
-        #     dataset,
-        #     [n_train, n_val, n_test],
-        #     generator=torch.Generator().manual_seed(42),
-        # )
-        #### to see if overfits on train, skipping val and straight to test
-        n_train = int(0.025 * n)
-        n_val = int(0.95 * n)
+        n_train = int(0.8 * n)
+        n_val = int(0.05 * n)
         n_test = n - n_train - n_val
+
+        self.train_set, self.val_set, self.test_set = random_split(
+            dataset,
+            [n_train, n_val, n_test],
+            generator=torch.Generator().manual_seed(42),
+        )
+        #### to see if overfits on train, skipping val and straight to test
+        # n_train = int(0.025 * n)
+        # n_val = int(0.95 * n)
+        # n_test = n - n_train - n_val
 
         self.train_set, self.val_set, self.test_set = random_split(
             dataset,
