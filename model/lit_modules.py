@@ -1,4 +1,6 @@
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -7,8 +9,6 @@ import torch.nn.functional as F
 from lightning.pytorch import LightningModule
 
 from ept import EPTFeatureExtractor
-from model.egnn import EGNN
-
 from .egnn import EGNN
 
 
@@ -23,6 +23,7 @@ class DriftingMoleculeGenerator(LightningModule):
         # Feature Space: The paper suggests drifting in a feature space
         # For now, this can be a simple linear layer or a small GNN encoder
         self.feature_extractor = self._init_feature_extractor()
+        self._freeze_feature_extractor()
 
         # Hyperparameters for Drifting Field V
         self.temperatures = [0.02, 0.05, 0.2]
@@ -43,7 +44,7 @@ class DriftingMoleculeGenerator(LightningModule):
         root_path = Path(__file__).parents[1]
 
         # Hard coding path for now, unsure if making it configurable is worth it.
-        ckpt_path = "hybrid_noaf/epoch49_step215752.ckpt"
+        ckpt_path = Path("hybrid_noaf/epoch49_step215752.ckpt")
 
         full_ckpt_path = root_path / ckpt_path
 
@@ -63,7 +64,14 @@ class DriftingMoleculeGenerator(LightningModule):
         if ept_path not in sys.path:
             sys.path.append(ept_path)
 
-        return EPTFeatureExtractor(ckpt_path, torch.device("cpu")) # start it on cpu bc lightning will fix it in next helper funcs
+        return EPTFeatureExtractor(
+            str(full_ckpt_path), torch.device("cpu")
+        )  # start on cpu; Lightning will move module later
+
+    def _freeze_feature_extractor(self):
+        self.feature_extractor.eval()
+        for parameter in self.feature_extractor.parameters():
+            parameter.requires_grad = False
 
     def on_fit_start(self):
         self.feature_extractor.to(self.device) # here
@@ -262,4 +270,6 @@ class DriftingMoleculeGenerator(LightningModule):
 
     def configure_optimizers(self):
         # The paper uses AdamW with specific beta values
-        return torch.optim.AdamW(self.parameters(), lr=4e-4, betas=(0.9, 0.95))
+        return torch.optim.AdamW(
+            self.generator.parameters(), lr=4e-4, betas=(0.9, 0.95)
+        )
