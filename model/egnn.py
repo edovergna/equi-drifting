@@ -208,7 +208,8 @@ class EGNN(nn.Module):
         src, dst = edge_index
         coord_diff = pos[src] - pos[dst]
         radial = (coord_diff**2).sum(dim=-1, keepdim=True)
-        norm = radial.sqrt() + eps
+        # Keep gradients finite when radial == 0 by moving eps inside sqrt.
+        norm = (radial + eps).sqrt()
         return radial, coord_diff / norm
 
     def forward(self, x: torch.Tensor, pos: torch.Tensor, edge_index: torch.Tensor):
