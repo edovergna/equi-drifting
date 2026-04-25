@@ -10,6 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
 import lightning.pytorch as pl
 import numpy as np
 import torch
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers import WandbLogger
 
 import wandb
@@ -76,7 +77,21 @@ def main(args: argparse.Namespace):
         force_reload=args.force_reload,
     )
     model = DriftingMoleculeGenerator(None, None)
-    callbacks = []
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=args.checkpoint_dir,
+        filename="best-{epoch:02d}-{val_loss:.4f}",
+        monitor="val_loss",
+        mode="min",
+        save_top_k=1,
+        save_last=True,
+    )
+    early_stopping_callback = EarlyStopping(
+        monitor="val_loss",
+        mode="min",
+        patience=args.early_stopping_patience,
+        min_delta=args.early_stopping_min_delta,
+    )
+    callbacks = [checkpoint_callback, early_stopping_callback]
 
     trainer = pl.Trainer(
         accelerator="auto",
@@ -89,11 +104,18 @@ def main(args: argparse.Namespace):
         callbacks=callbacks,
         logger=WandbLogger(experiment=run, save_dir="."),
         log_every_n_steps=args.log_every_n_steps,
-        enable_checkpointing=False,
+        enable_checkpointing=True,
     )
 
     trainer.fit(model, datamodule=datamodule)
-    trainer.test(model, datamodule=datamodule)
+
+    if checkpoint_callback.best_model_path:
+        print(f"Best checkpoint: {checkpoint_callback.best_model_path}")
+        print(f"Best val_loss: {checkpoint_callback.best_model_score}")
+    else:
+        print("No best checkpoint found; testing with current model weights.")
+
+    trainer.test(model, datamodule=datamodule, ckpt_path="best")
 
     wandb.finish()
 

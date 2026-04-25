@@ -71,6 +71,24 @@ def parse_args():
         help="Check validation every n epochs.",
     )
     parser.add_argument(
+        "--early_stopping_patience",
+        type=int,
+        default=10,
+        help="Number of validation checks with no improvement before stopping.",
+    )
+    parser.add_argument(
+        "--early_stopping_min_delta",
+        type=float,
+        default=0.0,
+        help="Minimum absolute improvement in val_loss to reset patience.",
+    )
+    parser.add_argument(
+        "--checkpoint_dir",
+        type=str,
+        default="checkpoints",
+        help="Directory where model checkpoints are saved.",
+    )
+    parser.add_argument(
         "--deterministic",
         action="store_true",
         help="Force deterministic kernels (slower, more reproducible).",

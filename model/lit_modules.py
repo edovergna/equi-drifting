@@ -228,7 +228,7 @@ class DriftingMoleculeGenerator(LightningModule):
         x_gen, edge_bond_logits, pos_gen = self.generator(
             x_prior,
             pos_prior,
-            batch.edge_index,
+            batch.dense_edge_index,
         )
         a_soft_gen = F.gumbel_softmax(x_gen, tau=1.0, hard=False, dim=-1)
         phi_gen = self.feature_extractor(
@@ -237,12 +237,13 @@ class DriftingMoleculeGenerator(LightningModule):
             batch_vec=batch.batch, 
             dense_edge_index=batch.dense_edge_index
         )
-        phi_real = self.feature_extractor(
-            pos=batch.pos, 
-            a_soft=batch.a_soft_real, 
-            batch_vec=batch.batch, 
-            dense_edge_index=batch.dense_edge_index
-        )           
+        with torch.no_grad():
+            phi_real = self.feature_extractor(
+                pos=batch.pos, 
+                a_soft=batch.a_soft_real, 
+                batch_vec=batch.batch, 
+                dense_edge_index=batch.dense_edge_index
+            )
         test_loss = F.mse_loss(phi_gen, phi_real)
         batch_size = self._batch_size_for_logging(batch)
         self.log(
@@ -261,37 +262,37 @@ class DriftingMoleculeGenerator(LightningModule):
             on_epoch=True,
         )
 
-
-    # def validation_step(self, batch, batch_idx): # commented out for quick train-test loop testing
-    #     x_prior, pos_prior = self.sample_prior(batch.num_nodes)
-    #     x_gen, edge_bond_logits, pos_gen = self.generator(
-    #         x_prior,
-    #         pos_prior,
-    #         batch.edge_index,
-    #     )
-    #     a_soft_gen = F.gumbel_softmax(x_gen, tau=1.0, hard=False, dim=-1)
-    #     phi_gen = self.feature_extractor(
-    #         pos=pos_gen,
-    #         a_soft=a_soft_gen,
-    #         batch_vec=batch.batch,
-    #         dense_edge_index=batch.dense_edge_index,
-    #     )
-    #     phi_real = self.feature_extractor(
-    #         pos=batch.pos,
-    #         a_soft=batch.a_soft_real,
-    #         batch_vec=batch.batch,
-    #         dense_edge_index=batch.dense_edge_index,
-    #     )
-    #     val_loss = F.mse_loss(phi_gen, phi_real)
-    #     batch_size = self._batch_size_for_logging(batch)
-    #     self.log(
-    #         "val_loss",
-    #         val_loss,
-    #         batch_size=batch_size,
-    #         prog_bar=True,
-    #         on_step=False,
-    #         on_epoch=True,
-    #     )
+    def validation_step(self, batch, batch_idx):
+        x_prior, pos_prior = self.sample_prior(batch.num_nodes)
+        x_gen, edge_bond_logits, pos_gen = self.generator(
+            x_prior,
+            pos_prior,
+            batch.dense_edge_index,
+        )
+        a_soft_gen = F.gumbel_softmax(x_gen, tau=1.0, hard=False, dim=-1)
+        phi_gen = self.feature_extractor(
+            pos=pos_gen,
+            a_soft=a_soft_gen,
+            batch_vec=batch.batch,
+            dense_edge_index=batch.dense_edge_index,
+        )
+        with torch.no_grad():
+            phi_real = self.feature_extractor(
+                pos=batch.pos,
+                a_soft=batch.a_soft_real,
+                batch_vec=batch.batch,
+                dense_edge_index=batch.dense_edge_index,
+            )
+        val_loss = F.mse_loss(phi_gen, phi_real)
+        batch_size = self._batch_size_for_logging(batch)
+        self.log(
+            "val_loss",
+            val_loss,
+            batch_size=batch_size,
+            prog_bar=True,
+            on_step=False,
+            on_epoch=True,
+        )
   
 
     def configure_optimizers(self):
