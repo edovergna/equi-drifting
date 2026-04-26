@@ -13,12 +13,36 @@ from .egnn import EGNN
 
 
 class DriftingMoleculeGenerator(LightningModule):
-    def __init__(self, generator_cfg, drift_cfg):
+    def __init__(self, generator_cfg=None, drift_cfg=None):
         super().__init__()
-        self.save_hyperparameters()
+
+        default_generator_cfg = {
+            "in_node_nf": 7,
+            "hidden_nf": 128,
+            "n_layers": 2,
+            "num_atom_types": 5,
+            "num_bond_types": 5,
+        }
+        default_drift_cfg = {
+            "lr": 1e-4,
+            "weight_decay": 1e-4,
+            "temperatures": [0.02, 0.05, 0.2],
+            "pct_start": 0.1,
+            "div_factor": 25.0,
+            "final_div_factor": 1e4,
+        }
+
+        generator_cfg = generator_cfg or {}
+        drift_cfg = drift_cfg or {}
+
+        self.generator_cfg = {**default_generator_cfg, **generator_cfg}
+        self.drift_cfg = {**default_drift_cfg, **drift_cfg}
+        self.save_hyperparameters(
+            {"generator_cfg": self.generator_cfg, "drift_cfg": self.drift_cfg}
+        )
 
         # Generator: Your EGNN or GNN architecture
-        self.generator = self._init_generator(generator_cfg)
+        self.generator = self._init_generator(self.generator_cfg)
 
         # Feature Space: The paper suggests drifting in a feature space
         # For now, this can be a simple linear layer or a small GNN encoder
@@ -26,17 +50,15 @@ class DriftingMoleculeGenerator(LightningModule):
         self._freeze_feature_extractor()
 
         # Hyperparameters for Drifting Field V
-        self.temperatures = [0.02, 0.05, 0.2]
+        self.temperatures = self.drift_cfg["temperatures"]
 
     def _init_generator(self, cfg) -> EGNN:
-        # Placeholder for your EGNN initialization
-        # TODO: add configuration options to parse args.
         return EGNN(
-            in_node_nf=7,  # Example: 5 for one-hot atom type + 2 for other features
-            hidden_nf=128,
-            n_layers=2,
-            num_atom_types=5,  # Example: C, O, N, S, H
-            num_bond_types=5,  # Example: single, double, triple, aromatic, no bond
+            in_node_nf=cfg["in_node_nf"],
+            hidden_nf=cfg["hidden_nf"],
+            n_layers=cfg["n_layers"],
+            num_atom_types=cfg["num_atom_types"],
+            num_bond_types=cfg["num_bond_types"],
         )
 
     def _init_feature_extractor(self):
@@ -158,145 +180,246 @@ class DriftingMoleculeGenerator(LightningModule):
 
         return 1
 
-    def training_step(self, batch, batch_idx):
-        """
-        Training-time evolution of the pushforward distribution.
-        """
-        # Sample from the prior distribution
-        x_prior, pos_prior = self.sample_prior(batch.num_nodes)
+    def _center_positions_per_graph(
+        self, pos: torch.Tensor, batch_vec: torch.Tensor
+    ) -> torch.Tensor:
+        """Zero-center coordinates independently for each graph in a batch."""
+        if batch_vec is None or batch_vec.numel() == 0:
+            return pos - pos.mean(dim=0, keepdim=True)
 
-        # Forward Pass: Map Prior (e) to Generated (x)
+        num_graphs = int(batch_vec.max().item()) + 1
+        sums = torch.zeros(num_graphs, pos.size(-1), device=pos.device, dtype=pos.dtype)
+        sums.index_add_(0, batch_vec, pos)
+
+        counts = torch.bincount(batch_vec, minlength=num_graphs).to(pos.device)
+        counts = counts.clamp_min(1).unsqueeze(-1).to(pos.dtype)
+
+        centers = sums / counts
+        return pos - centers[batch_vec]
+
+    def training_step(self, batch, batch_idx):
+        x_prior, pos_prior = self.sample_prior(batch.num_nodes)
+        
+        # 1. Use dense_edge_index (No Data Leakage)
         x_gen, edge_bond_logits, pos_gen = self.generator(
             x_prior,
             pos_prior,
-            batch.dense_edge_index,
+            batch.dense_edge_index, 
         )
-
-        # breakpoint()
-
+        
+        # 2. Zero-center coordinates per graph (Prevent Spatial Drift)
+        pos_gen = self._center_positions_per_graph(pos_gen, batch.batch)
+        
         a_soft_gen = F.gumbel_softmax(x_gen, tau=1.0, hard=False, dim=-1)
         
-        phi_gen = self.feature_extractor(
-            pos=pos_gen, 
-            a_soft=a_soft_gen, 
-            batch_vec=batch.batch, 
-            dense_edge_index=batch.dense_edge_index # <--- FIXED: Must be dense!
-        )
-
-        with torch.no_grad(): 
-            phi_real = self.feature_extractor(
-                pos=batch.pos, 
-                a_soft=batch.a_soft_real, # <--- Cleanly pulled straight from the batch!
-                batch_vec=batch.batch, 
-                dense_edge_index=batch.dense_edge_index # <--- Matches the generated side perfectly.
-            )
-
-        # Compute the Aggregated Drifting Field V
-        # Usually summed across multiple temperatures
-        total_v = torch.zeros_like(phi_gen)
-        for t in self.temperatures:
-            total_v += self.compute_v(phi_gen, phi_real, phi_gen, t)
-
-        # Stop-Gradient Loss
-        # We move x towards (x + V) without backpropping through V itself
-        target = (phi_gen + total_v).detach()
-
-        # Equation 6
-        loss = F.mse_loss(phi_gen, target)
-
-        batch_size = self._batch_size_for_logging(batch) # problem with progressbar fix
-        self.log(
-            "train_loss",
-            loss,
-            batch_size=batch_size,
-            prog_bar=True,
-            on_step=True,
-            on_epoch=True,
-        )
-        self.log(
-            "train_batch_size",
-            float(batch_size),
-            batch_size=batch_size,
-            on_step=True,
-            on_epoch=True,
-        )
- 
-        return loss
-
-    def test_step(self, batch, batch_idx):
-        x_prior, pos_prior = self.sample_prior(batch.num_nodes)
-        x_gen, edge_bond_logits, pos_gen = self.generator(
-            x_prior,
-            pos_prior,
-            batch.dense_edge_index,
-        )
-        a_soft_gen = F.gumbel_softmax(x_gen, tau=1.0, hard=False, dim=-1)
-        phi_gen = self.feature_extractor(
-            pos=pos_gen, 
-            a_soft=a_soft_gen, 
-            batch_vec=batch.batch, 
-            dense_edge_index=batch.dense_edge_index
-        )
-        with torch.no_grad():
-            phi_real = self.feature_extractor(
-                pos=batch.pos, 
-                a_soft=batch.a_soft_real, 
-                batch_vec=batch.batch, 
-                dense_edge_index=batch.dense_edge_index
-            )
-        test_loss = F.mse_loss(phi_gen, phi_real)
-        batch_size = self._batch_size_for_logging(batch)
-        self.log(
-            "test_loss",
-            test_loss,
-            batch_size=batch_size,
-            prog_bar=True,
-            on_step=False,
-            on_epoch=True,
-        )
-        self.log(
-            "test_batch_size",
-            float(batch_size),
-            batch_size=batch_size,
-            on_step=False,
-            on_epoch=True,
-        )
-
-    def validation_step(self, batch, batch_idx):
-        x_prior, pos_prior = self.sample_prior(batch.num_nodes)
-        x_gen, edge_bond_logits, pos_gen = self.generator(
-            x_prior,
-            pos_prior,
-            batch.dense_edge_index,
-        )
-        a_soft_gen = F.gumbel_softmax(x_gen, tau=1.0, hard=False, dim=-1)
         phi_gen = self.feature_extractor(
             pos=pos_gen,
             a_soft=a_soft_gen,
             batch_vec=batch.batch,
             dense_edge_index=batch.dense_edge_index,
         )
-        with torch.no_grad():
-            phi_real = self.feature_extractor(
-                pos=batch.pos,
-                a_soft=batch.a_soft_real,
-                batch_vec=batch.batch,
-                dense_edge_index=batch.dense_edge_index,
-            )
-        val_loss = F.mse_loss(phi_gen, phi_real)
+        phi_real = self.feature_extractor(
+            pos=batch.pos,
+            a_soft=batch.a_soft_real,
+            batch_vec=batch.batch,
+            dense_edge_index=batch.dense_edge_index,
+        )
+        
+        # 3. Use the robust normalized drifting loss
+        loss = self.compute_normalized_drift_loss(phi_gen, phi_real)
+        
+        batch_size = self._batch_size_for_logging(batch)
+        self.log("train_loss", loss, batch_size=batch_size, on_step=True, on_epoch=True)
+        
+        # Log maximum structural extent to monitor for explosions
+        max_dist = torch.max(torch.cdist(pos_gen, pos_gen))
+        self.log("max_atom_dist", max_dist, batch_size=batch_size)
+        
+        return loss
+
+    def compute_normalized_drift_loss(self, phi_gen: torch.Tensor, phi_real: torch.Tensor) -> torch.Tensor:
+        # Run pairwise-distance math in float32 for AMP stability.
+        phi_gen = torch.nan_to_num(phi_gen.float(), nan=0.0, posinf=1e4, neginf=-1e4)
+        phi_real = torch.nan_to_num(phi_real.float(), nan=0.0, posinf=1e4, neginf=-1e4)
+
+        D = phi_gen.shape[-1]
+        N = phi_gen.shape[0]
+
+        dist_pos = torch.cdist(phi_gen, phi_real)
+        dist_neg = torch.cdist(phi_gen, phi_gen)
+        dist_neg.fill_diagonal_(1e6)
+
+        all_dists = torch.cat([dist_pos.flatten(), dist_neg.flatten()])
+        valid_mask = torch.isfinite(all_dists) & (all_dists < 1e5)
+        valid_dists = all_dists[valid_mask]
+
+        if valid_dists.numel() == 0:
+            S = torch.tensor(1.0, device=phi_gen.device, dtype=phi_gen.dtype)
+        else:
+            S = (valid_dists.mean() / (D ** 0.5)).detach()
+        S = torch.clamp(S, min=1e-5, max=1e3)
+        
+        phi_gen_norm = phi_gen / S
+        phi_real_norm = phi_real / S
+        
+        norm_dist_pos = dist_pos / S
+        norm_dist_neg = dist_neg / S
+        
+        aggregated_v_norm = torch.zeros_like(phi_gen_norm)
+        
+        for tau in self.temperatures:
+            tau_tilde = tau * (D ** 0.5)
+            
+            logit_pos = -norm_dist_pos / tau_tilde
+            logit_neg = -norm_dist_neg / tau_tilde
+            
+            logit = torch.cat([logit_pos, logit_neg], dim=1)
+            
+            # <-- ADDED: Clamp logits before softmax to prevent fp16 underflow
+            logit = torch.clamp(logit, min=-100.0, max=50.0) 
+            
+            A_row = F.softmax(logit, dim=-1)
+            A_col = F.softmax(logit, dim=-2)
+            A = torch.sqrt(torch.clamp(A_row * A_col, min=1e-30))
+            
+            A_pos, A_neg = torch.split(A, [phi_real.size(0), phi_gen.size(0)], dim=1)
+            
+            denom_pos = A_pos.sum(dim=1, keepdim=True).clamp_min(1e-5)
+            denom_neg = A_neg.sum(dim=1, keepdim=True).clamp_min(1e-5)
+            W_pos = A_pos / denom_pos
+            W_neg = A_neg / denom_neg
+            
+            drift_pos = W_pos @ phi_real_norm
+            drift_neg = W_neg @ phi_gen_norm
+            V_tau = drift_pos - drift_neg
+            
+            v_sq_norm = (V_tau ** 2).sum(dim=-1)
+            lambda_tau = torch.sqrt(torch.clamp(v_sq_norm.mean() / D, min=1e-10)).detach()
+            lambda_tau = torch.clamp(lambda_tau, min=1e-5, max=1e3)
+            
+            V_tau_norm = V_tau / lambda_tau
+            aggregated_v_norm += V_tau_norm
+            
+        target = (phi_gen_norm + aggregated_v_norm).detach()
+        loss = F.mse_loss(phi_gen_norm, target)
+
+        if not torch.isfinite(loss):
+            # Defensive fallback to keep training alive if a rare unstable batch appears.
+            loss = torch.tensor(0.0, device=phi_gen.device, dtype=phi_gen.dtype)
+
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        x_prior, pos_prior = self.sample_prior(batch.num_nodes)
+        
+        # 1. Use dense_edge_index to prevent data leakage
+        x_gen, edge_bond_logits, pos_gen = self.generator(
+            x_prior,
+            pos_prior,
+            batch.dense_edge_index,
+        )
+        
+        # 2. Zero-center coordinates per graph to prevent cross-graph leakage
+        pos_gen = self._center_positions_per_graph(pos_gen, batch.batch)
+        
+        a_soft_gen = F.gumbel_softmax(x_gen, tau=1.0, hard=False, dim=-1)
+        
+        phi_gen = self.feature_extractor(
+            pos=pos_gen,
+            a_soft=a_soft_gen,
+            batch_vec=batch.batch,
+            dense_edge_index=batch.dense_edge_index,
+        )
+        phi_real = self.feature_extractor(
+            pos=batch.pos,
+            a_soft=batch.a_soft_real,
+            batch_vec=batch.batch,
+            dense_edge_index=batch.dense_edge_index,
+        )
+        
+        # 3. Use the exact same normalized objective
+        val_loss = self.compute_normalized_drift_loss(phi_gen, phi_real)
+        
         batch_size = self._batch_size_for_logging(batch)
         self.log(
             "val_loss",
             val_loss,
             batch_size=batch_size,
-            prog_bar=True,
             on_step=False,
             on_epoch=True,
+            sync_dist=True # Good practice if you ever scale to multi-GPU
         )
-  
+        return val_loss
+
+    def test_step(self, batch, batch_idx):
+        x_prior, pos_prior = self.sample_prior(batch.num_nodes)
+        
+        x_gen, edge_bond_logits, pos_gen = self.generator(
+            x_prior,
+            pos_prior,
+            batch.dense_edge_index,
+        )
+        
+        pos_gen = self._center_positions_per_graph(pos_gen, batch.batch)
+        
+        a_soft_gen = F.gumbel_softmax(x_gen, tau=1.0, hard=False, dim=-1)
+        
+        phi_gen = self.feature_extractor(
+            pos=pos_gen,
+            a_soft=a_soft_gen,
+            batch_vec=batch.batch,
+            dense_edge_index=batch.dense_edge_index,
+        )
+        phi_real = self.feature_extractor(
+            pos=batch.pos,
+            a_soft=batch.a_soft_real,
+            batch_vec=batch.batch,
+            dense_edge_index=batch.dense_edge_index,
+        )
+        
+        test_loss = self.compute_normalized_drift_loss(phi_gen, phi_real)
+        
+        batch_size = self._batch_size_for_logging(batch)
+        self.log(
+            "test_loss",
+            test_loss,
+            batch_size=batch_size,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True
+        )
+        return test_loss
+
 
     def configure_optimizers(self):
-        # The paper uses AdamW with specific beta values
-        return torch.optim.AdamW(
-            self.generator.parameters(), lr=4e-4, betas=(0.9, 0.95)
+        # 1. Optimizer: AdamW is highly recommended for flow/drifting models
+        # over standard Adam to prevent weight explosion.
+        optimizer = torch.optim.AdamW(
+            self.generator.parameters(), 
+            lr=self.drift_cfg["lr"],
+            weight_decay=self.drift_cfg["weight_decay"],
+            eps=1e-8           # Adam epsilon (fine at 1e-8 here, as gradients are fp32)
         )
+
+        # 2. Scheduler: Linear Warmup followed by Cosine Annealing
+        from torch.optim.lr_scheduler import OneCycleLR
+        
+        # OneCycleLR handles both the warmup from 0 to max_lr, and the decay back down.
+        scheduler = OneCycleLR(
+            optimizer,
+            max_lr=self.drift_cfg["lr"],
+            total_steps=self.trainer.estimated_stepping_batches,
+            pct_start=self.drift_cfg["pct_start"],
+            anneal_strategy='cos',
+            div_factor=self.drift_cfg["div_factor"],
+            final_div_factor=self.drift_cfg["final_div_factor"]
+        )
+
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "step", # Update the LR every batch, not every epoch
+                "frequency": 1
+            }
+        }

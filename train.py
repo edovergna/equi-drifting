@@ -46,7 +46,7 @@ def get_device() -> torch.device:
 
 def main(args: argparse.Namespace):
     set_seed(args.seed)
-    torch.set_float32_matmul_precision("medium")
+    torch.set_float32_matmul_precision("medium") 
     pl.seed_everything(args.seed, workers=True)
     device = get_device()
     print(f"Detected best torch device: {device}")
@@ -82,7 +82,20 @@ def main(args: argparse.Namespace):
         num_workers=args.num_workers,
         force_reload=args.force_reload,
     )
-    model = DriftingMoleculeGenerator(None, None)
+    generator_cfg = {
+        "in_node_nf": 7,
+        "hidden_nf": args.hidden_dim,
+        "n_layers": args.num_layers,
+        "num_atom_types": 5,
+        "num_bond_types": 5,
+    }
+    drift_cfg = {
+        "lr": args.lr,
+        "weight_decay": args.weight_decay,
+        "temperatures": [0.02, 0.05, 0.2],
+    }
+    model = DriftingMoleculeGenerator(generator_cfg, drift_cfg)
+
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.checkpoint_dir,
         filename="best-{epoch:02d}-{val_loss:.4f}",
@@ -91,6 +104,7 @@ def main(args: argparse.Namespace):
         save_top_k=1,
         save_last=True,
     )
+    
     early_stopping_callback = EarlyStopping(
         monitor="val_loss",
         mode="min",
