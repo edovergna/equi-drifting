@@ -8,6 +8,12 @@ dependencies:
   - pip:
     - "torch==2.8.0"
     - "--extra-index-url=https://pypi.org/simple"
+    - "--find-links=https://data.pyg.org/whl/torch-2.8.0+cpu.html"
+    - "pyg-lib"
+    - "torch-scatter"
+    - "torch-sparse"
+    - "torch-cluster"
+    - "torch-spline-conv"
     - "aiohappyeyeballs==2.6.1"
     - "aiohttp==3.13.5"
     - "aiosignal==1.4.0"
