@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+
 # Make sure the project root is in the Python path for imports
 PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -43,7 +44,7 @@ def main(args: argparse.Namespace):
         "num_atom_types": 5,
         "num_bond_types": 5,
     }
-    
+
     drift_cfg = {
         "lr": args.lr,
         "weight_decay": args.weight_decay,
@@ -60,7 +61,7 @@ def main(args: argparse.Namespace):
         save_top_k=1,
         save_last=True,
     )
-    
+
     early_stopping_callback = EarlyStopping(
         monitor="val_loss",
         mode="min",
@@ -77,7 +78,7 @@ def main(args: argparse.Namespace):
         deterministic=deterministic,
         benchmark=benchmark,
         precision=precision,
-        gradient_clip_val=1.0, 
+        gradient_clip_val=1.0,
         gradient_clip_algorithm="norm",
         check_val_every_n_epoch=args.check_val_every_n_epoch,
         callbacks=callbacks,
