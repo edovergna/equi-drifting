@@ -91,11 +91,11 @@ class QM9DataModule(pl.LightningDataModule):
         # n_val = int(0.95 * n)
         # n_test = n - n_train - n_val
 
-        self.train_set, self.val_set, self.test_set = random_split(
-            dataset,
-            [n_train, n_val, n_test],
-            generator=torch.Generator().manual_seed(42),
-        )
+        # self.train_set, self.val_set, self.test_set = random_split(
+        #     dataset,
+        #     [n_train, n_val, n_test],
+        #     generator=torch.Generator().manual_seed(42),
+        # )
 
 
     
