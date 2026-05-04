@@ -19,6 +19,7 @@ dependencies = [
     "lightning>=2.6.1",
     "einops>=0.8.2",
     "gdown>=6.0.0",
+    "matplotlib>=3.10.9",
 ]
 
 [tool.uv]
