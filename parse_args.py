@@ -48,9 +48,6 @@ def parse_args():
         help="Weight decay for the optimizer.",
     )
     parser.add_argument(
-        "--type_loss_weight", type=float, default=0.1, help="Weight for the type loss."
-    )
-    parser.add_argument(
         "--offline",
         action="store_true",
         help="Whether to log to Weights & Biases in offline mode.",
