@@ -43,6 +43,7 @@ def main(args: argparse.Namespace):
         "n_layers": args.num_layers,
         "num_atom_types": 5,
         "num_bond_types": 5,
+        "predict_bond_types": args.predict_bond_types,
     }
 
     drift_cfg = {
@@ -56,20 +57,13 @@ def main(args: argparse.Namespace):
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.checkpoint_dir,
         filename="best-{epoch:02d}-{val_loss:.4f}",
-        monitor="val_loss",
+        monitor="train_loss",
         mode="min",
         save_top_k=1,
         save_last=True,
     )
 
-    early_stopping_callback = EarlyStopping(
-        monitor="val_loss",
-        mode="min",
-        patience=args.early_stopping_patience,
-        min_delta=args.early_stopping_min_delta,
-    )
-
-    callbacks = [checkpoint_callback, early_stopping_callback]
+    callbacks = [checkpoint_callback]
 
     trainer = pl.Trainer(
         accelerator="auto",

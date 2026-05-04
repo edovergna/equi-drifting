@@ -189,8 +189,11 @@ class EGNN(nn.Module):
         num_atom_types: int,
         num_bond_types: int,
         n_layers: int = 4,
+        predict_bond_types: bool = False,
     ):
         super().__init__()
+
+        self.compute_heads = predict_bond_types
 
         self.embedding = nn.Linear(in_node_nf, hidden_nf)
 
@@ -198,9 +201,11 @@ class EGNN(nn.Module):
             [EquivariantBlock(hidden_nf) for _ in range(n_layers)]
         )
 
-        # Heads
+        # atom_head is always instantiated: its output feeds the EPT feature extractor.
+        # bond_head is only instantiated when compute_heads=True (currently unused in loss).
         self.atom_head = AtomHead(hidden_nf, num_atom_types)
-        self.bond_head = BondHead(hidden_nf, num_bond_types)
+        if predict_bond_types:
+            self.bond_head = BondHead(hidden_nf, num_bond_types)
 
     def compute_edge_features(
         self, pos: torch.Tensor, edge_index: torch.Tensor, eps: float = 1e-5
@@ -220,10 +225,13 @@ class EGNN(nn.Module):
             edge_attr, coord_diff = self.compute_edge_features(pos, edge_index)
             x, pos = block(x, pos, edge_index, edge_attr, coord_diff)
 
-        # Final edge features (for bond head)
-        edge_attr, _ = self.compute_edge_features(pos, edge_index)
-
         atom_logits = self.atom_head(x)
+
+        if not self.compute_heads:
+            return atom_logits, None, pos
+
+        # Final edge features needed only for bond head
+        edge_attr, _ = self.compute_edge_features(pos, edge_index)
         bond_logits = self.bond_head(x, edge_index, edge_attr)
 
         return atom_logits, bond_logits, pos
