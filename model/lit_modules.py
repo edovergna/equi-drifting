@@ -291,7 +291,7 @@ class DriftingMoleculeGenerator(LightningModule):
 
         # 3. Use the robust normalized drifting loss
         try:
-            loss = self.compute_normalized_drift_loss(phi_gen, phi_real)
+            loss, stats = self.compute_normalized_drift_loss(phi_gen, phi_real)
         except TrainingDivergedException as e:
             self.print(f"\n[Step {self.global_step}] {e}\nStopping training.")
             self.trainer.should_stop = True
@@ -300,9 +300,21 @@ class DriftingMoleculeGenerator(LightningModule):
         batch_size = self._batch_size_for_logging(batch)
         self.log("train_loss", loss, batch_size=batch_size, on_step=True, on_epoch=True)
 
-        # Log maximum structural extent to monitor for explosions
-        max_dist = torch.max(torch.cdist(pos_gen, pos_gen))
-        self.log("max_atom_dist", max_dist, batch_size=batch_size)
+        # Drift internals: scale, per-temperature lambda / drift magnitude / attention entropy
+        for key, val in stats.items():
+            self.log(f"drift/{key}", val, batch_size=batch_size, on_step=True, on_epoch=False)
+
+        # Learning rate (OneCycleLR updates every step — make it visible)
+        current_lr = self.optimizers().param_groups[0]["lr"]
+        self.log("train/lr", current_lr, on_step=True, on_epoch=False)
+
+        # Geometry: coordinate magnitudes and pairwise extent of generated molecules
+        with torch.no_grad():
+            pos_norms = pos_gen.norm(dim=-1)
+            max_dist = torch.cdist(pos_gen, pos_gen).max()
+        self.log("geom/pos_gen_norm_mean", pos_norms.mean(), batch_size=batch_size)
+        self.log("geom/pos_gen_norm_std", pos_norms.std(), batch_size=batch_size)
+        self.log("geom/max_atom_dist", max_dist, batch_size=batch_size)
 
         # Center norm diagnostics (should be ~0 if centering is correct)
         self.log("debug/gen_center_norm_mean", gen_center_norms.mean(), batch_size=batch_size)
@@ -313,13 +325,13 @@ class DriftingMoleculeGenerator(LightningModule):
 
     def compute_normalized_drift_loss(
         self, phi_gen: torch.Tensor, phi_real: torch.Tensor
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, dict]:
+        """Returns (loss, stats) where stats is a flat dict of float diagnostics."""
         # Run pairwise-distance math in float32 for AMP stability.
         phi_gen = torch.nan_to_num(phi_gen.float(), nan=0.0, posinf=1e4, neginf=-1e4)
         phi_real = torch.nan_to_num(phi_real.float(), nan=0.0, posinf=1e4, neginf=-1e4)
 
         D = phi_gen.shape[-1]
-        N = phi_gen.shape[0]
 
         dist_pos = torch.cdist(phi_gen, phi_real)
         dist_neg = torch.cdist(phi_gen, phi_gen)
@@ -343,16 +355,22 @@ class DriftingMoleculeGenerator(LightningModule):
 
         aggregated_v_norm = torch.zeros_like(phi_gen_norm)
 
+        stats: dict[str, float] = {}
+        with torch.no_grad():
+            stats["scale_S"] = S.item()
+            gen_norms = phi_gen_norm.norm(dim=-1)
+            real_norms = phi_real_norm.norm(dim=-1)
+            stats["phi_gen_norm_mean"] = gen_norms.mean().item()
+            stats["phi_gen_norm_std"] = gen_norms.std().item()
+            stats["phi_real_norm_mean"] = real_norms.mean().item()
+
         for tau in self.temperatures:
+            tau_key = str(tau).replace(".", "_")
             tau_tilde = tau * (D**0.5)
 
             logit_pos = -norm_dist_pos / tau_tilde
             logit_neg = -norm_dist_neg / tau_tilde
-
-            logit = torch.cat([logit_pos, logit_neg], dim=1)
-
-            # <-- ADDED: Clamp logits before softmax to prevent fp16 underflow
-            logit = torch.clamp(logit, min=-100.0, max=50.0)
+            logit = torch.clamp(torch.cat([logit_pos, logit_neg], dim=1), min=-100.0, max=50.0)
 
             A_row = F.softmax(logit, dim=-1)
             A_col = F.softmax(logit, dim=-2)
@@ -378,6 +396,13 @@ class DriftingMoleculeGenerator(LightningModule):
             V_tau_norm = V_tau / lambda_tau
             aggregated_v_norm += V_tau_norm
 
+            with torch.no_grad():
+                # Entropy of row-softmax attention: 0 = all mass on one neighbour, log(N) = uniform
+                row_entropy = -(A_row * (A_row + 1e-30).log()).sum(dim=-1).mean()
+                stats[f"attn_entropy_{tau_key}"] = row_entropy.item()
+                stats[f"lambda_{tau_key}"] = lambda_tau.item()
+                stats[f"v_norm_{tau_key}"] = V_tau_norm.norm(dim=-1).mean().item()
+
         target = (phi_gen_norm + aggregated_v_norm).detach()
         loss = F.mse_loss(phi_gen_norm, target)
 
@@ -389,7 +414,7 @@ class DriftingMoleculeGenerator(LightningModule):
                 f"S={S.item():.3g}"
             )
 
-        return loss
+        return loss, stats
 
     def validation_step(self, batch, batch_idx):
         x_prior, pos_prior = self.sample_prior(batch.num_nodes)
@@ -425,9 +450,13 @@ class DriftingMoleculeGenerator(LightningModule):
         )
 
         # 3. Use the exact same normalized objective
-        val_loss = self.compute_normalized_drift_loss(phi_gen, phi_real)
+        val_loss, stats = self.compute_normalized_drift_loss(phi_gen, phi_real)
 
         batch_size = self._batch_size_for_logging(batch)
+
+        for key, val in stats.items():
+            self.log(f"val/{key}", val, batch_size=batch_size, on_step=False, on_epoch=True, sync_dist=True)
+
         self.log("debug/val_gen_center_norm_mean", gen_center_norms.mean(), batch_size=batch_size, on_epoch=True, sync_dist=True)
         self.log("debug/val_real_center_norm_mean", real_center_norms.mean(), batch_size=batch_size, on_epoch=True, sync_dist=True)
         self.log(
@@ -436,7 +465,7 @@ class DriftingMoleculeGenerator(LightningModule):
             batch_size=batch_size,
             on_step=False,
             on_epoch=True,
-            sync_dist=True,  # Good practice if you ever scale to multi-GPU
+            sync_dist=True,
         )
         return val_loss
 
@@ -466,7 +495,7 @@ class DriftingMoleculeGenerator(LightningModule):
             dense_edge_index=batch.dense_edge_index,
         )
 
-        test_loss = self.compute_normalized_drift_loss(phi_gen, phi_real)
+        test_loss, _ = self.compute_normalized_drift_loss(phi_gen, phi_real)
 
         batch_size = self._batch_size_for_logging(batch)
         self.log(
