@@ -15,7 +15,7 @@ from lightning.pytorch.loggers import WandbLogger
 
 import wandb
 
-from model import initialize_training_config, QM9DataModule, DriftingMoleculeGenerator
+from model import initialize_training_config, QM9DataModule, DriftingMoleculeGenerator, GradientMonitorCallback
 
 
 def main(args: argparse.Namespace):
@@ -63,7 +63,7 @@ def main(args: argparse.Namespace):
         save_last=True,
     )
 
-    callbacks = [checkpoint_callback]
+    callbacks = [checkpoint_callback, GradientMonitorCallback()]
 
     trainer = pl.Trainer(
         accelerator="auto",
