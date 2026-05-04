@@ -1,5 +1,4 @@
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -24,6 +23,8 @@ class DriftingMoleculeGenerator(LightningModule):
             "n_layers": 2,
             "num_atom_types": 5,
             "num_bond_types": 5,
+            "compute_heads": False,
+            "predict_bond_types": False,
         }
         default_drift_cfg = {
             "lr": 1e-4,
@@ -61,6 +62,7 @@ class DriftingMoleculeGenerator(LightningModule):
             n_layers=cfg["n_layers"],
             num_atom_types=cfg["num_atom_types"],
             num_bond_types=cfg["num_bond_types"],
+            predict_bond_types=cfg["predict_bond_types"],
         )
 
     def _init_feature_extractor(self):
@@ -73,14 +75,29 @@ class DriftingMoleculeGenerator(LightningModule):
         full_ckpt_path = root_path / ckpt_path
 
         if not full_ckpt_path.exists():
-            print(f"Checkpoint not found at {full_ckpt_path}. Downloading...")
-            print("Downloading EPT from google drive...")
-            print(
-                "os.system('gdown --folder https://drive.google.com/drive/folders/1tBqGwC_jcTdq3QArFZox_auSCzxDjA0P')"
+            print(f"Checkpoint not found at {full_ckpt_path}. Downloading EPT from Google Drive...")
+            result = subprocess.run(
+                [
+                    "gdown",
+                    "--folder",
+                    "https://drive.google.com/drive/folders/1tBqGwC_jcTdq3QArFZox_auSCzxDjA0P",
+                ],
+                capture_output=True,
+                text=True,
             )
-            os.system(
-                "gdown --folder https://drive.google.com/drive/folders/1tBqGwC_jcTdq3QArFZox_auSCzxDjA0P"
-            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"EPT checkpoint download failed (exit code {result.returncode}).\n"
+                    f"stdout: {result.stdout}\n"
+                    f"stderr: {result.stderr}\n"
+                    "Ensure gdown is installed: pip install gdown"
+                )
+            if not full_ckpt_path.exists():
+                raise RuntimeError(
+                    f"Download appeared to succeed but checkpoint not found at {full_ckpt_path}.\n"
+                    f"gdown output: {result.stdout}\n"
+                    "Check that the folder structure matches the expected path."
+                )
             print("Download complete.")
 
         # Add the "ept" directory to sys.path so that torch.load finds the EPT modules
@@ -177,6 +194,17 @@ class DriftingMoleculeGenerator(LightningModule):
 
         return x, pos
 
+    def _per_graph_center_norms(
+        self, pos: torch.Tensor, batch_vec: torch.Tensor
+    ) -> torch.Tensor:
+        """Returns a [G] tensor of per-graph center L2 norms. Should be ~0 if centered."""
+        num_graphs = int(batch_vec.max().item()) + 1
+        sums = torch.zeros(num_graphs, 3, device=pos.device, dtype=pos.dtype)
+        sums.index_add_(0, batch_vec, pos)
+        counts = torch.bincount(batch_vec, minlength=num_graphs).clamp_min(1).to(pos.dtype)
+        centers = sums / counts.unsqueeze(-1)
+        return centers.norm(dim=-1)
+
     def _batch_size_for_logging(self, batch) -> int:
         if hasattr(batch, "num_graphs") and batch.num_graphs is not None:
             return int(batch.num_graphs)
@@ -216,6 +244,11 @@ class DriftingMoleculeGenerator(LightningModule):
         # 2. Zero-center coordinates per graph (Prevent Spatial Drift)
         pos_gen = self._center_positions_per_graph(pos_gen, batch.batch)
 
+        # Log center norms to verify centering is working for both real and generated molecules
+        with torch.no_grad():
+            gen_center_norms = self._per_graph_center_norms(pos_gen, batch.batch)
+            real_center_norms = self._per_graph_center_norms(batch.pos, batch.batch)
+
         a_soft_gen = F.gumbel_softmax(x_gen, tau=1.0, hard=False, dim=-1)
 
         phi_gen = self.feature_extractor(
@@ -240,6 +273,11 @@ class DriftingMoleculeGenerator(LightningModule):
         # Log maximum structural extent to monitor for explosions
         max_dist = torch.max(torch.cdist(pos_gen, pos_gen))
         self.log("max_atom_dist", max_dist, batch_size=batch_size)
+
+        # Center norm diagnostics (should be ~0 if centering is correct)
+        self.log("debug/gen_center_norm_mean", gen_center_norms.mean(), batch_size=batch_size)
+        self.log("debug/gen_center_norm_std", gen_center_norms.std(), batch_size=batch_size)
+        self.log("debug/real_center_norm_mean", real_center_norms.mean(), batch_size=batch_size)
 
         return loss
 
@@ -332,6 +370,10 @@ class DriftingMoleculeGenerator(LightningModule):
         # 2. Zero-center coordinates per graph to prevent cross-graph leakage
         pos_gen = self._center_positions_per_graph(pos_gen, batch.batch)
 
+        with torch.no_grad():
+            gen_center_norms = self._per_graph_center_norms(pos_gen, batch.batch)
+            real_center_norms = self._per_graph_center_norms(batch.pos, batch.batch)
+
         a_soft_gen = F.gumbel_softmax(x_gen, tau=1.0, hard=False, dim=-1)
 
         phi_gen = self.feature_extractor(
@@ -352,6 +394,8 @@ class DriftingMoleculeGenerator(LightningModule):
         val_loss = self.compute_normalized_drift_loss(phi_gen, phi_real)
 
         batch_size = self._batch_size_for_logging(batch)
+        self.log("debug/val_gen_center_norm_mean", gen_center_norms.mean(), batch_size=batch_size, on_epoch=True, sync_dist=True)
+        self.log("debug/val_real_center_norm_mean", real_center_norms.mean(), batch_size=batch_size, on_epoch=True, sync_dist=True)
         self.log(
             "val_loss",
             val_loss,
