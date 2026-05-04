@@ -24,7 +24,7 @@ def main(args: argparse.Namespace):
 
     run = wandb.init(
         entity="equivariant-drifting",
-        project="tests",
+        project="col-daniel-tests",
         group=args.group_tag,
         mode="offline" if args.offline else "online",
         config=vars(args),
