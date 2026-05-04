@@ -44,6 +44,13 @@ def parse_args():
         help="Whether to predict bond types.",
     )
     parser.add_argument(
+        "--temperatures",
+        type=float,
+        nargs="+",
+        default=[0.02, 0.05, 0.2],
+        help="Temperature values for the drifting field (space-separated, e.g. --temperatures 0.02 0.05 0.2).",
+    )
+    parser.add_argument(
         "--hidden_dim",
         type=int,
         default=192,

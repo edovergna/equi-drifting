@@ -13,6 +13,10 @@ from ept import EPTFeatureExtractor
 from .egnn import EGNN
 
 
+class TrainingDivergedException(Exception):
+    """Raised when the drift loss becomes non-finite. Triggers a clean training stop."""
+
+
 class DriftingMoleculeGenerator(LightningModule):
     def __init__(self, generator_cfg=None, drift_cfg=None):
         super().__init__()
@@ -113,6 +117,15 @@ class DriftingMoleculeGenerator(LightningModule):
         self.feature_extractor.eval()
         for parameter in self.feature_extractor.parameters():
             parameter.requires_grad = False
+
+    def on_before_optimizer_step(self, optimizer):
+        # Log pre-clip gradient norms so we can see the raw signal before Lightning clips it.
+        grads = [p.grad for p in self.generator.parameters() if p.grad is not None]
+        if grads:
+            total_norm = torch.stack([g.detach().norm(2) for g in grads]).norm(2)
+            max_abs = torch.stack([g.detach().abs().max() for g in grads]).max()
+            self.log("grad/total_norm", total_norm, on_step=True, on_epoch=False)
+            self.log("grad/max_abs", max_abs, on_step=True, on_epoch=False)
 
     def on_fit_start(self):
         self.feature_extractor.to(self.device)  # here
@@ -264,8 +277,25 @@ class DriftingMoleculeGenerator(LightningModule):
             dense_edge_index=batch.dense_edge_index,
         )
 
+        # Early NaN/Inf check before computing loss — gives a clearer error than a cryptic NaN
+        if not (torch.isfinite(phi_gen).all() and torch.isfinite(phi_real).all()):
+            bad_gen = (~torch.isfinite(phi_gen)).sum().item()
+            bad_real = (~torch.isfinite(phi_real)).sum().item()
+            self.print(
+                f"\n[Step {self.global_step}] Non-finite embeddings detected — "
+                f"phi_gen: {bad_gen} bad values, phi_real: {bad_real} bad values. "
+                "Stopping training."
+            )
+            self.trainer.should_stop = True
+            return torch.tensor(0.0, device=self.device, requires_grad=True)
+
         # 3. Use the robust normalized drifting loss
-        loss = self.compute_normalized_drift_loss(phi_gen, phi_real)
+        try:
+            loss = self.compute_normalized_drift_loss(phi_gen, phi_real)
+        except TrainingDivergedException as e:
+            self.print(f"\n[Step {self.global_step}] {e}\nStopping training.")
+            self.trainer.should_stop = True
+            return torch.tensor(0.0, device=self.device, requires_grad=True)
 
         batch_size = self._batch_size_for_logging(batch)
         self.log("train_loss", loss, batch_size=batch_size, on_step=True, on_epoch=True)
@@ -352,8 +382,12 @@ class DriftingMoleculeGenerator(LightningModule):
         loss = F.mse_loss(phi_gen_norm, target)
 
         if not torch.isfinite(loss):
-            # Defensive fallback to keep training alive if a rare unstable batch appears.
-            loss = torch.tensor(0.0, device=phi_gen.device, dtype=phi_gen.dtype)
+            raise TrainingDivergedException(
+                f"Non-finite loss ({loss.item()!r}) after drift computation. "
+                f"phi_gen range: [{phi_gen.min().item():.3g}, {phi_gen.max().item():.3g}], "
+                f"phi_real range: [{phi_real.min().item():.3g}, {phi_real.max().item():.3g}], "
+                f"S={S.item():.3g}"
+            )
 
         return loss
 
