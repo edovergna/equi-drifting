@@ -66,7 +66,7 @@ class DriftingMoleculeGenerator(LightningModule):
 
         # Sample positions
         pos = torch.randn(num_nodes, 3, device=self.device)
-        
+
         # Sample node features
         # We sample a 7-dimensional feature space, because the
         # node features are composed by a 5-dim one-hot encoding
@@ -92,14 +92,10 @@ class DriftingMoleculeGenerator(LightningModule):
             pos=batch.pos, a_soft=batch.a_soft_real,
             batch_vec=batch.batch, dense_edge_index=batch.dense_edge_index,
         )
-        return pos_gen, phi_gen, phi_real
-
-    # ------------------------------------------------------------------
-    # Steps
-    # ------------------------------------------------------------------
+        return pos_gen, a_soft_gen, phi_gen, phi_real
 
     def training_step(self, batch, batch_idx):
-        pos_gen, phi_gen, phi_real = self._forward(batch)
+        pos_gen, _, phi_gen, phi_real = self._forward(batch)
 
         if not (torch.isfinite(phi_gen).all() and torch.isfinite(phi_real).all()):
             bad_gen = (~torch.isfinite(phi_gen)).sum().item()
@@ -142,7 +138,7 @@ class DriftingMoleculeGenerator(LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        pos_gen, phi_gen, phi_real = self._forward(batch)
+        pos_gen, a_soft_gen, phi_gen, phi_real = self._forward(batch)
         val_loss, stats = compute_normalized_drift_loss(phi_gen, phi_real, self.temperatures)
 
         bs = batch_size_for_logging(batch)
@@ -157,10 +153,18 @@ class DriftingMoleculeGenerator(LightningModule):
         self.log("debug/val_gen_center_norm_mean", gen_cn.mean(), batch_size=bs, on_epoch=True, sync_dist=True)
         self.log("debug/val_real_center_norm_mean", real_cn.mean(), batch_size=bs, on_epoch=True, sync_dist=True)
 
-        return val_loss
+        return {
+            "phi_gen": phi_gen.detach().cpu(),
+            "phi_real": phi_real.detach().cpu(),
+            "pos_gen": pos_gen.detach().cpu(),
+            "a_soft_gen": a_soft_gen.detach().cpu(),
+            "pos_real": batch.pos.detach().cpu(),
+            "a_soft_real": batch.a_soft_real.detach().cpu(),
+            "batch_vec": batch.batch.detach().cpu(),
+        }
 
     def test_step(self, batch, batch_idx):
-        _, phi_gen, phi_real = self._forward(batch)
+        _, _, phi_gen, phi_real = self._forward(batch)
         test_loss, _ = compute_normalized_drift_loss(phi_gen, phi_real, self.temperatures)
 
         bs = batch_size_for_logging(batch)

@@ -51,6 +51,13 @@ def compute_normalized_drift_loss(
         stats["phi_gen_norm_std"] = gen_norms.std().item()
         stats["phi_real_norm_mean"] = real_norms.mean().item()
 
+        # Angular and distance proximity to nearest real neighbour
+        phi_gen_unit = F.normalize(phi_gen, dim=-1)
+        phi_real_unit = F.normalize(phi_real, dim=-1)
+        cos_sim_matrix = phi_gen_unit @ phi_real_unit.T          # [N_gen, N_real]
+        stats["cosine_sim_to_nn"] = cos_sim_matrix.max(dim=1).values.mean().item()
+        stats["nn_l2_distance"] = dist_pos.min(dim=1).values.mean().item()
+
     for tau in temperatures:
         tau_key = str(tau).replace(".", "_")
         tau_tilde = tau * (D**0.5)
@@ -84,6 +91,11 @@ def compute_normalized_drift_loss(
             stats[f"attn_entropy_{tau_key}"] = row_entropy.item()
             stats[f"lambda_{tau_key}"] = lambda_tau.item()
             stats[f"v_norm_{tau_key}"] = V_tau_norm.norm(dim=-1).mean().item()
+
+            # Fraction of attention mass on real samples; ~0.5 at convergence (equal pull)
+            pos_mass = A_pos.sum(dim=1)
+            neg_mass = A_neg.sum(dim=1)
+            stats[f"attn_pos_mass_frac_{tau_key}"] = (pos_mass / (pos_mass + neg_mass).clamp_min(1e-8)).mean().item()
 
     target = (phi_gen_norm + aggregated_v_norm).detach()
     loss = F.mse_loss(phi_gen_norm, target)

@@ -15,7 +15,14 @@ from lightning.pytorch.loggers import WandbLogger
 
 import wandb
 
-from model import initialize_training_config, QM9DataModule, DriftingMoleculeGenerator, GradientMonitorCallback
+from model import (
+    initialize_training_config,
+    QM9DataModule,
+    DriftingMoleculeGenerator,
+    GradientMonitorCallback,
+    EmbeddingMonitorCallback,
+    MoleculeVisualizationCallback,
+)
 
 
 def main(args: argparse.Namespace):
@@ -63,7 +70,12 @@ def main(args: argparse.Namespace):
         save_last=True,
     )
 
-    callbacks = [checkpoint_callback, GradientMonitorCallback()]
+    callbacks = [
+        checkpoint_callback,
+        GradientMonitorCallback(),
+        EmbeddingMonitorCallback(),
+        MoleculeVisualizationCallback(n_molecules=4, bond_threshold=2.0, every_n_epochs=1),
+    ]
 
     trainer = pl.Trainer(
         accelerator="auto",
