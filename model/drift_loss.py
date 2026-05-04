@@ -54,7 +54,7 @@ def compute_normalized_drift_loss(
         # Angular and distance proximity to nearest real neighbour
         phi_gen_unit = F.normalize(phi_gen, dim=-1)
         phi_real_unit = F.normalize(phi_real, dim=-1)
-        cos_sim_matrix = phi_gen_unit @ phi_real_unit.T          # [N_gen, N_real]
+        cos_sim_matrix = phi_gen_unit @ phi_real_unit.T  # [N_gen, N_real]
         stats["cosine_sim_to_nn"] = cos_sim_matrix.max(dim=1).values.mean().item()
         stats["nn_l2_distance"] = dist_pos.min(dim=1).values.mean().item()
 
@@ -78,9 +78,11 @@ def compute_normalized_drift_loss(
 
         V_tau = W_pos @ phi_real_norm - W_neg @ phi_gen_norm
 
-        lambda_tau = torch.sqrt(
-            ((V_tau**2).sum(dim=-1).mean() / D).clamp(min=1e-10)
-        ).detach().clamp(min=1e-5, max=1e3)
+        lambda_tau = (
+            torch.sqrt(((V_tau**2).sum(dim=-1).mean() / D).clamp(min=1e-10))
+            .detach()
+            .clamp(min=1e-5, max=1e3)
+        )
 
         V_tau_norm = V_tau / lambda_tau
         aggregated_v_norm = aggregated_v_norm + V_tau_norm
@@ -95,7 +97,9 @@ def compute_normalized_drift_loss(
             # Fraction of attention mass on real samples; ~0.5 at convergence (equal pull)
             pos_mass = A_pos.sum(dim=1)
             neg_mass = A_neg.sum(dim=1)
-            stats[f"attn_pos_mass_frac_{tau_key}"] = (pos_mass / (pos_mass + neg_mass).clamp_min(1e-8)).mean().item()
+            stats[f"attn_pos_mass_frac_{tau_key}"] = (
+                (pos_mass / (pos_mass + neg_mass).clamp_min(1e-8)).mean().item()
+            )
 
     target = (phi_gen_norm + aggregated_v_norm).detach()
     loss = F.mse_loss(phi_gen_norm, target)

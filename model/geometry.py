@@ -12,9 +12,7 @@ def center_positions_per_graph(
     return pos - com[batch_vec]
 
 
-def per_graph_center_norms(
-    pos: torch.Tensor, batch_vec: torch.Tensor
-) -> torch.Tensor:
+def per_graph_center_norms(pos: torch.Tensor, batch_vec: torch.Tensor) -> torch.Tensor:
     """Returns a [G] tensor of per-graph center L2 norms. Should be ~0 if centered."""
     com = global_mean_pool(pos, batch_vec)  # [G, 3]
     return com.norm(dim=-1)

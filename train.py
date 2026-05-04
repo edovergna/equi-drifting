@@ -7,22 +7,16 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import argparse
-from parse_args import parse_args
 
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers import WandbLogger
 
 import wandb
-
-from model import (
-    initialize_training_config,
-    QM9DataModule,
-    DriftingMoleculeGenerator,
-    GradientMonitorCallback,
-    EmbeddingMonitorCallback,
-    MoleculeVisualizationCallback,
-)
+from model import (DriftingMoleculeGenerator, EmbeddingMonitorCallback,
+                   GradientMonitorCallback, MoleculeVisualizationCallback,
+                   QM9DataModule, initialize_training_config)
+from parse_args import parse_args
 
 
 def main(args: argparse.Namespace):
@@ -74,7 +68,9 @@ def main(args: argparse.Namespace):
         checkpoint_callback,
         GradientMonitorCallback(),
         EmbeddingMonitorCallback(),
-        MoleculeVisualizationCallback(n_molecules=4, bond_threshold=2.0, every_n_epochs=1),
+        MoleculeVisualizationCallback(
+            n_molecules=4, bond_threshold=2.0, every_n_epochs=1
+        ),
     ]
 
     trainer = pl.Trainer(

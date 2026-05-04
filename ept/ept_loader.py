@@ -6,7 +6,9 @@ import torch
 
 from .ept import EPTFeatureExtractor
 
-_GDRIVE_FOLDER = "https://drive.google.com/drive/folders/1tBqGwC_jcTdq3QArFZox_auSCzxDjA0P"
+_GDRIVE_FOLDER = (
+    "https://drive.google.com/drive/folders/1tBqGwC_jcTdq3QArFZox_auSCzxDjA0P"
+)
 _CKPT_RELATIVE = Path("hybrid_noaf") / "epoch49_step215752.ckpt"
 _ROOT_PATH = Path(__file__).parents[1]
 
@@ -26,7 +28,9 @@ def load_ept_feature_extractor() -> EPTFeatureExtractor:
 
 
 def _download_ept(expected_path: Path) -> None:
-    print(f"EPT checkpoint not found at {expected_path}. Downloading from Google Drive...")
+    print(
+        f"EPT checkpoint not found at {expected_path}. Downloading from Google Drive..."
+    )
     result = subprocess.run(
         ["gdown", "--folder", _GDRIVE_FOLDER],
         capture_output=True,

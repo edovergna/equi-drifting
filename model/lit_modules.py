@@ -5,10 +5,13 @@ import torch.nn.functional as F
 from lightning.pytorch import LightningModule
 from torch.optim.lr_scheduler import OneCycleLR
 
-from .drift_loss import TrainingDivergedException, compute_normalized_drift_loss
-from .egnn import EGNN
 from ept.ept_loader import load_ept_feature_extractor
-from .geometry import batch_size_for_logging, center_positions_per_graph, per_graph_center_norms
+
+from .drift_loss import (TrainingDivergedException,
+                         compute_normalized_drift_loss)
+from .egnn import EGNN
+from .geometry import (batch_size_for_logging, center_positions_per_graph,
+                       per_graph_center_norms)
 
 
 class DriftingMoleculeGenerator(LightningModule):
@@ -85,12 +88,16 @@ class DriftingMoleculeGenerator(LightningModule):
         a_soft_gen = F.gumbel_softmax(x_gen, tau=1.0, hard=False, dim=-1)
 
         phi_gen = self.feature_extractor(
-            pos=pos_gen, a_soft=a_soft_gen,
-            batch_vec=batch.batch, dense_edge_index=batch.dense_edge_index,
+            pos=pos_gen,
+            a_soft=a_soft_gen,
+            batch_vec=batch.batch,
+            dense_edge_index=batch.dense_edge_index,
         )
         phi_real = self.feature_extractor(
-            pos=batch.pos, a_soft=batch.a_soft_real,
-            batch_vec=batch.batch, dense_edge_index=batch.dense_edge_index,
+            pos=batch.pos,
+            a_soft=batch.a_soft_real,
+            batch_vec=batch.batch,
+            dense_edge_index=batch.dense_edge_index,
         )
         return pos_gen, a_soft_gen, phi_gen, phi_real
 
@@ -108,7 +115,9 @@ class DriftingMoleculeGenerator(LightningModule):
             return torch.tensor(0.0, device=self.device, requires_grad=True)
 
         try:
-            loss, stats = compute_normalized_drift_loss(phi_gen, phi_real, self.temperatures)
+            loss, stats = compute_normalized_drift_loss(
+                phi_gen, phi_real, self.temperatures
+            )
         except TrainingDivergedException as e:
             self.print(f"\n[Step {self.global_step}] {e}\nStopping training.")
             self.trainer.should_stop = True
@@ -120,7 +129,12 @@ class DriftingMoleculeGenerator(LightningModule):
         for key, val in stats.items():
             self.log(f"drift/{key}", val, batch_size=bs, on_step=True, on_epoch=False)
 
-        self.log("train/lr", self.optimizers().param_groups[0]["lr"], on_step=True, on_epoch=False)
+        self.log(
+            "train/lr",
+            self.optimizers().param_groups[0]["lr"],
+            on_step=True,
+            on_epoch=False,
+        )
 
         with torch.no_grad():
             pos_norms = pos_gen.norm(dim=-1)
@@ -139,19 +153,47 @@ class DriftingMoleculeGenerator(LightningModule):
 
     def validation_step(self, batch, batch_idx):
         pos_gen, a_soft_gen, phi_gen, phi_real = self._forward(batch)
-        val_loss, stats = compute_normalized_drift_loss(phi_gen, phi_real, self.temperatures)
+        val_loss, stats = compute_normalized_drift_loss(
+            phi_gen, phi_real, self.temperatures
+        )
 
         bs = batch_size_for_logging(batch)
-        self.log("val_loss", val_loss, batch_size=bs, on_step=False, on_epoch=True, sync_dist=True)
+        self.log(
+            "val_loss",
+            val_loss,
+            batch_size=bs,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
 
         for key, val in stats.items():
-            self.log(f"val/{key}", val, batch_size=bs, on_step=False, on_epoch=True, sync_dist=True)
+            self.log(
+                f"val/{key}",
+                val,
+                batch_size=bs,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
 
         with torch.no_grad():
             gen_cn = per_graph_center_norms(pos_gen, batch.batch)
             real_cn = per_graph_center_norms(batch.pos, batch.batch)
-        self.log("debug/val_gen_center_norm_mean", gen_cn.mean(), batch_size=bs, on_epoch=True, sync_dist=True)
-        self.log("debug/val_real_center_norm_mean", real_cn.mean(), batch_size=bs, on_epoch=True, sync_dist=True)
+        self.log(
+            "debug/val_gen_center_norm_mean",
+            gen_cn.mean(),
+            batch_size=bs,
+            on_epoch=True,
+            sync_dist=True,
+        )
+        self.log(
+            "debug/val_real_center_norm_mean",
+            real_cn.mean(),
+            batch_size=bs,
+            on_epoch=True,
+            sync_dist=True,
+        )
 
         return {
             "phi_gen": phi_gen.detach().cpu(),
@@ -165,10 +207,19 @@ class DriftingMoleculeGenerator(LightningModule):
 
     def test_step(self, batch, batch_idx):
         _, _, phi_gen, phi_real = self._forward(batch)
-        test_loss, _ = compute_normalized_drift_loss(phi_gen, phi_real, self.temperatures)
+        test_loss, _ = compute_normalized_drift_loss(
+            phi_gen, phi_real, self.temperatures
+        )
 
         bs = batch_size_for_logging(batch)
-        self.log("test_loss", test_loss, batch_size=bs, on_step=False, on_epoch=True, sync_dist=True)
+        self.log(
+            "test_loss",
+            test_loss,
+            batch_size=bs,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
         return test_loss
 
     def configure_optimizers(self):
@@ -189,5 +240,9 @@ class DriftingMoleculeGenerator(LightningModule):
         )
         return {
             "optimizer": optimizer,
-            "lr_scheduler": {"scheduler": scheduler, "interval": "step", "frequency": 1},
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "step",
+                "frequency": 1,
+            },
         }

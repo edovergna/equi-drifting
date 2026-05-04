@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 
+
 class EPTFeatureExtractor(nn.Module):
     def __init__(self, ckpt_path, device):
         super().__init__()
@@ -33,7 +34,10 @@ class EPTFeatureExtractor(nn.Module):
         # Locate the continuous embedding weights
         self.embed_weights = None
         for module in self.ept_model.graph_constructor.node_modules:
-            if type(module).__name__ == "ContinuousEmbedding" and module.level == "unit":
+            if (
+                type(module).__name__ == "ContinuousEmbedding"
+                and module.level == "unit"
+            ):
                 self.embed_weights = module.embedding.weight
                 break
 
@@ -42,7 +46,7 @@ class EPTFeatureExtractor(nn.Module):
 
         print("EPT Initialized.")
 
-    def forward(self, pos, a_soft, batch_vec, dense_edge_index): 
+    def forward(self, pos, a_soft, batch_vec, dense_edge_index):
         """
         pos: [N, 3] 3D coordinates
         a_soft: [N, 5] Continuous atom probabilities
@@ -59,14 +63,16 @@ class EPTFeatureExtractor(nn.Module):
         block_vec = torch.arange(N_total, device=current_device)
 
         # dummy_edge_attr fills the 64-dim requirement the EPT expects for bonds
-        dummy_edge_attr = torch.zeros((dense_edge_index.shape[1], 64), device=current_device)
+        dummy_edge_attr = torch.zeros(
+            (dense_edge_index.shape[1], 64), device=current_device
+        )
 
         _, _, graph_repr, _ = self.ept_model.encoder(
             H=h_continuous,
             Z=pos,
             block_id=block_vec,
             batch_id=batch_vec,
-            edges=dense_edge_index, 
+            edges=dense_edge_index,
             edge_attr=dummy_edge_attr,
         )
 
