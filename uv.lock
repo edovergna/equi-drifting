@@ -280,7 +280,9 @@ dependencies = [
     { name = "lightning" },
     { name = "matplotlib" },
     { name = "numpy" },
+    { name = "pillow" },
     { name = "pyg-lib" },
+    { name = "rdkit" },
     { name = "torch" },
     { name = "torch-cluster" },
     { name = "torch-geometric" },
@@ -300,7 +302,9 @@ requires-dist = [
     { name = "lightning", specifier = ">=2.6.1" },
     { name = "matplotlib", specifier = ">=3.10.9" },
     { name = "numpy", specifier = ">=2.4.4" },
+    { name = "pillow", specifier = ">=12.2.0" },
     { name = "pyg-lib" },
+    { name = "rdkit", specifier = ">=2026.3.1" },
     { name = "torch", specifier = "==2.8.0", index = "https://download.pytorch.org/whl/cu126" },
     { name = "torch-cluster" },
     { name = "torch-geometric", specifier = ">=2.7.0" },
@@ -1156,6 +1160,25 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/74/93/7baea19427dcfbe1e5a372d81473250b379f04b1bd3c4c5ff825e2327202/pyyaml-6.0.3-cp312-cp312-win32.whl", hash = "sha256:96b533f0e99f6579b3d4d4995707cf36df9100d67e0c8303a0c55b27b5f99bc5", size = 137658 },
     { url = "https://files.pythonhosted.org/packages/86/bf/899e81e4cce32febab4fb42bb97dcdf66bc135272882d1987881a4b519e9/pyyaml-6.0.3-cp312-cp312-win_amd64.whl", hash = "sha256:5fcd34e47f6e0b794d17de1b4ff496c00986e1c83f7ab2fb8fcfe9616ff7477b", size = 154003 },
     { url = "https://files.pythonhosted.org/packages/1a/08/67bd04656199bbb51dbed1439b7f27601dfb576fb864099c7ef0c3e55531/pyyaml-6.0.3-cp312-cp312-win_arm64.whl", hash = "sha256:64386e5e707d03a7e172c0701abfb7e10f0fb753ee1d773128192742712a98fd", size = 140344 },
+]
+
+[[package]]
+name = "rdkit"
+version = "2026.3.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pillow" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/87/54/e4fb88a6bce76424ba76b2aee3941115fc58ff19c9bed0d3a39743171a5a/rdkit-2026.3.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:41edffacdf49ddb502688e00a7e349cdfe895bfeefc59a4859b9387f7839985a", size = 29858944 },
+    { url = "https://files.pythonhosted.org/packages/08/5c/b999261bf7419398133abf3f9ba58776d1f0e584f36cc66aed1860bd8835/rdkit-2026.3.1-cp311-cp311-manylinux_2_28_aarch64.whl", hash = "sha256:092cc114ba3fd76c85da0c9a1e8831be53dc70236448b671d70919c2e8c52384", size = 35613411 },
+    { url = "https://files.pythonhosted.org/packages/4d/a3/890e65ede0231b39aa0f93d03b109977ee0307eb8b5363b306e82c736bc5/rdkit-2026.3.1-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:97cd3081224629caf169a531d6350c8f5b3fcc16dc85e6dad0209a7a15a909f4", size = 37061286 },
+    { url = "https://files.pythonhosted.org/packages/86/c3/cdf07922c6f7db0026fb08d8e107530b8d4465a4b03ce0e9b3789bd87f7b/rdkit-2026.3.1-cp311-cp311-win_amd64.whl", hash = "sha256:394b15d92df6fb011744502322b3e4de94ef939f628c384fea83aabb224ea8c7", size = 24515977 },
+    { url = "https://files.pythonhosted.org/packages/49/b8/b63e73f8849e90b673965e581e53a2b2620aa3be25e8e3bfce72f5f6c10f/rdkit-2026.3.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:14e050ffa5d6c5b6b8c87435888c017dcc9fb1fde763f5a49c78bb331aac8c8b", size = 29903263 },
+    { url = "https://files.pythonhosted.org/packages/ba/b3/e6b7c7da20fa18c8924fc19c86300431ae5b57892b752aad7289c47f883f/rdkit-2026.3.1-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:7b2480bdbbf8d20cf857a635a40de249a97d619a5ae270d840771cc6bdb4979c", size = 35499474 },
+    { url = "https://files.pythonhosted.org/packages/ef/db/5b1cddbcf0f44e74d1a7756d0c3551c7507d05656a2ac55e6d0d17f69f04/rdkit-2026.3.1-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:a84112a2f33256789319e1142f005f19333161549b1b3e86a0945d6545ace851", size = 36996740 },
+    { url = "https://files.pythonhosted.org/packages/e2/bf/6441076139ce0dbcb063f2fe1d89a5a3a2179215c459932865c088bb4668/rdkit-2026.3.1-cp312-cp312-win_amd64.whl", hash = "sha256:8be158d43c7f5a31822a8195e6f036e4227a085d3029636a815a00f6ec3dfa5e", size = 24536311 },
 ]
 
 [[package]]

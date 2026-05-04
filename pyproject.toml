@@ -20,6 +20,8 @@ dependencies = [
     "einops>=0.8.2",
     "gdown>=6.0.0",
     "matplotlib>=3.10.9",
+    "rdkit>=2026.3.1",
+    "pillow>=12.2.0",
 ]
 
 [tool.uv]
