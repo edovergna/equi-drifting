@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from torch_geometric.nn import global_mean_pool
 
 class EPTFeatureExtractor(nn.Module):
     def __init__(self, ckpt_path, device):
@@ -51,23 +50,20 @@ class EPTFeatureExtractor(nn.Module):
         dense_edge_index: [2, E] Fully connected edges
         """
         N_total = pos.shape[0]
-        current_device = pos.device # fix errors for init
-        com = global_mean_pool(pos, batch_vec) # this is redundant with the Center() but EGNN output does not have that
-        pos_centered = pos - com[batch_vec]
+        current_device = pos.device
 
         # This is to bypass the non-differentiable nn.Embedding layer (need for self.embed_weigths)
-        h_continuous = a_soft @ self.embed_weights[:5, :] 
+        h_continuous = a_soft @ self.embed_weights[:5, :]
 
-       
-        # block_vec needed to split 
-        block_vec = torch.arange(N_total, device=current_device) 
-        
+        # block_vec needed to split
+        block_vec = torch.arange(N_total, device=current_device)
+
         # dummy_edge_attr fills the 64-dim requirement the EPT expects for bonds
-        dummy_edge_attr = torch.zeros((dense_edge_index.shape[1], 64), device=current_device) 
+        dummy_edge_attr = torch.zeros((dense_edge_index.shape[1], 64), device=current_device)
 
         _, _, graph_repr, _ = self.ept_model.encoder(
             H=h_continuous,
-            Z=pos_centered,       
+            Z=pos,
             block_id=block_vec,
             batch_id=batch_vec,
             edges=dense_edge_index, 
