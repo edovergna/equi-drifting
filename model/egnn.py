@@ -203,12 +203,14 @@ class EGNN(nn.Module):
         self.bond_head = BondHead(hidden_nf, num_bond_types)
 
     def compute_edge_features(
-        self, pos: torch.Tensor, edge_index: torch.Tensor, eps: float = 1e-8
+        self, pos: torch.Tensor, edge_index: torch.Tensor, eps: float = 1e-5
+
     ):
         src, dst = edge_index
         coord_diff = pos[src] - pos[dst]
         radial = (coord_diff**2).sum(dim=-1, keepdim=True)
-        norm = radial.sqrt() + eps
+        # Keep gradients finite when radial == 0 by moving eps inside sqrt.
+        norm = (radial + eps).sqrt()
         return radial, coord_diff / norm
 
     def forward(self, x: torch.Tensor, pos: torch.Tensor, edge_index: torch.Tensor):
