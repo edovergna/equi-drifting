@@ -52,7 +52,6 @@ def compute_drift_loss(
     # Paper Eq. (12):
     # k(x,y) = exp(-||x-y|| / tau)
     # ------------------------------------------------------------
-    breakpoint()  # for debugging; remove later
     logits_pos = -dist_pos / tau
     logits_neg = -dist_neg / tau
 
