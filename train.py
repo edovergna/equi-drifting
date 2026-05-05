@@ -13,10 +13,16 @@ from lightning.pytorch.callbacks import EarlyStopping
 from lightning.pytorch.loggers import WandbLogger
 
 import wandb
-from model import (ChemicalValidityCallback, DriftingMoleculeGenerator,
-                   EmbeddingMonitorCallback, GeneratorCheckpointCallback,
-                   GradientMonitorCallback, MoleculeVisualizationCallback,
-                   QM9DataModule, initialize_training_config)
+from model import (
+    ChemicalValidityCallback,
+    DriftingMoleculeGenerator,
+    EmbeddingMonitorCallback,
+    GeneratorCheckpointCallback,
+    GradientMonitorCallback,
+    MoleculeVisualizationCallback,
+    QM9DataModule,
+    initialize_training_config,
+)
 from model.wandb_utils import load_pretrained_generator
 from parse_args import parse_args
 
@@ -61,7 +67,11 @@ def main(args: argparse.Namespace):
 
         if args.wandb_run_id:
             print(f"Loading pretrained generator from wandb run: {args.wandb_run_id}")
-            load_pretrained_generator(args.wandb_run_id, model, variant=args.wandb_variant)
+            load_pretrained_generator(
+                args.wandb_run_id, model, variant=args.wandb_variant
+            )
+
+        gen_ckpt = GeneratorCheckpointCallback(monitor="val_loss", mode="min")
 
         callbacks = [
             GradientMonitorCallback(),
@@ -70,7 +80,7 @@ def main(args: argparse.Namespace):
                 n_molecules=4, bond_threshold=2.0, every_n_epochs=1
             ),
             ChemicalValidityCallback(),
-            GeneratorCheckpointCallback(monitor="val_loss", mode="min"),
+            gen_ckpt,
         ]
 
         trainer = pl.Trainer(
@@ -90,14 +100,8 @@ def main(args: argparse.Namespace):
         )
 
         trainer.fit(model, datamodule=datamodule)
-
-        if checkpoint_callback.best_model_path:
-            print(f"Best checkpoint: {checkpoint_callback.best_model_path}")
-            print(f"Best val_loss: {checkpoint_callback.best_model_score}")
-        else:
-            print("No best checkpoint found; testing with current model weights.")
-
-        trainer.test(model, datamodule=datamodule, ckpt_path="best")
+        gen_ckpt.load_best_weights(model)
+        trainer.test(model, datamodule=datamodule)
 
     except KeyboardInterrupt:
         print("\nTraining interrupted.")
