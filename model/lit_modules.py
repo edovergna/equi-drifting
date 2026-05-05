@@ -126,7 +126,7 @@ class DriftingMoleculeGenerator(LightningModule):
 
         try:
             loss, stats = compute_drift_loss(
-                phi_gen, phi_real, self.temperatures
+                phi_gen, phi_real,
             )
         except TrainingDivergedException as e:
             self.print(f"\n[Step {self.global_step}] {e}\nStopping training.")
@@ -164,7 +164,7 @@ class DriftingMoleculeGenerator(LightningModule):
     def validation_step(self, batch, batch_idx):
         pos_gen, a_soft_gen, phi_gen, phi_real = self._forward(batch)
         val_loss, stats = compute_drift_loss(
-            phi_gen, phi_real, self.temperatures
+            phi_gen, phi_real
         )
 
         bs = batch_size_for_logging(batch)
