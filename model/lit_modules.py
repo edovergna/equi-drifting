@@ -134,7 +134,7 @@ class DriftingMoleculeGenerator(LightningModule):
         self.log("train_loss", loss, batch_size=bs, on_step=True, on_epoch=True)
 
         for key, val in stats.items():
-            self.log(f"drift/{key}", val, batch_size=bs, on_step=True, on_epoch=False)
+            self.log(f"drift_train/{key}", val, batch_size=bs, on_step=True, on_epoch=False)
 
         self.log(
             "train/lr",
@@ -176,7 +176,7 @@ class DriftingMoleculeGenerator(LightningModule):
 
         for key, val in stats.items():
             self.log(
-                f"val/{key}",
+                f"drift_val/{key}",
                 val,
                 batch_size=bs,
                 on_step=False,

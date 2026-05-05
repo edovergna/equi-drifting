@@ -92,9 +92,9 @@ class EmbeddingMonitorCallback(Callback):
         try:
             logger.experiment.log(
                 {
-                    "val/cosine_sim_to_nn_hist": wandb.Histogram(cos_sim),
-                    "val/phi_gen_norm_hist": wandb.Histogram(gen_norms),
-                    "val/phi_real_norm_hist": wandb.Histogram(real_norms),
+                    "embed/cosine_sim_to_nn_hist": wandb.Histogram(cos_sim),
+                    "embed/phi_gen_norm_hist": wandb.Histogram(gen_norms),
+                    "embed/phi_real_norm_hist": wandb.Histogram(real_norms),
                 },
                 step=trainer.global_step,
             )
@@ -193,28 +193,28 @@ class MoleculeVisualizationCallback(Callback):
                 ]
 
             images = {
-                "val/molecules/random_gen": render_group(
+                "mol/random_gen": render_group(
                     random_idx, ref["pos_gen"], ref["a_soft_gen"], "gen"
                 ),
-                "val/molecules/best_gen": render_group(
+                "mol/best_gen": render_group(
                     best_idx,
                     ref["pos_gen"],
                     ref["a_soft_gen"],
                     f"best d={nn_dists[best_idx[0]]:.2f}",
                 ),
-                "val/molecules/worst_gen": render_group(
+                "mol/worst_gen": render_group(
                     worst_idx,
                     ref["pos_gen"],
                     ref["a_soft_gen"],
                     f"worst d={nn_dists[worst_idx[0]]:.2f}",
                 ),
-                "val/molecules/real_ref": render_group(
+                "mol/real_ref": render_group(
                     random_idx, ref["pos_real"], ref["a_soft_real"], "real"
                 ),
             }
 
             if gen_types is not None and real_types is not None:
-                images["val/atom_type_dist"] = self._atom_dist_chart(
+                images["mol/atom_type_dist"] = self._atom_dist_chart(
                     gen_types, real_types
                 )
 
