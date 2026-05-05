@@ -15,6 +15,9 @@ from .geometry import (batch_size_for_logging, center_positions_per_graph,
 
 
 class DriftingMoleculeGenerator(LightningModule):
+    _SAVE_COMPONENTS = ["generator", "feature_extractor"]
+    _LOAD_COMPONENTS = ["generator", "feature_extractor"]
+
     def __init__(self, generator_cfg=None, drift_cfg=None):
         super().__init__()
 
@@ -228,6 +231,29 @@ class DriftingMoleculeGenerator(LightningModule):
             sync_dist=True,
         )
         return test_loss
+
+    def _is_feature_extractor_trainable(self) -> bool:
+        return any(p.requires_grad for p in self.feature_extractor.parameters())
+
+    def save_individual_components(self, save_path: str) -> None:
+        torch.save(self.generator.state_dict(), f"{save_path}/generator.pth")
+        if self._is_feature_extractor_trainable():
+            torch.save(
+                self.feature_extractor.ept_model.state_dict(),
+                f"{save_path}/feature_extractor.pth",
+            )
+
+    def load_individual_components(self, folder_path) -> None:
+        folder_path = Path(folder_path)
+        self.generator.load_state_dict(
+            torch.load(folder_path / "generator.pth", map_location=self.device)
+        )
+        fe_path = folder_path / "feature_extractor.pth"
+        if fe_path.exists():
+            self.feature_extractor.ept_model.load_state_dict(
+                torch.load(fe_path, map_location=self.device)
+            )
+            print("Loaded fine-tuned feature extractor weights.")
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(

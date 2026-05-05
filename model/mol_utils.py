@@ -18,6 +18,9 @@ _BOND_FACTOR = 1.3  # bond exists when dist < factor * (r_i + r_j)
 # Maximum valence per element (conservative: allows for ionic/charged forms)
 _MAX_VALENCE = {1: 1, 6: 4, 7: 4, 8: 3, 9: 1}
 
+# Typical (target) valence used for stability: atom is stable iff bond_count == this
+_STABLE_VALENCE = {1: 1, 6: 4, 7: 3, 8: 2, 9: 1}
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -54,6 +57,41 @@ def heavy_atom_counts(a_soft: torch.Tensor, batch_vec: torch.Tensor) -> list[int
         types = a_soft[mask].argmax(dim=-1)
         counts.append(int((types != 0).sum().item()))  # 0 == H in our encoding
     return counts
+
+
+def batch_to_stability(
+    pos: torch.Tensor,
+    a_soft: torch.Tensor,
+    batch_vec: torch.Tensor,
+) -> tuple[float, float]:
+    """
+    Compute atom-level and molecule-level stability.
+
+    An atom is stable iff its bond count equals _STABLE_VALENCE for its element.
+    A molecule is stable iff every atom in it is stable.
+
+    Returns:
+        atom_stable_frac  — fraction of all atoms that are stable
+        mol_stable_frac   — fraction of molecules where all atoms are stable
+    """
+    n_graphs = int(batch_vec.max().item()) + 1
+    total_atoms = 0
+    n_stable_atoms = 0
+    n_stable_mols = 0
+
+    for g in range(n_graphs):
+        mask = batch_vec == g
+        p = pos[mask].numpy().astype(np.float64)
+        types = a_soft[mask].argmax(dim=-1).numpy()
+        stable = _per_atom_stability(p, types)
+        n_stable_atoms += int(stable.sum())
+        total_atoms += len(stable)
+        if stable.all():
+            n_stable_mols += 1
+
+    atom_stable_frac = n_stable_atoms / total_atoms if total_atoms > 0 else 0.0
+    mol_stable_frac = n_stable_mols / n_graphs if n_graphs > 0 else 0.0
+    return atom_stable_frac, mol_stable_frac
 
 
 # ---------------------------------------------------------------------------
@@ -143,3 +181,23 @@ def _numpy_assess(
     counts = Counter(int(t) for t in atom_type_indices)
     formula = "".join(f"{_ATOM_NAMES[k]}{v}" for k, v in sorted(counts.items()))
     return True, formula
+
+
+def _per_atom_stability(
+    positions: np.ndarray, atom_type_indices: np.ndarray
+) -> np.ndarray:
+    """Returns a boolean array: True for each atom that has its target valence."""
+    atomic_nums = [_ATOMIC_NUMS[int(i)] for i in atom_type_indices]
+    n = len(atomic_nums)
+    degrees = np.zeros(n, dtype=int)
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if np.linalg.norm(positions[i] - positions[j]) < _BOND_FACTOR * (
+                _COV_RADII[atomic_nums[i]] + _COV_RADII[atomic_nums[j]]
+            ):
+                degrees[i] += 1
+                degrees[j] += 1
+
+    target = np.array([_STABLE_VALENCE[a] for a in atomic_nums], dtype=int)
+    return degrees == target

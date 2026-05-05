@@ -1,11 +1,17 @@
+import numpy as np
 import lightning.pytorch as pl
 import torch
 import torch.nn.functional as F
-from torch.utils.data import random_split
+from torch.utils.data import Subset
 from torch_geometric.data import Data
 from torch_geometric.datasets import QM9
 from torch_geometric.loader import DataLoader
 from torch_geometric.transforms import Center, Compose
+
+# Standard QM9 split sizes (after excluding 3,054 uncharacterized molecules).
+# Matches gen_splits_gdb9 in the EPT preprocessing script: seed=0, 110k/10k/rest.
+_N_TRAIN = 110_000
+_N_VAL = 10_000
 
 
 class EncodeAtomTypesTransform:
@@ -58,18 +64,17 @@ class QM9DataModule(pl.LightningDataModule):
         batch_size: int = 128,
         num_workers: int = 4,
         force_reload: bool = False,
+        sample_frac: float = 1.0,
     ):
         super().__init__()
         self.root = root
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.force_reload = force_reload
+        self.sample_frac = sample_frac
         self.pin_memory = torch.cuda.is_available()
 
     def setup(self, stage=None):
-        # Note that the pre_transform is applied once when loading the dataset.
-        # We are centering the molecules and adding a fully connected dense_edge_index
-        # to each graph.
         dataset = QM9(
             self.root,
             pre_transform=Compose(
@@ -79,25 +84,27 @@ class QM9DataModule(pl.LightningDataModule):
         )
 
         n = len(dataset)
-        # n_train = int(0.8 * n)
-        # n_val = int(0.10 * n)
-        # n_test = n - n_train - n_val
+        n_train = min(_N_TRAIN, n)
+        n_val   = min(_N_VAL,   n - n_train)
+        n_test  = n - n_train - n_val
 
-        # self.train_set, self.val_set, self.test_set = random_split(
-        #     dataset,
-        #     [n_train, n_val, n_test],
-        #     generator=torch.Generator().manual_seed(42),
-        # )
-        #### to see if overfits on train, skipping val and straight to test
-        n_train = int(0.025 * n)
-        n_val = int(0.05 * n)
-        n_test = n - n_train - n_val
+        # Reproducible permutation matching the EPT standard split (seed=0)
+        rng  = np.random.default_rng(0)
+        perm = rng.permutation(n)
+        train_idx = perm[:n_train]
+        val_idx   = perm[n_train : n_train + n_val]
+        test_idx  = perm[n_train + n_val :]
 
-        self.train_set, self.val_set, self.test_set = random_split(
-            dataset,
-            [n_train, n_val, n_test],
-            generator=torch.Generator().manual_seed(42),
-        )
+        if self.sample_frac < 1.0:
+            # Subsample each split proportionally, with a fixed secondary seed
+            srng = np.random.default_rng(42)
+            train_idx = srng.choice(train_idx, size=max(1, int(self.sample_frac * n_train)),  replace=False)
+            val_idx   = srng.choice(val_idx,   size=max(1, int(self.sample_frac * n_val)),    replace=False)
+            test_idx  = srng.choice(test_idx,  size=max(1, int(self.sample_frac * n_test)),   replace=False)
+
+        self.train_set = Subset(dataset, train_idx)
+        self.val_set   = Subset(dataset, val_idx)
+        self.test_set  = Subset(dataset, test_idx)
 
     def train_dataloader(self) -> DataLoader:
         return DataLoader(

@@ -16,6 +16,12 @@ def parse_args():
         help="Whether to force reload the QM9 dataset (required after modifying pre_transform).",
     )
     parser.add_argument(
+        "--sample_frac",
+        type=float,
+        default=1.0,
+        help="Fraction of each split to use (0 < sample_frac <= 1.0). Useful for quick iteration runs.",
+    )
+    parser.add_argument(
         "--seed", type=int, default=42, help="Random seed for reproducibility."
     )
     parser.add_argument(
@@ -53,16 +59,29 @@ def parse_args():
     parser.add_argument(
         "--hidden_dim",
         type=int,
-        default=192,
+        default=64,
         help="Hidden dimension for the EGNN model.",
     )
     parser.add_argument(
         "--num_layers",
         type=int,
-        default=3,
+        default=6,
         help="Number of layers for the EGNN model.",
     )
     # Wandb args
+    parser.add_argument(
+        "--wandb_run_id",
+        type=str,
+        default=None,
+        help="Wandb run ID to load pretrained generator weights from before training.",
+    )
+    parser.add_argument(
+        "--wandb_variant",
+        type=str,
+        default="best",
+        choices=["best", "final"],
+        help="Which saved checkpoint to load from the given wandb run (best or final).",
+    )
     parser.add_argument(
         "--offline",
         action="store_true",
