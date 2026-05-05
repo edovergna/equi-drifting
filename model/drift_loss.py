@@ -3,119 +3,98 @@ import torch.nn.functional as F
 
 
 class TrainingDivergedException(Exception):
-    pass
+    """Raised when the drift loss becomes non-finite."""
 
 
-def compute_normalized_drift_loss(
+def compute_drift_loss(
     phi_gen: torch.Tensor,
     phi_real: torch.Tensor,
-    temperatures: list[float],
-):
-    phi_gen = torch.nan_to_num(
-        phi_gen.float(), nan=0.0, posinf=1e4, neginf=-1e4
-    )
-    phi_real = torch.nan_to_num(
-        phi_real.float(), nan=0.0, posinf=1e4, neginf=-1e4
-    )
+    tau: float = 0.05,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """
+    Faithful implementation of Algorithm 2 from:
+    'Generative Modeling via Drifting'
 
-    D = phi_gen.shape[-1]
+    Computes:
+        loss = ||V||^2
+
+    where:
+        target = stopgrad(phi_gen + V)
+
+    Args:
+        phi_gen: [N_gen, D]
+        phi_real: [N_real, D]
+        tau: kernel temperature
+
+    Returns:
+        loss, stats
+    """
+
+    phi_gen = phi_gen.float()
+    phi_real = phi_real.float()
+
+    N_gen, D = phi_gen.shape
+    N_real = phi_real.shape[0]
 
     # ------------------------------------------------------------
-    # distance normalization (your stabilization)
+    # Pairwise distances
     # ------------------------------------------------------------
 
-    dist_pos = torch.cdist(phi_gen, phi_real)
-    dist_neg = torch.cdist(phi_gen, phi_gen)
+    dist_pos = torch.cdist(phi_gen, phi_real)   # [N_gen, N_real]
+    dist_neg = torch.cdist(phi_gen, phi_gen)    # [N_gen, N_gen]
 
+    # ignore self-matches among negatives
     dist_neg.fill_diagonal_(1e6)
 
-    valid = torch.cat([dist_pos.flatten(), dist_neg.flatten()])
-    valid = valid[torch.isfinite(valid) & (valid < 1e5)]
+    # ------------------------------------------------------------
+    # Kernel logits
+    #
+    # Paper Eq. (12):
+    # k(x,y) = exp(-||x-y|| / tau)
+    # ------------------------------------------------------------
 
-    if valid.numel() == 0:
-        S = torch.tensor(1.0, device=phi_gen.device)
-    else:
-        S = (valid.mean() / (D**0.5)).detach()
+    logits_pos = -dist_pos / tau
+    logits_neg = -dist_neg / tau
 
-    S = S.clamp(min=1e-5, max=1e3)
+    logits = torch.cat([logits_pos, logits_neg], dim=1)
 
-    phi_gen = phi_gen / S
-    phi_real = phi_real / S
+    # ------------------------------------------------------------
+    # Bidirectional normalization (Algorithm 2)
+    # ------------------------------------------------------------
 
-    aggregated_v = torch.zeros_like(phi_gen)
+    A_row = F.softmax(logits, dim=-1)
+    A_col = F.softmax(logits, dim=-2)
 
-    stats = {
-        "scale_S": S.item(),
-    }
+    A = torch.sqrt(A_row * A_col)
 
-    # recompute normalized distances
-    dist_pos = torch.cdist(phi_gen, phi_real)
-    dist_neg = torch.cdist(phi_gen, phi_gen)
+    # split positive / negative blocks
+    A_pos, A_neg = torch.split(
+        A,
+        [N_real, N_gen],
+        dim=1,
+    )
 
-    dist_neg.fill_diagonal_(1e6)
+    # ------------------------------------------------------------
+    # Coupled weighting (CRITICAL)
+    # ------------------------------------------------------------
 
-    for tau in temperatures:
+    W_pos = A_pos * A_neg.sum(dim=1, keepdim=True)
+    W_neg = A_neg * A_pos.sum(dim=1, keepdim=True)
 
-        tau_key = str(tau).replace(".", "_")
+    # ------------------------------------------------------------
+    # Drifting field
+    # ------------------------------------------------------------
 
-        tau_eff = tau * (D**0.5)
+    drift_pos = W_pos @ phi_real
+    drift_neg = W_neg @ phi_gen
 
-        logits_pos = -dist_pos / tau_eff
-        logits_neg = -dist_neg / tau_eff
+    V = drift_pos - drift_neg
 
-        logits = torch.cat([logits_pos, logits_neg], dim=1)
-        logits = logits.clamp(min=-100, max=50)
+    # ------------------------------------------------------------
+    # Fixed-point target (Eq. 6)
+    # ------------------------------------------------------------
 
-        # ------------------------------------------------------------
-        # exact Algorithm 2 normalization
-        # ------------------------------------------------------------
-
-        A_row = F.softmax(logits, dim=-1)
-        A_col = F.softmax(logits, dim=-2)
-
-        A = torch.sqrt(torch.clamp(A_row * A_col, min=1e-30))
-
-        N_real = phi_real.size(0)
-
-        A_pos, A_neg = torch.split(
-            A,
-            [N_real, phi_gen.size(0)],
-            dim=1,
-        )
-
-        # ------------------------------------------------------------
-        # CRITICAL: coupled normalization from paper
-        # ------------------------------------------------------------
-
-        pos_mass = A_pos.sum(dim=1, keepdim=True)
-        neg_mass = A_neg.sum(dim=1, keepdim=True)
-
-        W_pos = A_pos * neg_mass
-        W_neg = A_neg * pos_mass
-
-        drift_pos = W_pos @ phi_real
-        drift_neg = W_neg @ phi_gen
-
-        V_tau = drift_pos - drift_neg
-
-        # optional stabilization (NOT in paper)
-        # comment out for faithful implementation
-
-        lambda_tau = torch.sqrt(
-            (V_tau.pow(2).sum(dim=-1).mean() / D).clamp(min=1e-10)
-        ).detach()
-
-        V_tau = V_tau / lambda_tau.clamp(min=1e-5)
-
-        aggregated_v = aggregated_v + V_tau
-
-        with torch.no_grad():
-            stats[f"lambda_{tau_key}"] = lambda_tau.item()
-            stats[f"v_norm_{tau_key}"] = (
-                V_tau.norm(dim=-1).mean().item()
-            )
-
-    target = (phi_gen + aggregated_v).detach()
+    target = (phi_gen + V).detach()
 
     loss = F.mse_loss(phi_gen, target)
 
@@ -123,5 +102,27 @@ def compute_normalized_drift_loss(
         raise TrainingDivergedException(
             f"Non-finite drift loss: {loss.item()}"
         )
+
+    # ------------------------------------------------------------
+    # Diagnostics
+    # ------------------------------------------------------------
+
+    with torch.no_grad():
+
+        row_entropy = (
+            -(A_row * (A_row + 1e-30).log())
+            .sum(dim=-1)
+            .mean()
+        )
+
+        stats = {
+            "loss": loss.item(),
+            "v_norm": V.norm(dim=-1).mean().item(),
+            "attn_entropy": row_entropy.item(),
+            "pos_mass_frac": (
+                A_pos.sum(dim=1)
+                / (A_pos.sum(dim=1) + A_neg.sum(dim=1)).clamp_min(1e-8)
+            ).mean().item(),
+        }
 
     return loss, stats
