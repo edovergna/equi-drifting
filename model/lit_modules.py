@@ -87,16 +87,23 @@ class DriftingMoleculeGenerator(LightningModule):
         pos_gen = center_positions_per_graph(pos_gen, batch.batch)
         a_soft_gen = F.gumbel_softmax(x_gen, tau=1.0, hard=False, dim=-1)
 
+        # EPT expects block_id[i] = block index for atom i (each atom is its own block,
+        # so block index = atom index), and batch_id[j] = graph index for block j.
+        block_id = torch.arange(batch.num_nodes, device=batch.batch.device)
+        batch_id = batch.batch
+
         phi_gen = self.feature_extractor(
             pos=pos_gen,
             a_soft=a_soft_gen,
-            batch_vec=batch.batch,
+            block_id=block_id,
+            batch_id=batch_id,
             dense_edge_index=batch.dense_edge_index,
         )
         phi_real = self.feature_extractor(
             pos=batch.pos,
             a_soft=batch.a_soft_real,
-            batch_vec=batch.batch,
+            block_id=block_id,
+            batch_id=batch_id,
             dense_edge_index=batch.dense_edge_index,
         )
         return pos_gen, a_soft_gen, phi_gen, phi_real
