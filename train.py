@@ -7,15 +7,22 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import argparse
-from parse_args import parse_args
 
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers import WandbLogger
 
 import wandb
-
-from model import initialize_training_config, QM9DataModule, DriftingMoleculeGenerator
+from model import (
+    ChemicalValidityCallback,
+    DriftingMoleculeGenerator,
+    EmbeddingMonitorCallback,
+    GradientMonitorCallback,
+    MoleculeVisualizationCallback,
+    QM9DataModule,
+    initialize_training_config,
+)
+from parse_args import parse_args
 
 
 def main(args: argparse.Namespace):
@@ -43,12 +50,13 @@ def main(args: argparse.Namespace):
         "n_layers": args.num_layers,
         "num_atom_types": 5,
         "num_bond_types": 5,
+        "predict_bond_types": args.predict_bond_types,
     }
 
     drift_cfg = {
         "lr": args.lr,
         "weight_decay": args.weight_decay,
-        "temperatures": [0.02, 0.05, 0.2],
+        "temperatures": args.temperatures,
     }
 
     model = DriftingMoleculeGenerator(generator_cfg, drift_cfg)
@@ -56,20 +64,21 @@ def main(args: argparse.Namespace):
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.checkpoint_dir,
         filename="best-{epoch:02d}-{val_loss:.4f}",
-        monitor="val_loss",
+        monitor="train_loss",
         mode="min",
         save_top_k=1,
         save_last=True,
     )
 
-    early_stopping_callback = EarlyStopping(
-        monitor="val_loss",
-        mode="min",
-        patience=args.early_stopping_patience,
-        min_delta=args.early_stopping_min_delta,
-    )
-
-    callbacks = [checkpoint_callback, early_stopping_callback]
+    callbacks = [
+        checkpoint_callback,
+        GradientMonitorCallback(),
+        EmbeddingMonitorCallback(),
+        MoleculeVisualizationCallback(
+            n_molecules=4, bond_threshold=2.0, every_n_epochs=1
+        ),
+        ChemicalValidityCallback(),
+    ]
 
     trainer = pl.Trainer(
         accelerator="auto",

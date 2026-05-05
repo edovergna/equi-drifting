@@ -3,6 +3,7 @@ import argparse
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train a flow matching model on QM9.")
+    # Data
     parser.add_argument(
         "--root",
         type=str,
@@ -18,13 +19,36 @@ def parse_args():
         "--seed", type=int, default=42, help="Random seed for reproducibility."
     )
     parser.add_argument(
-        "--max_epochs", type=int, default=120, help="Maximum number of training epochs."
-    )
-    parser.add_argument(
         "--batch_size", type=int, default=128, help="Batch size for training."
     )
     parser.add_argument(
         "--num_workers", type=int, default=2, help="Number of workers for data loading."
+    )
+    # Optimization
+    parser.add_argument(
+        "--max_epochs", type=int, default=120, help="Maximum number of training epochs."
+    )
+    parser.add_argument(
+        "--lr", type=float, default=2e-4, help="Learning rate for the optimizer."
+    )
+    parser.add_argument(
+        "--weight_decay",
+        type=float,
+        default=5e-5,
+        help="Weight decay for the optimizer.",
+    )
+    # Model Args
+    parser.add_argument(
+        "--predict_bond_types",
+        action="store_true",
+        help="Whether to predict bond types.",
+    )
+    parser.add_argument(
+        "--temperatures",
+        type=float,
+        nargs="+",
+        default=[0.02, 0.05, 0.2],
+        help="Temperature values for the drifting field (space-separated, e.g. --temperatures 0.02 0.05 0.2).",
     )
     parser.add_argument(
         "--hidden_dim",
@@ -38,18 +62,7 @@ def parse_args():
         default=3,
         help="Number of layers for the EGNN model.",
     )
-    parser.add_argument(
-        "--lr", type=float, default=2e-4, help="Learning rate for the optimizer."
-    )
-    parser.add_argument(
-        "--weight_decay",
-        type=float,
-        default=5e-5,
-        help="Weight decay for the optimizer.",
-    )
-    parser.add_argument(
-        "--type_loss_weight", type=float, default=0.1, help="Weight for the type loss."
-    )
+    # Wandb args
     parser.add_argument(
         "--offline",
         action="store_true",
@@ -61,6 +74,7 @@ def parse_args():
         default="default_group",
         help="Group tag for Weights & Biases logging.",
     )
+    # Lightning args
     parser.add_argument(
         "--log_every_n_steps", type=int, default=10, help="Log every n steps."
     )

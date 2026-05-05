@@ -1,10 +1,10 @@
-import numpy as np
 import random
 
-import torch 
+import lightning.pytorch as pl
+import numpy as np
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import lightning.pytorch as pl
 
 
 def initialize_training_config(args):
@@ -17,6 +17,7 @@ def initialize_training_config(args):
     benchmark = torch.cuda.is_available() and not deterministic
     print(f"Deterministic: {deterministic}\nBenchmark: {benchmark}")
     return device, precision, deterministic, benchmark
+
 
 def set_seed(seed: int):
     random.seed(seed)
@@ -41,6 +42,7 @@ def get_device() -> torch.device:
         device = torch.device("cpu")
 
     return device
+
 
 def set_precision(precision: str) -> str:
     """Determine the appropriate precision setting based on user input and hardware capabilities."""
