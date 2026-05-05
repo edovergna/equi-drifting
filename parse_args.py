@@ -70,6 +70,19 @@ def parse_args():
     )
     # Wandb args
     parser.add_argument(
+        "--wandb_run_id",
+        type=str,
+        default=None,
+        help="Wandb run ID to load pretrained generator weights from before training.",
+    )
+    parser.add_argument(
+        "--wandb_variant",
+        type=str,
+        default="best",
+        choices=["best", "final"],
+        help="Which saved checkpoint to load from the given wandb run (best or final).",
+    )
+    parser.add_argument(
         "--offline",
         action="store_true",
         help="Whether to log to Weights & Biases in offline mode.",
