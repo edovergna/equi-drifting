@@ -122,7 +122,6 @@ def compute_drift_loss(
             stats[f"attn_entropy_{tau_key}"] = row_entropy.item()
             stats[f"attn_entropy_rel_{tau_key}"] = (row_entropy / row_entropy_uniform).item()
             stats[f"force_scale_{tau_key}"] = force_scale.item()
-            stats[f"f_norm_val_{tau_key}"] = f_norm_val.item()
             stats[f"v_norm_{tau_key}"] = (total_force_R / force_scale).norm(dim=-1).mean().item()
             stats[f"frac_zero_dists_{tau_key}"] = (A_row == 0).float().mean().item()
 
