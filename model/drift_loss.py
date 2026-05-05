@@ -9,7 +9,7 @@ class TrainingDivergedException(Exception):
 def compute_drift_loss(
     phi_gen: torch.Tensor,
     phi_real: torch.Tensor,
-    tau: float = 0.05,
+    tau: float = 0.5,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """
     Faithful implementation of Algorithm 2 from:
@@ -52,7 +52,7 @@ def compute_drift_loss(
     # Paper Eq. (12):
     # k(x,y) = exp(-||x-y|| / tau)
     # ------------------------------------------------------------
-
+    breakpoint()  # for debugging; remove later
     logits_pos = -dist_pos / tau
     logits_neg = -dist_neg / tau
 
