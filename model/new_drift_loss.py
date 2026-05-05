@@ -83,27 +83,27 @@ def compute_drift_loss(
 
     force_across_R = torch.zeros_like(old_gen_scaled)
 
-    for R in temperatures:
-        R_key = str(R).replace(".", "_")
-        logits = -dist_normed / R  # [N_gen, N_targets]
+    for tau in temperatures:
+        tau_key = str(tau).replace(".", "_")
+        logits = -dist_normed / tau
 
-        A_row = F.softmax(logits, dim=-1)   # [N_gen, N_targets]
-        A_col = F.softmax(logits, dim=-2)   # [N_gen, N_targets]
+        A_row = F.softmax(logits, dim=-1)
+        A_col = F.softmax(logits, dim=-2)
         A = torch.sqrt(torch.clamp(A_row * A_col, min=1e-6))
 
-        # neg block = gen columns, pos block = real columns
-        aff_neg = A[:, :N_gen]   # [N_gen, N_gen]
-        aff_pos = A[:, N_gen:]   # [N_gen, N_real]
+        # Split affinities into gen-gen and gen-real blocks
+        aff_neg = A[:, :N_gen]
+        aff_pos = A[:, N_gen:]
 
-        sum_pos = aff_pos.sum(dim=-1, keepdim=True)  # [N_gen, 1]
-        sum_neg = aff_neg.sum(dim=-1, keepdim=True)  # [N_gen, 1]
+        sum_pos = aff_pos.sum(dim=-1, keepdim=True)
+        sum_neg = aff_neg.sum(dim=-1, keepdim=True)
 
-        r_coeff_neg = -aff_neg * sum_pos  # [N_gen, N_gen]  repulsion
-        r_coeff_pos = aff_pos * sum_neg   # [N_gen, N_real] attraction
+        r_coeff_neg = -aff_neg * sum_pos
+        r_coeff_pos = aff_pos * sum_neg
 
-        R_coeff = torch.cat([r_coeff_neg, r_coeff_pos], dim=1)  # [N_gen, N_targets]
+        R_coeff = torch.cat([r_coeff_neg, r_coeff_pos], dim=1)
 
-        total_force_R = R_coeff @ targets_scaled  # [N_gen, D]
+        total_force_R = R_coeff @ targets_scaled
 
         # Centering correction (always ~0 with uniform weights, kept for faithfulness)
         total_coeffs = R_coeff.sum(dim=-1)  # [N_gen]
@@ -119,19 +119,19 @@ def compute_drift_loss(
             row_entropy_uniform = torch.log(
                 torch.tensor(N_targets, device=A_row.device, dtype=torch.float)
             )
-            stats[f"attn_entropy_{R_key}"] = row_entropy.item()
-            stats[f"attn_entropy_rel_{R_key}"] = (row_entropy / row_entropy_uniform).item()
-            stats[f"lambda_{R_key}"] = force_scale.item()
-            stats[f"loss_{R_key}"] = f_norm_val.item()
-            stats[f"v_norm_{R_key}"] = (total_force_R / force_scale).norm(dim=-1).mean().item()
-            stats[f"frac_zero_dists_{R_key}"] = (A_row == 0).float().mean().item()
+            stats[f"attn_entropy_{tau_key}"] = row_entropy.item()
+            stats[f"attn_entropy_rel_{tau_key}"] = (row_entropy / row_entropy_uniform).item()
+            stats[f"lambda_{tau_key}"] = force_scale.item()
+            stats[f"loss_{tau_key}"] = f_norm_val.item()
+            stats[f"v_norm_{tau_key}"] = (total_force_R / force_scale).norm(dim=-1).mean().item()
+            stats[f"frac_zero_dists_{tau_key}"] = (A_row == 0).float().mean().item()
 
             pos_mass = aff_pos.sum(dim=-1)
             neg_mass = aff_neg.sum(dim=-1)
-            stats[f"attn_pos_mass_frac_{R_key}"] = (
+            stats[f"attn_pos_mass_frac_{tau_key}"] = (
                 (pos_mass / (pos_mass + neg_mass).clamp_min(1e-8)).mean().item()
             )
-            stats[f"total_coeffs_abs_mean_{R_key}"] = total_coeffs.abs().mean().item()
+            stats[f"total_coeffs_abs_mean_{tau_key}"] = total_coeffs.abs().mean().item()
 
     goal_scaled = (old_gen_scaled + force_across_R).detach()
     gen_scaled = phi_gen / scale_inputs
