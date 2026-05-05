@@ -16,6 +16,12 @@ def parse_args():
         help="Whether to force reload the QM9 dataset (required after modifying pre_transform).",
     )
     parser.add_argument(
+        "--sample_frac",
+        type=float,
+        default=1.0,
+        help="Fraction of each split to use (0 < sample_frac <= 1.0). Useful for quick iteration runs.",
+    )
+    parser.add_argument(
         "--seed", type=int, default=42, help="Random seed for reproducibility."
     )
     parser.add_argument(

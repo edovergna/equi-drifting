@@ -37,6 +37,7 @@ def main(args: argparse.Namespace):
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         force_reload=args.force_reload,
+        sample_frac=args.sample_frac,
     )
 
     generator_cfg = {
