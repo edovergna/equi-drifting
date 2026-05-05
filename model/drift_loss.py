@@ -119,7 +119,8 @@ def compute_molecule_based_drift_loss(
         pos_gen: torch.Tensor,
         x_gen: torch.Tensor,
         pos_real: torch.Tensor,
-        x_real: torch.Tensor
+        x_real: torch.Tensor,
+        index: torch.Tensor,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """
     Drifting field loss directly on 3D molecules.
@@ -128,4 +129,77 @@ def compute_molecule_based_drift_loss(
     pass directly to self.log(). Raises TrainingDivergedException on non-finite loss.
     """
     # TODO
+
+    gen_distances, gen_angles = prep_batch_for_kernel(pos_gen, index)
+    real_distances, real_angles = prep_batch_for_kernel(pos_real, index)
+
+    kernel_pos = molecule_kernel(gen_distances, gen_angles, x_gen, 
+                                 real_distances, real_angles, 
+                                 x_real, index)                                 # shape: [Num_Gen_Mol, Num_Real_Mol]
+    kernel_neg = molecule_kernel(gen_distances, gen_angles, x_gen, 
+                                 real_distances=gen_distances, real_angles=gen_angles,
+                                 x_real=x_gen, index=index)                     # shape: [Num_Gen_Mol, Num_Gen_Mol]
     
+    N_pos, N_neg = kernel_pos.shape[1], kernel_neg.shape[1]
+    exp_pos = torch.clamp(kernel_pos.sum(dim=1) / N_pos, min=1e-8)
+    exp_neg = torch.clamp(kernel_neg.sum(dim=1) / N_neg, min=1e-8)
+
+    # Have to check if this is allowed but we can just compare the gradients of the log 
+    log_exp_pos = torch.log(exp_pos)
+    log_exp_neg = torch.log(exp_neg)
+    
+    # Automatically obtain relevant gradients with regards to the inputs separately
+    grad_pos_pos = torch.autograd.grad(
+                        outputs=log_exp_pos.sum(),
+                        inputs=gen_distances)[0]
+    grad_pos_neg = torch.autograd.grad(
+                        outputs=log_exp_neg.sum(),
+                        inputs=gen_distances)[0]
+    
+    grad_types_pos = torch.autograd.grad(
+                        outputs=log_exp_pos.sum(),
+                        inputs=x_gen)[0]
+    grad_types_neg = torch.autograd.grad(
+                        outputs=log_exp_neg.sum(),
+                        inputs=x_gen)[0]
+    
+    # Obtain drift field by subtracting
+    v_positions = grad_pos_pos - grad_pos_neg
+    v_types = grad_types_pos - grad_types_neg
+
+    # Can now obtain the targets
+    target_positions = (gen_distances + v_positions).detach()
+    target_types = (x_gen + v_types).detach()
+
+    # TODO: define the distance based loss for the types and positions, and aggregate
+
+# TODO
+def prep_batch_for_kernel(
+        positions: torch.Tensor,
+        index: torch.Tensor
+):
+    """
+    Returns for a batch of molecules (per molecule); the pairwise distances between atoms, 
+    the angles between the connections of atoms.
+    """
+    # For a batch [Total_Atoms, 3], it should return a tensor that stores the distances between atoms 
+    # within molecules, and a tensor that stores the angles between connections of atoms within molcules. 
+    # Shape for distance tensor should be ig [Total_Atoms, Total_Atoms], where we skip the calculation based
+    # on the indexing for which atoms belong to which molecule. 
+    # Shape for angle tensor should be ig . Again skip based on molecules,
+    # and the angle stored is for the first index of the tensor as "the middle atom", so that the angle between the 
+    # connections of this atom with the other atoms are checked. It stores cosine angles.
+
+# TODO
+def molecule_kernel(
+        gen_distances: torch.Tensor,
+        gen_angles: torch.Tensor,
+        x_gen: torch.Tensor,
+        real_distances: torch.Tensor,
+        real_angles: torch.Tensor,
+        x_real: torch.Tensor,
+        index: torch.Tensor    
+):
+    """
+    Calculates the molecule kernel between each combination of real versus generated molecules
+    """

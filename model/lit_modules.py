@@ -333,6 +333,9 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
         # Sample node features; in Riemannian space, this is just the 5 possible bond types for QM9
         x = torch.randn(num_nodes, in_dim, device=self.device)
 
+        # TODO: we need to add smtg that divides these samples into molecules, currently in the forward
+        # we just use the actual indexes. We should generate these probably instead as well
+
         return x, pos
 
     def _forward(self, batch):
