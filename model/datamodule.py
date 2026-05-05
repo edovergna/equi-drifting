@@ -1,3 +1,4 @@
+import sys
 import numpy as np
 import lightning.pytorch as pl
 import torch
@@ -75,13 +76,28 @@ class QM9DataModule(pl.LightningDataModule):
         self.pin_memory = torch.cuda.is_available()
 
     def setup(self, stage=None):
-        dataset = QM9(
-            self.root,
-            pre_transform=Compose(
-                [Center(), FullyConnectedTransform(), EncodeAtomTypesTransform()]
-            ),
-            force_reload=self.force_reload,
-        )
+        # rdkit ≥2026 returns None for ~41 malformed molecules in gdb9.sdf, but
+        # torch_geometric's QM9.process() has no None guard. Setting rdkit entries
+        # to None in sys.modules makes `import rdkit` raise ImportError inside QM9,
+        # forcing it to download and use the pre-processed qm9_v3.pt instead.
+        _rdkit_saved = {k: v for k, v in sys.modules.items()
+                        if k == 'rdkit' or k.startswith('rdkit.')}
+        for k in list(_rdkit_saved):
+            sys.modules[k] = None  # type: ignore[assignment]
+        sys.modules.setdefault('rdkit', None)  # type: ignore[assignment]
+        try:
+            dataset = QM9(
+                self.root,
+                pre_transform=Compose(
+                    [Center(), FullyConnectedTransform(), EncodeAtomTypesTransform()]
+                ),
+                force_reload=self.force_reload,
+            )
+        finally:
+            for k in list(sys.modules):
+                if sys.modules[k] is None and (k == 'rdkit' or k.startswith('rdkit.')):
+                    del sys.modules[k]
+            sys.modules.update(_rdkit_saved)
 
         n = len(dataset)
         n_train = min(_N_TRAIN, n)
