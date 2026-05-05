@@ -59,13 +59,13 @@ def parse_args():
     parser.add_argument(
         "--hidden_dim",
         type=int,
-        default=192,
+        default=64,
         help="Hidden dimension for the EGNN model.",
     )
     parser.add_argument(
         "--num_layers",
         type=int,
-        default=3,
+        default=6,
         help="Number of layers for the EGNN model.",
     )
     # Wandb args
