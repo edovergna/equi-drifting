@@ -7,11 +7,14 @@ from torch.optim.lr_scheduler import OneCycleLR
 
 from ept.ept_loader import load_ept_feature_extractor
 
-from .drift_loss import (TrainingDivergedException,
-                         compute_normalized_drift_loss)
+from .drift_loss import TrainingDivergedException, compute_normalized_drift_loss
 from .egnn import EGNN
-from .geometry import (batch_size_for_logging, center_positions_per_graph,
-                       per_graph_center_norms)
+from .geometry import (
+    batch_size_for_logging,
+    center_positions_per_graph,
+    per_graph_center_norms,
+)
+from .priors import sample_molecular_prior
 
 
 class DriftingMoleculeGenerator(LightningModule):
@@ -68,7 +71,7 @@ class DriftingMoleculeGenerator(LightningModule):
         for p in self.feature_extractor.parameters():
             p.requires_grad = False
 
-    def sample_prior(self, num_nodes: int) -> tuple[torch.Tensor, torch.Tensor]:
+    def _sample_prior(self, num_nodes: int) -> tuple[torch.Tensor, torch.Tensor]:
 
         # Sample positions
         pos = torch.randn(num_nodes, 3, device=self.device)
@@ -81,11 +84,21 @@ class DriftingMoleculeGenerator(LightningModule):
         # hence, we sample 7 dimensions to cover all the node features
         x = torch.randn(num_nodes, 7, device=self.device)
 
-        return x, pos
+    def sample_prior(self, batch) -> tuple[torch.Tensor, torch.Tensor]:
+        atom_type_probs = batch.a_soft_real.mean(dim=0)
+        prior = sample_molecular_prior(
+            batch_vec=batch.batch,
+            num_atom_types=self.generator_cfg["num_atom_types"],
+            in_node_nf=self.generator_cfg["in_node_nf"],
+            atom_type_probs=atom_type_probs,
+            reference_pos=batch.pos,
+            dtype=batch.pos.dtype,
+        )
+        return prior["x"], prior["pos"]
 
     def _forward(self, batch):
         """Shared forward pass: prior → EGNN → center → soft atoms → EPT embeddings."""
-        x_prior, pos_prior = self.sample_prior(batch.num_nodes)
+        x_prior, pos_prior = self.sample_prior(batch)
         x_gen, _, pos_gen = self.generator(x_prior, pos_prior, batch.dense_edge_index)
         pos_gen = center_positions_per_graph(pos_gen, batch.batch)
         a_soft_gen = F.gumbel_softmax(x_gen, tau=1.0, hard=False, dim=-1)
@@ -137,7 +150,9 @@ class DriftingMoleculeGenerator(LightningModule):
         self.log("train_loss", loss, batch_size=bs, on_step=True, on_epoch=True)
 
         for key, val in stats.items():
-            self.log(f"drift_train/{key}", val, batch_size=bs, on_step=True, on_epoch=False)
+            self.log(
+                f"drift_train/{key}", val, batch_size=bs, on_step=True, on_epoch=False
+            )
 
         self.log(
             "train/lr",

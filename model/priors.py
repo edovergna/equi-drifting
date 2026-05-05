@@ -1,4 +1,5 @@
 import torch
+
 # Scipy is not currently in the reqs. We are not using this file at the
 # moment so we can leave it out for now.
 from scipy.optimize import linear_sum_assignment
@@ -187,6 +188,8 @@ def align_prior(
     """
     for _ in range(n_alignments):
         if permutation:
+            if linear_sum_assignment is None:
+                raise ImportError("scipy is required for permutation prior alignment")
             # solve assignment problem
             cost_mat = torch.cdist(dst_feat, prior_feat, p=2)
             _, prior_idx = linear_sum_assignment(cost_mat)
@@ -330,7 +333,7 @@ TRAIN_PRIOR_REGISTER = {
 }
 
 INFERENCE_PRIOR_REGISTER = {
-    "centered-normal": centered_normal_prior_batched_graph,
+    "centered-normal": centered_normal_prior,
     "uniform-simplex": uniform_simplex_prior,
     "biased-simplex": biased_simplex_prior,
     "marginal": sample_marginal,
@@ -400,3 +403,203 @@ def edge_prior(
     edge_prior[upper_edge_mask] = upper_edge_prior
     edge_prior[~upper_edge_mask] = upper_edge_prior
     return edge_prior
+
+
+# ---------------------------------------------------------------------------
+# Molecular prior
+# ---------------------------------------------------------------------------
+
+
+def _graph_counts(batch_vec: torch.Tensor) -> torch.Tensor:
+    if batch_vec.numel() == 0:
+        return torch.zeros(0, device=batch_vec.device, dtype=torch.long)
+    return torch.bincount(batch_vec, minlength=int(batch_vec.max().item()) + 1)
+
+
+def center_by_graph(x: torch.Tensor, batch_vec: torch.Tensor) -> torch.Tensor:
+    """
+    Center per-node coordinates independently for each graph in a PyG batch.
+    """
+    if batch_vec.numel() == 0:
+        return x
+
+    n_graphs = int(batch_vec.max().item()) + 1
+    sums = torch.zeros(n_graphs, x.shape[-1], device=x.device, dtype=x.dtype)
+    sums.index_add_(0, batch_vec, x)
+    counts = _graph_counts(batch_vec).to(device=x.device, dtype=x.dtype).clamp_min(1)
+    means = sums / counts.unsqueeze(-1)
+    return x - means[batch_vec]
+
+
+def estimate_sigma_per_graph(
+    reference_pos: torch.Tensor,
+    batch_vec: torch.Tensor,
+    global_sigma: float | torch.Tensor = 1.0,
+) -> torch.Tensor:
+    """
+    Estimate the coordinate scale from empirical radius of gyration.
+
+    For each molecule size n in the current reference batch, this computes the
+    mean squared radius of gyration among graphs with that n and returns its
+    square root as sigma_n. Graph sizes absent from the reference batch fall
+    back to global_sigma.
+    """
+    if batch_vec.numel() == 0:
+        return torch.empty(0, device=reference_pos.device, dtype=reference_pos.dtype)
+
+    device = reference_pos.device
+    dtype = reference_pos.dtype
+    graph_counts = _graph_counts(batch_vec).to(device=device)
+    centered = center_by_graph(reference_pos, batch_vec)
+    squared_norm = centered.square().sum(dim=-1)
+
+    n_graphs = graph_counts.shape[0]
+    rg2_sum = torch.zeros(n_graphs, device=device, dtype=dtype)
+    rg2_sum.index_add_(0, batch_vec, squared_norm)
+    rg2 = rg2_sum / graph_counts.to(dtype=dtype).clamp_min(1)
+
+    sigma_per_graph = (
+        torch.as_tensor(global_sigma, device=device, dtype=dtype)
+        .expand(n_graphs)
+        .clone()
+    )
+    for n in graph_counts.unique():
+        same_n = graph_counts == n
+        sigma_per_graph[same_n] = rg2[same_n].mean().clamp_min(1e-12).sqrt()
+
+    return sigma_per_graph
+
+
+def sample_centered_coordinate_prior(
+    batch_vec: torch.Tensor,
+    sigma_per_graph: torch.Tensor | None = None,
+    global_sigma: float = 1.0,
+    dtype: torch.dtype = torch.float32,
+) -> torch.Tensor:
+    """
+    Sample centered Gaussian coordinate noise in the zero-COM subspace.
+
+    Args:
+        batch_vec: PyG batch vector of shape [N].
+        sigma_per_graph: optional [G] tensor with the coordinate std per graph.
+        global_sigma: fallback std when sigma_per_graph is omitted.
+    """
+    device = batch_vec.device
+    eps_x = torch.randn(batch_vec.shape[0], 3, device=device, dtype=dtype)
+
+    if sigma_per_graph is None:
+        eps_x = eps_x * global_sigma
+    else:
+        eps_x = eps_x * sigma_per_graph.to(device=device, dtype=dtype)[
+            batch_vec
+        ].unsqueeze(-1)
+
+    return center_by_graph(eps_x, batch_vec)
+
+
+def make_dirichlet_alpha(
+    atom_type_probs: torch.Tensor,
+    concentration: float | None = None,
+    min_alpha: float = 1e-3,
+) -> torch.Tensor:
+    """
+    Convert empirical atom-type probabilities into Dirichlet parameters.
+    """
+    d_a = atom_type_probs.shape[0]
+    if concentration is None:
+        concentration = float(d_a)
+
+    probs = atom_type_probs / atom_type_probs.sum().clamp_min(1e-12)
+    return (float(concentration) * probs).clamp_min(min_alpha)
+
+
+def sample_atom_dirichlet_prior(
+    n_nodes: int,
+    atom_type_probs: torch.Tensor,
+    concentration: float | None = None,
+    min_alpha: float = 1e-3,
+    dtype: torch.dtype = torch.float32,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Sample simplex-valued atom probabilities and their Fisher-Rao sqrt map.
+    """
+    alpha = make_dirichlet_alpha(
+        atom_type_probs.to(dtype=dtype),
+        concentration=concentration,
+        min_alpha=min_alpha,
+    )
+    dist = torch.distributions.Dirichlet(alpha)
+    a_prob = dist.sample((n_nodes,))
+    s_sqrt = torch.sqrt(a_prob.clamp_min(1e-12))
+    return a_prob, s_sqrt, alpha
+
+
+def sample_molecular_prior(
+    batch_vec: torch.Tensor,
+    num_atom_types: int,
+    in_node_nf: int,
+    atom_type_probs: torch.Tensor | None = None,
+    reference_pos: torch.Tensor | None = None,
+    concentration: float | None = None,
+    min_alpha: float = 1e-3,
+    global_sigma: float = 1.0,
+    dtype: torch.dtype = torch.float32,
+) -> dict[str, torch.Tensor]:
+    """
+    Recommended molecular prior.
+
+    Coordinates are centered Gaussian samples. Atom types are sampled from a
+    Dirichlet prior parameterized by empirical atom-type frequencies, then
+    mapped to square-root coordinates for Fisher-Rao geometry. The returned
+    ``x`` tensor preserves this project's existing 7D EGNN input interface by
+    placing ``S_sqrt`` in the atom-type channels and zero-padding the rest.
+    """
+    device = batch_vec.device
+    n_nodes = batch_vec.shape[0]
+
+    if reference_pos is not None:
+        sigma_per_graph = estimate_sigma_per_graph(
+            reference_pos=reference_pos.to(device=device, dtype=dtype),
+            batch_vec=batch_vec,
+            global_sigma=global_sigma,
+        )
+    else:
+        sigma_per_graph = None
+
+    eps_x = sample_centered_coordinate_prior(
+        batch_vec=batch_vec,
+        sigma_per_graph=sigma_per_graph,
+        global_sigma=global_sigma,
+        dtype=dtype,
+    )
+
+    if atom_type_probs is None:
+        atom_type_probs = torch.full(
+            (num_atom_types,),
+            1.0 / num_atom_types,
+            device=device,
+            dtype=dtype,
+        )
+    else:
+        atom_type_probs = atom_type_probs.to(device=device, dtype=dtype)
+
+    a_prob, s_sqrt, alpha_atom = sample_atom_dirichlet_prior(
+        n_nodes=n_nodes,
+        atom_type_probs=atom_type_probs,
+        concentration=concentration,
+        min_alpha=min_alpha,
+        dtype=dtype,
+    )
+
+    x = torch.zeros(n_nodes, in_node_nf, device=device, dtype=dtype)
+    x[:, :num_atom_types] = s_sqrt
+
+    return {
+        "x": x,
+        "pos": eps_x,
+        "A_prob": a_prob,
+        "S_sqrt": s_sqrt,
+        "alpha_atom": alpha_atom,
+        "sigma_per_graph": sigma_per_graph,
+        "batch": batch_vec,
+    }
