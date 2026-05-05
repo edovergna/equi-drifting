@@ -8,7 +8,7 @@ from torch.optim.lr_scheduler import OneCycleLR
 from ept.ept_loader import load_ept_feature_extractor
 
 from .drift_loss import (TrainingDivergedException,
-                         compute_normalized_drift_loss)
+                         compute_drift_loss)
 from .egnn import EGNN
 from .geometry import (batch_size_for_logging, center_positions_per_graph,
                        per_graph_center_norms)
@@ -125,8 +125,8 @@ class DriftingMoleculeGenerator(LightningModule):
             return torch.tensor(0.0, device=self.device, requires_grad=True)
 
         try:
-            loss, stats = compute_normalized_drift_loss(
-                phi_gen, phi_real, self.temperatures
+            loss, stats = compute_drift_loss(
+                phi_gen, phi_real, temperatures=self.temperatures
             )
         except TrainingDivergedException as e:
             self.print(f"\n[Step {self.global_step}] {e}\nStopping training.")
@@ -163,8 +163,8 @@ class DriftingMoleculeGenerator(LightningModule):
 
     def validation_step(self, batch, batch_idx):
         pos_gen, a_soft_gen, phi_gen, phi_real = self._forward(batch)
-        val_loss, stats = compute_normalized_drift_loss(
-            phi_gen, phi_real, self.temperatures
+        val_loss, stats = compute_drift_loss(
+            phi_gen, phi_real, temperatures=self.temperatures
         )
 
         bs = batch_size_for_logging(batch)
@@ -217,7 +217,7 @@ class DriftingMoleculeGenerator(LightningModule):
 
     def test_step(self, batch, batch_idx):
         _, _, phi_gen, phi_real = self._forward(batch)
-        test_loss, _ = compute_normalized_drift_loss(
+        test_loss, _ = compute_drift_loss(
             phi_gen, phi_real, self.temperatures
         )
 
