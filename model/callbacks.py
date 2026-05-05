@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from lightning.pytorch import Callback, LightningModule, Trainer
 from torch.optim import Optimizer
 
-from .mol_utils import batch_to_validity, heavy_atom_counts
+from .mol_utils import batch_to_stability, batch_to_validity, heavy_atom_counts
 
 # QM9 atom ordering from EncodeAtomTypesTransform: {H, C, N, O, F}
 _ATOM_NAMES = ["H", "C", "N", "O", "F"]
@@ -385,6 +385,7 @@ class ChemicalValidityCallback(Callback):
 
         results = batch_to_validity(pos, a_soft, bvec)
         heavy = heavy_atom_counts(a_soft, bvec)
+        atom_stable_frac, mol_stable_frac = batch_to_stability(pos, a_soft, bvec)
 
         n_total = len(results)
         n_valid = sum(1 for ok, _ in results if ok)
@@ -393,9 +394,11 @@ class ChemicalValidityCallback(Callback):
         validity = n_valid / n_total if n_total > 0 else 0.0
         heavy_mean = float(np.mean(heavy)) if heavy else 0.0
 
-        pl_module.log("chem/validity", validity, on_epoch=True, on_step=False)
-        pl_module.log("chem/uniqueness", uniqueness, on_epoch=True, on_step=False)
-        pl_module.log("chem/heavy_atom_mean", heavy_mean, on_epoch=True, on_step=False)
+        pl_module.log("chem/validity",        validity,        on_epoch=True, on_step=False)
+        pl_module.log("chem/uniqueness",       uniqueness,      on_epoch=True, on_step=False)
+        pl_module.log("chem/heavy_atom_mean",  heavy_mean,      on_epoch=True, on_step=False)
+        pl_module.log("chem/atom_stability",   atom_stable_frac, on_epoch=True, on_step=False)
+        pl_module.log("chem/mol_stability",    mol_stable_frac,  on_epoch=True, on_step=False)
 
         logger = trainer.logger
         if logger is None or not hasattr(logger, "experiment"):

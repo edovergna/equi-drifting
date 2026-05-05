@@ -113,10 +113,14 @@ Logged as WandB histograms — look at the distribution shape, not just scalars.
 | `chem/validity` | Fraction of generated molecules that pass RDKit sanitization. |
 | `chem/uniqueness` | Of the valid molecules, fraction that are structurally unique (by SMILES). |
 | `chem/heavy_atom_mean` | Mean number of non-hydrogen atoms per molecule. |
+| `chem/atom_stability` | Fraction of atoms whose bond count exactly matches the target valence (H=1, C=4, N=3, O=2, F=1). |
+| `chem/mol_stability` | Fraction of molecules where every atom is stable. |
 | `chem/valid_smiles` | Table of the top-50 most frequent valid SMILES generated this epoch. |
 
-**Healthy:** `validity` increases monotonically. `uniqueness` stays high (model isn't stuck repeating one structure). `heavy_atom_mean` matches QM9 (~9 heavy atoms on average).
-**Red flags:** `validity` stays at 0 for many epochs (geometry is still garbage); `uniqueness` drops toward 0 (mode collapse — model generates the same molecule every time); `heavy_atom_mean` near 0 (predicting mostly H).
+Note: **stability** and **validity** measure different things. Stability is purely geometric — does the distance-based bond count match the expected valence? Validity requires the full molecule to be chemically sane (RDKit sanitization). A molecule can be stable but still fail sanitization (e.g. disconnected graph), or pass sanitization with some unusual bond orders that don't match the target valence exactly.
+
+**Healthy:** `atom_stability` and `mol_stability` increase in early training (geometry improving), then `validity` follows as the overall structure becomes chemically coherent. `uniqueness` stays high. `heavy_atom_mean` matches QM9 (~9 heavy atoms on average).
+**Red flags:** `validity` stays at 0 for many epochs (geometry is still garbage); `uniqueness` drops toward 0 (mode collapse — model generates the same molecule every time); `atom_stability` high but `validity` near 0 (geometry looks right locally but molecules aren't coherent globally); `heavy_atom_mean` near 0 (predicting mostly H).
 
 ---
 
