@@ -279,3 +279,218 @@ class DriftingMoleculeGenerator(LightningModule):
                 "frequency": 1,
             },
         }
+
+
+class RiemannianDriftingMoleculeGenerator(LightningModule):
+    _SAVE_COMPONENTS = ["generator"]
+    _LOAD_COMPONENTS = ["generator"]
+
+    def __init__(self, generator_cfg=None, drift_cfg=None):
+        super().__init__()
+
+        # TODO: check these later with the Riemannian
+        default_generator_cfg = {
+            "in_node_nf": 5,
+            "hidden_nf": 128,
+            "n_layers": 2,
+            "num_atom_types": 5,
+            "num_bond_types": 5,
+            "predict_bond_types": False,
+        }
+        default_drift_cfg = {
+            "lr": 1e-4,
+            "weight_decay": 1e-4,
+            "temperatures": [0.02, 0.05, 0.2],
+            "pct_start": 0.1,
+            "div_factor": 25.0,
+            "final_div_factor": 1e4,
+        }
+
+        self.generator_cfg = {**default_generator_cfg, **(generator_cfg or {})}
+        self.drift_cfg = {**default_drift_cfg, **(drift_cfg or {})}
+        self.save_hyperparameters(
+            {"generator_cfg": self.generator_cfg, "drift_cfg": self.drift_cfg}
+        )
+
+        self.generator = self._init_generator(self.generator_cfg)
+
+    def _init_generator(self, cfg) -> EGNN:
+        return EGNN(
+            in_node_nf=cfg["in_node_nf"],
+            hidden_nf=cfg["hidden_nf"],
+            n_layers=cfg["n_layers"],
+            num_atom_types=cfg["num_atom_types"],
+            num_bond_types=cfg["num_bond_types"],
+            predict_bond_types=cfg["predict_bond_types"],
+        )
+
+    def sample_prior(self, num_nodes: int, in_dim: int) -> tuple[torch.Tensor, torch.Tensor]:
+        # TODO: add proper prior sampling
+
+        # Sample positions
+        pos = torch.randn(num_nodes, 3, device=self.device)
+
+        # Sample node features; in Riemannian space, this is just the 5 possible bond types for QM9
+        x = torch.randn(num_nodes, in_dim, device=self.device)
+
+        return x, pos
+
+    def _forward(self, batch):
+        """Forward pass of generation for soft atom types: prior → EGNN → center → soft atoms."""
+
+        # TODO: add transformation to Riemannian space for atom types
+        x_prior, pos_prior = self.sample_prior(num_nodes=batch.num_nodes, in_dim=self.generator_cfg.in_node_nf)
+        x_gen, _, pos_gen = self.generator(x_prior, pos_prior, batch.dense_edge_index)
+        pos_gen = center_positions_per_graph(pos_gen, batch.batch)
+
+        return pos_gen, x_gen
+
+    def training_step(self, batch, batch_idx):
+        pos_gen, x_gen = self._forward(batch)
+        pos_real, x_real = batch.pos, batch.a_soft_real
+
+
+        # TODO: sync with new drift loss function
+        try:
+            loss, stats = compute_normalized_drift_loss(
+                phi_gen, phi_real, self.temperatures
+            )
+        except TrainingDivergedException as e:
+            self.print(f"\n[Step {self.global_step}] {e}\nStopping training.")
+            self.trainer.should_stop = True
+            return torch.tensor(0.0, device=self.device, requires_grad=True)
+
+        bs = batch_size_for_logging(batch)
+        self.log("train_loss", loss, batch_size=bs, on_step=True, on_epoch=True)
+
+        for key, val in stats.items():
+            self.log(f"drift_train/{key}", val, batch_size=bs, on_step=True, on_epoch=False)
+
+        self.log(
+            "train/lr",
+            self.optimizers().param_groups[0]["lr"],
+            on_step=True,
+            on_epoch=False,
+        )
+
+        with torch.no_grad():
+            pos_norms = pos_gen.norm(dim=-1)
+            gen_center_norms = per_graph_center_norms(pos_gen, batch.batch)
+            real_center_norms = per_graph_center_norms(batch.pos, batch.batch)
+            max_dist = torch.cdist(pos_gen, pos_gen).max()
+
+        self.log("geom/pos_gen_norm_mean", pos_norms.mean(), batch_size=bs)
+        self.log("geom/pos_gen_norm_std", pos_norms.std(), batch_size=bs)
+        self.log("geom/max_atom_dist", max_dist, batch_size=bs)
+        self.log("debug/gen_center_norm_mean", gen_center_norms.mean(), batch_size=bs)
+        self.log("debug/gen_center_norm_std", gen_center_norms.std(), batch_size=bs)
+        self.log("debug/real_center_norm_mean", real_center_norms.mean(), batch_size=bs)
+
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        # TODO
+        pos_gen, a_soft_gen, phi_gen, phi_real = self._forward(batch)
+        val_loss, stats = compute_normalized_drift_loss(
+            phi_gen, phi_real, self.temperatures
+        )
+
+        bs = batch_size_for_logging(batch)
+        self.log(
+            "val_loss",
+            val_loss,
+            batch_size=bs,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
+
+        for key, val in stats.items():
+            self.log(
+                f"drift_val/{key}",
+                val,
+                batch_size=bs,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+
+        with torch.no_grad():
+            gen_cn = per_graph_center_norms(pos_gen, batch.batch)
+            real_cn = per_graph_center_norms(batch.pos, batch.batch)
+        self.log(
+            "debug/val_gen_center_norm_mean",
+            gen_cn.mean(),
+            batch_size=bs,
+            on_epoch=True,
+            sync_dist=True,
+        )
+        self.log(
+            "debug/val_real_center_norm_mean",
+            real_cn.mean(),
+            batch_size=bs,
+            on_epoch=True,
+            sync_dist=True,
+        )
+
+        return {
+            "phi_gen": phi_gen.detach().cpu(),
+            "phi_real": phi_real.detach().cpu(),
+            "pos_gen": pos_gen.detach().cpu(),
+            "a_soft_gen": a_soft_gen.detach().cpu(),
+            "pos_real": batch.pos.detach().cpu(),
+            "a_soft_real": batch.a_soft_real.detach().cpu(),
+            "batch_vec": batch.batch.detach().cpu(),
+        }
+
+    def test_step(self, batch, batch_idx):
+        # TODO
+        _, _, phi_gen, phi_real = self._forward(batch)
+        test_loss, _ = compute_normalized_drift_loss(
+            phi_gen, phi_real, self.temperatures
+        )
+
+        bs = batch_size_for_logging(batch)
+        self.log(
+            "test_loss",
+            test_loss,
+            batch_size=bs,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
+        return test_loss
+
+    def save_individual_components(self, save_path: str) -> None:
+        torch.save(self.generator.state_dict(), f"{save_path}/generator.pth")
+
+    def load_individual_components(self, folder_path) -> None:
+        folder_path = Path(folder_path)
+        self.generator.load_state_dict(
+            torch.load(folder_path / "generator.pth", map_location=self.device)
+        )
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.AdamW(
+            self.generator.parameters(),
+            lr=self.drift_cfg["lr"],
+            weight_decay=self.drift_cfg["weight_decay"],
+            eps=1e-8,
+        )
+        scheduler = OneCycleLR(
+            optimizer,
+            max_lr=self.drift_cfg["lr"],
+            total_steps=self.trainer.estimated_stepping_batches,
+            pct_start=self.drift_cfg["pct_start"],
+            anneal_strategy="cos",
+            div_factor=self.drift_cfg["div_factor"],
+            final_div_factor=self.drift_cfg["final_div_factor"],
+        )
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "step",
+                "frequency": 1,
+            },
+        }

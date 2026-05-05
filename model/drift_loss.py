@@ -113,3 +113,19 @@ def compute_normalized_drift_loss(
         )
 
     return loss, stats
+
+
+def compute_molecule_based_drift_loss(
+        pos_gen: torch.Tensor,
+        x_gen: torch.Tensor,
+        pos_real: torch.Tensor,
+        x_real: torch.Tensor
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """
+    Drifting field loss directly on 3D molecules.
+
+    Returns (loss, stats) where stats is a flat dict of float diagnostics safe to
+    pass directly to self.log(). Raises TrainingDivergedException on non-finite loss.
+    """
+    # TODO
+    
