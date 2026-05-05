@@ -82,6 +82,16 @@ class GeneratorCheckpointCallback(Callback):
                 wandb.save(fe_best_path, base_path=run_dir)
                 print("Logged feature_extractor_best.pth to wandb.")
 
+    def load_best_weights(self, pl_module: LightningModule) -> bool:
+        """Loads the best in-memory state dict(s) into pl_module. Returns True if applied."""
+        if self._best_state_dict is None:
+            return False
+        pl_module.generator.load_state_dict(self._best_state_dict)
+        if self._best_fe_state_dict is not None:
+            pl_module.feature_extractor.ept_model.load_state_dict(self._best_fe_state_dict)
+        print(f"Loaded best weights ({self.monitor}={self._best_score:.6f}) into model.")
+        return True
+
     def on_train_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         self._save_and_log(trainer, pl_module)
 

@@ -27,7 +27,7 @@ def main(args: argparse.Namespace):
 
     run = wandb.init(
         entity="equivariant-drifting",
-        project="tests-kristian",
+        project="tests-col-daniel",
         group=args.group_tag,
         mode="offline" if args.offline else "online",
         config=vars(args),
@@ -63,6 +63,8 @@ def main(args: argparse.Namespace):
             print(f"Loading pretrained generator from wandb run: {args.wandb_run_id}")
             load_pretrained_generator(args.wandb_run_id, model, variant=args.wandb_variant)
 
+        gen_ckpt = GeneratorCheckpointCallback(monitor="val_loss", mode="min")
+
         callbacks = [
             GradientMonitorCallback(),
             EmbeddingMonitorCallback(),
@@ -70,7 +72,7 @@ def main(args: argparse.Namespace):
                 n_molecules=4, bond_threshold=2.0, every_n_epochs=1
             ),
             ChemicalValidityCallback(),
-            GeneratorCheckpointCallback(monitor="val_loss", mode="min"),
+            gen_ckpt,
         ]
 
         trainer = pl.Trainer(
@@ -90,14 +92,8 @@ def main(args: argparse.Namespace):
         )
 
         trainer.fit(model, datamodule=datamodule)
-
-        if checkpoint_callback.best_model_path:
-            print(f"Best checkpoint: {checkpoint_callback.best_model_path}")
-            print(f"Best val_loss: {checkpoint_callback.best_model_score}")
-        else:
-            print("No best checkpoint found; testing with current model weights.")
-
-        trainer.test(model, datamodule=datamodule, ckpt_path="best")
+        gen_ckpt.load_best_weights(model)
+        trainer.test(model, datamodule=datamodule)
 
     except KeyboardInterrupt:
         print("\nTraining interrupted.")
