@@ -81,7 +81,7 @@ def compute_drift_loss(
         stats["nn_l2_distance"] = dist[:, N_gen:].min(dim=1).values.mean().item()
         stats["invalid_dist_frac"] = (~valid_mask).float().mean().item()
 
-    force_across_R = torch.zeros_like(old_gen_scaled)
+    V_across_taus = torch.zeros_like(old_gen_scaled)
 
     for tau in temperatures:
         tau_key = str(tau).replace(".", "_")
@@ -112,7 +112,7 @@ def compute_drift_loss(
         f_norm_val = (total_force_R ** 2).mean()
         force_scale = torch.sqrt(f_norm_val.clamp(min=1e-8)).detach()
 
-        force_across_R = force_across_R + total_force_R / force_scale
+        V_across_taus = V_across_taus + total_force_R / force_scale
 
         with torch.no_grad():
             row_entropy = -(A_row * (A_row + 1e-30).log()).sum(dim=-1).mean()
@@ -132,7 +132,7 @@ def compute_drift_loss(
             )
             stats[f"total_coeffs_abs_mean_{tau_key}"] = total_coeffs.abs().mean().item()
 
-    goal_scaled = (old_gen_scaled + force_across_R).detach()
+    goal_scaled = (old_gen_scaled + V_across_taus).detach()
     gen_scaled = phi_gen / scale_inputs
 
     loss = F.mse_loss(gen_scaled, goal_scaled)
