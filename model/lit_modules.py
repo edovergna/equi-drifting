@@ -7,7 +7,7 @@ from torch.optim.lr_scheduler import OneCycleLR
 
 from ept.ept_loader import load_ept_feature_extractor
 
-from .new_drift_loss import (TrainingDivergedException,
+from .drift_loss import (TrainingDivergedException,
                          compute_drift_loss)
 from .egnn import EGNN
 from .geometry import (batch_size_for_logging, center_positions_per_graph,
