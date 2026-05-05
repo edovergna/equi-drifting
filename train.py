@@ -9,7 +9,7 @@ if str(PROJECT_ROOT) not in sys.path:
 import argparse
 
 import lightning.pytorch as pl
-from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
+from lightning.pytorch.callbacks import EarlyStopping
 from lightning.pytorch.loggers import WandbLogger
 
 import wandb
@@ -63,17 +63,7 @@ def main(args: argparse.Namespace):
             print(f"Loading pretrained generator from wandb run: {args.wandb_run_id}")
             load_pretrained_generator(args.wandb_run_id, model, variant=args.wandb_variant)
 
-        checkpoint_callback = ModelCheckpoint(
-            dirpath=args.checkpoint_dir,
-            filename="best-{epoch:02d}-{val_loss:.4f}",
-            monitor="train_loss",
-            mode="min",
-            save_top_k=1,
-            save_last=True,
-        )
-
         callbacks = [
-            checkpoint_callback,
             GradientMonitorCallback(),
             EmbeddingMonitorCallback(),
             MoleculeVisualizationCallback(

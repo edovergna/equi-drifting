@@ -1,5 +1,5 @@
 import os
-import shutil
+import tempfile
 from pathlib import Path
 
 import wandb
@@ -40,9 +40,9 @@ def _download_component(run, remote_name: str, local_path: Path) -> bool:
     """Download a single component file. Returns False if not found (404), raises on other errors."""
     try:
         run.file(f"individual_components/{remote_name}").download(
-            root=str(local_path.parent.parent), replace=True
+            root=str(local_path.parent), replace=True
         )
-        (local_path.parent / remote_name).rename(local_path)
+        (local_path.parent / "individual_components" / remote_name).rename(local_path)
         return True
     except wandb.errors.CommError as e:
         if "404" in str(e):
@@ -63,21 +63,19 @@ def load_pretrained_generator(
     api = wandb.Api()
     run = api.run(f"{WANDB_PATH}/{wandb_run_id}")
 
-    downloaded_folder_path = Path(__file__).parents[1] / "individual_components"
-    downloaded_folder_path.mkdir(exist_ok=True)
-
     print(f"Downloading components from wandb run: {WANDB_PATH}/{wandb_run_id} (variant={variant})")
 
-    print(f"  Downloading generator_{variant}.pth")
-    _download_component(run, f"generator_{variant}.pth", downloaded_folder_path / "generator.pth")
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
 
-    print(f"  Downloading feature_extractor_{variant}.pth")
-    found = _download_component(
-        run, f"feature_extractor_{variant}.pth", downloaded_folder_path / "feature_extractor.pth"
-    )
-    if not found:
-        print(f"  feature_extractor_{variant}.pth not found — was not fine-tuned, skipping.")
+        print(f"  Downloading generator_{variant}.pth")
+        _download_component(run, f"generator_{variant}.pth", tmp_path / "generator.pth")
 
-    lit_module.load_individual_components(downloaded_folder_path)
+        print(f"  Downloading feature_extractor_{variant}.pth")
+        found = _download_component(
+            run, f"feature_extractor_{variant}.pth", tmp_path / "feature_extractor.pth"
+        )
+        if not found:
+            print(f"  feature_extractor_{variant}.pth not found — was not fine-tuned, skipping.")
 
-    shutil.rmtree(downloaded_folder_path)
+        lit_module.load_individual_components(tmp_path)
