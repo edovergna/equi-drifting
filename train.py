@@ -13,9 +13,10 @@ from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers import WandbLogger
 
 import wandb
-from model import (DriftingMoleculeGenerator, EmbeddingMonitorCallback,
-                   GradientMonitorCallback, MoleculeVisualizationCallback,
-                   QM9DataModule, initialize_training_config)
+from model import (ChemicalValidityCallback, DriftingMoleculeGenerator,
+                   EmbeddingMonitorCallback, GradientMonitorCallback,
+                   MoleculeVisualizationCallback, QM9DataModule,
+                   initialize_training_config)
 from parse_args import parse_args
 
 
@@ -71,6 +72,7 @@ def main(args: argparse.Namespace):
         MoleculeVisualizationCallback(
             n_molecules=4, bond_threshold=2.0, every_n_epochs=1
         ),
+        ChemicalValidityCallback(),
     ]
 
     trainer = pl.Trainer(
