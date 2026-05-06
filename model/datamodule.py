@@ -9,6 +9,34 @@ from torch_geometric.datasets import QM9
 from torch_geometric.loader import DataLoader
 from torch_geometric.transforms import Center, Compose
 
+_dense_edge_index_cache: dict[int, torch.Tensor] = {}
+
+
+def get_dense_edge_index(n: int, device: torch.device) -> torch.Tensor:
+    """Return a cached fully-connected (no self-loops) edge index for n nodes."""
+    if n not in _dense_edge_index_cache:
+        row = torch.arange(n).repeat_interleave(n)
+        col = torch.arange(n).repeat(n)
+        mask = row != col
+        _dense_edge_index_cache[n] = torch.stack([row[mask], col[mask]], dim=0)
+    return _dense_edge_index_cache[n].to(device)
+
+
+def compute_size_distribution(dataset) -> tuple[np.ndarray, np.ndarray]:
+    """Compute empirical atom-count distribution over the full underlying QM9 dataset."""
+    underlying = dataset.dataset if hasattr(dataset, "dataset") else dataset
+
+    if hasattr(underlying, "slices") and "pos" in underlying.slices:
+        sizes = torch.diff(underlying.slices["pos"])  # [n_molecules] — full dataset
+    else:
+        sizes = torch.tensor([underlying[i].num_nodes for i in range(len(underlying))])
+
+    counts = torch.bincount(sizes.long())
+    mask = counts > 0
+    unique = torch.where(mask)[0].numpy().astype(int)
+    probs = (counts[mask].float() / counts[mask].sum()).numpy()
+    return unique, probs
+
 # Standard QM9 split sizes (after excluding 3,054 uncharacterized molecules).
 # Matches gen_splits_gdb9 in the EPT preprocessing script: seed=0, 110k/10k/rest.
 _N_TRAIN = 110_000
@@ -36,25 +64,12 @@ class FullyConnectedTransform:
     """A PyG transform that adds a fully connected dense_edge_index to the data."""
 
     def __call__(self, data: Data) -> Data:
-        # Get device and number of nodes
         device = (
             data.edge_index.device
             if data.edge_index is not None
             else torch.device("cpu")
         )
-        n = data.num_nodes
-
-        # Generate all pairs
-        row = torch.arange(n, device=device).repeat_interleave(n)
-        col = torch.arange(n, device=device).repeat(n)
-
-        # Remove self-loops
-        mask = row != col
-
-        edge_index = torch.stack([row[mask], col[mask]], dim=0)
-
-        data.dense_edge_index = edge_index
-
+        data.dense_edge_index = get_dense_edge_index(data.num_nodes, device)
         return data
 
 

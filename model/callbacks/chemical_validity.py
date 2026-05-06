@@ -49,7 +49,7 @@ class ChemicalValidityCallback(Callback):
             return
         pos = outputs.get("pos_gen")
         a_hard = outputs.get("gen_atom_types")
-        bvec = outputs.get("batch_vec")
+        bvec = outputs.get("gen_batch_vec", outputs.get("batch_vec"))
         if pos is None or a_hard is None or bvec is None:
             return
         if self._offset >= self.MAX_MOLS:

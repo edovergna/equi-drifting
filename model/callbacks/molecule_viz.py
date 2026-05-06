@@ -2,6 +2,8 @@ import io
 
 import numpy as np
 import torch
+import matplotlib.pyplot as plt
+from PIL import Image as PILImage
 from lightning.pytorch import Callback, LightningModule, Trainer
 
 import wandb
@@ -32,6 +34,7 @@ class MoleculeVisualizationCallback(Callback):
         "gen_atom_types",
         "pos_real",
         "real_atom_types",
+        "gen_batch_vec",
         "batch_vec",
     }
 
@@ -79,8 +82,9 @@ class MoleculeVisualizationCallback(Callback):
             ref = self._ref
             phi_gen = ref["phi_gen"].float()
             phi_real = ref["phi_real"].float()
-            batch_vec = ref["batch_vec"]
-            n_graphs = int(batch_vec.max().item()) + 1
+            gen_batch_vec = ref["gen_batch_vec"]
+            real_batch_vec = ref["batch_vec"]
+            n_graphs = int(phi_gen.shape[0])
 
             nn_dists = torch.cdist(phi_gen, phi_real).min(dim=1).values
             all_idx = list(range(n_graphs))
@@ -90,31 +94,33 @@ class MoleculeVisualizationCallback(Callback):
             best_idx = ranked[: self.n_molecules]
             worst_idx = ranked[-self.n_molecules :]
 
-            def render_group(indices, pos, atom_types, label_prefix):
+            def render_group(indices, pos, atom_types, bvec, label_prefix):
                 return [
-                    self._render_mol(pos, atom_types, batch_vec, i, f"{label_prefix} #{i}")
+                    self._render_mol(pos, atom_types, bvec, i, f"{label_prefix} #{i}")
                     for i in indices
                 ]
 
             real_atom_types = ref["real_atom_types"].argmax(dim=-1)
             images = {
                 "mol/random_gen": render_group(
-                    random_idx, ref["pos_gen"], ref["gen_atom_types"], "gen"
+                    random_idx, ref["pos_gen"], ref["gen_atom_types"], gen_batch_vec, "gen"
                 ),
                 "mol/best_gen": render_group(
                     best_idx,
                     ref["pos_gen"],
                     ref["gen_atom_types"],
+                    gen_batch_vec,
                     f"best d={nn_dists[best_idx[0]]:.2f}",
                 ),
                 "mol/worst_gen": render_group(
                     worst_idx,
                     ref["pos_gen"],
                     ref["gen_atom_types"],
+                    gen_batch_vec,
                     f"worst d={nn_dists[worst_idx[0]]:.2f}",
                 ),
                 "mol/real_ref": render_group(
-                    random_idx, ref["pos_real"], real_atom_types, "real"
+                    random_idx, ref["pos_real"], real_atom_types, real_batch_vec, "real"
                 ),
             }
 
@@ -134,8 +140,6 @@ class MoleculeVisualizationCallback(Callback):
         graph_idx: int,
         title: str = "",
     ) -> "wandb.Image":
-        import matplotlib.pyplot as plt
-        from PIL import Image as PILImage
 
         mask = batch_vec == graph_idx
         p = pos[mask].numpy()
@@ -176,8 +180,6 @@ class MoleculeVisualizationCallback(Callback):
     def _atom_dist_chart(
         self, gen_types: torch.Tensor, real_types: torch.Tensor
     ) -> "wandb.Image":
-        import matplotlib.pyplot as plt
-        from PIL import Image as PILImage
 
         n = len(_ATOM_NAMES)
         gen_frac = np.array(
