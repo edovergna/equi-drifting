@@ -82,7 +82,7 @@ class DriftingMoleculeGenerator(LightningModule):
 
     def _forward(self, batch):
         """Shared forward pass: prior → EGNN → center → soft atoms → EPT embeddings."""
-        x_prior, pos_prior = self.sample_prior(batch.num_nodes)
+        x_prior, pos_prior = self.sample_prior(batch.num_nodes, in_dim=self.generator_cfg.in_node_nf)
         x_gen, _, pos_gen = self.generator(x_prior, pos_prior, batch.dense_edge_index)
         pos_gen = center_positions_per_graph(pos_gen, batch.batch)
         pos_gen = pos_gen.clamp(-self.pos_clamp, self.pos_clamp)
