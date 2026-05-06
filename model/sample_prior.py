@@ -58,6 +58,36 @@ def batch_vector_from_node_counts(node_counts, device=None) -> torch.Tensor:
     )
 
 
+def dense_edge_index_from_node_counts(node_counts, device=None) -> torch.Tensor:
+    """
+    node_counts: list/1D tensor of length B with number of real nodes per graph.
+
+    Returns:
+        dense_edge_index: [2, E], fully connected within each graph, no self-loops.
+    """
+    node_counts = torch.as_tensor(node_counts, device=device, dtype=torch.long)
+    if node_counts.dim() != 1:
+        raise ValueError("node_counts must be a 1D list or tensor")
+    if node_counts.numel() == 0:
+        raise ValueError("node_counts must contain at least one graph")
+    if torch.any(node_counts <= 0):
+        raise ValueError("all node counts must be positive")
+
+    edge_indices = []
+    offset = 0
+    for count in node_counts.tolist():
+        local_nodes = torch.arange(count, device=node_counts.device)
+        src = local_nodes.repeat_interleave(count)
+        dst = local_nodes.repeat(count)
+        keep = src != dst
+        edge_indices.append(
+            torch.stack([src[keep] + offset, dst[keep] + offset], dim=0)
+        )
+        offset += count
+
+    return torch.cat(edge_indices, dim=1)
+
+
 def sample_egnn_molecule_batch(
     node_counts,
     clamp_range: float,
@@ -78,6 +108,7 @@ def sample_egnn_molecule_batch(
     """
     node_counts = torch.as_tensor(node_counts, device=device, dtype=torch.long)
     batch = batch_vector_from_node_counts(node_counts, device=device)
+    dense_edge_index = dense_edge_index_from_node_counts(node_counts, device=device)
     total_nodes = int(node_counts.sum().item())
 
     pos = sample_coordinate_noise(
@@ -97,6 +128,7 @@ def sample_egnn_molecule_batch(
         "x": S_sqrt,
         "pos": pos,
         "batch": batch,
+        "dense_edge_index": dense_edge_index,
         "A_prob": A_prob,
         "S_sqrt": S_sqrt,
     }

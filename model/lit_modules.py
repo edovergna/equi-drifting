@@ -86,7 +86,7 @@ class DriftingMoleculeGenerator(LightningModule):
         x_gen, _, pos_gen = self.generator(
             prior["x"],
             prior["pos"],
-            batch.dense_edge_index,
+            prior["dense_edge_index"],
         )
         pos_gen = center_positions_per_graph(pos_gen, prior["batch"])
         a_soft_gen = F.gumbel_softmax(x_gen, tau=1.0, hard=False, dim=-1)
@@ -101,14 +101,14 @@ class DriftingMoleculeGenerator(LightningModule):
             a_soft=a_soft_gen,
             block_id=block_id,
             batch_id=batch_id,
-            dense_edge_index=batch.dense_edge_index,
+            dense_edge_index=prior["dense_edge_index"],
         )
         phi_real = self.feature_extractor(
             pos=batch.pos,
             a_soft=batch.a_soft_real,
             block_id=block_id,
             batch_id=batch_id,
-            dense_edge_index=batch.dense_edge_index,
+            dense_edge_index=prior["dense_edge_index"],
         )
         return pos_gen, a_soft_gen, phi_gen, phi_real
 
