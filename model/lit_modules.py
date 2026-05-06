@@ -348,7 +348,7 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
         pos_gen, x_gen = self._forward(batch)
         pos_real, x_real = batch.pos, batch.a_soft_real
 
-
+        
         # TODO: sync with new drift loss function
         try:
             loss, stats = compute_normalized_drift_loss(

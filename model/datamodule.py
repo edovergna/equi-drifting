@@ -56,7 +56,7 @@ class FullyConnectedTransform:
 
         return data
 
-
+# TODO: pre-transform for training molecules
 class QM9DataModule(pl.LightningDataModule):
     def __init__(
         self,
