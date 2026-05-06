@@ -172,6 +172,7 @@ def compute_molecule_based_drift_loss(
     target_types = (x_gen + v_types).detach()
 
     # TODO: define the distance based loss for the types and positions, and aggregate
+    
 
 # TODO
 def prep_batch_for_kernel(

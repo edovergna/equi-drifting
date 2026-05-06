@@ -22,7 +22,7 @@ class DriftingMoleculeGenerator(LightningModule):
         super().__init__()
 
         default_generator_cfg = {
-            "in_node_nf": 7,
+            "in_node_nf": 5,
             "hidden_nf": 128,
             "n_layers": 2,
             "num_atom_types": 5,
@@ -68,24 +68,20 @@ class DriftingMoleculeGenerator(LightningModule):
         for p in self.feature_extractor.parameters():
             p.requires_grad = False
 
-    def sample_prior(self, num_nodes: int) -> tuple[torch.Tensor, torch.Tensor]:
-
+    def sample_prior(self, num_nodes: int, in_dim: int) -> tuple[torch.Tensor, torch.Tensor]:
+        # TODO:
         # Sample positions
         pos = torch.randn(num_nodes, 3, device=self.device)
 
-        # Sample node features
-        # We sample a 7-dimensional feature space, because the
-        # node features are composed by a 5-dim one-hot encoding
-        # of the atom type + 6 more dimensions for the other features (charge, etc.).
-        # We can summarize the 5-dim one-hot encoding in a single dimension,
-        # hence, we sample 7 dimensions to cover all the node features
-        x = torch.randn(num_nodes, 7, device=self.device)
+        # Sample node features; this is just the 5 possible bond types for QM9
+        x = torch.randn(num_nodes, in_dim, device=self.device)
 
         return x, pos
 
     def _forward(self, batch):
         """Shared forward pass: prior → EGNN → center → soft atoms → EPT embeddings."""
-        x_prior, pos_prior = self.sample_prior(batch.num_nodes)
+        x_prior, pos_prior = self.sample_prior(batch.num_nodes, in_dim=self.generator_cfg.in_node_nf)
+        # TODO:
         x_gen, _, pos_gen = self.generator(x_prior, pos_prior, batch.dense_edge_index)
         pos_gen = center_positions_per_graph(pos_gen, batch.batch)
         a_soft_gen = F.gumbel_softmax(x_gen, tau=1.0, hard=False, dim=-1)
