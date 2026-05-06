@@ -63,7 +63,9 @@ def main(args: argparse.Namespace):
 
         if args.wandb_run_id:
             print(f"Loading pretrained generator from wandb run: {args.wandb_run_id}")
-            load_pretrained_generator(args.wandb_run_id, model, variant=args.wandb_variant)
+            load_pretrained_generator(
+                args.wandb_run_id, model, variant=args.wandb_variant
+            )
 
         gen_ckpt = GeneratorCheckpointCallback(monitor="val_loss", mode="min")
 

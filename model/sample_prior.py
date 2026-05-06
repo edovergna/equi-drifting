@@ -1,7 +1,6 @@
 import numpy as np
 import torch
 
-
 # ---------------------------------------------------------------------------
 # Dense edge-index cache
 # ---------------------------------------------------------------------------
@@ -23,6 +22,7 @@ def get_dense_edge_index(n: int, device: torch.device) -> torch.Tensor:
 # QM9 atom-count distribution
 # ---------------------------------------------------------------------------
 
+
 def compute_size_distribution(dataset) -> tuple[np.ndarray, np.ndarray]:
     """Compute empirical atom-count distribution over the full underlying QM9 dataset."""
     underlying = dataset.dataset if hasattr(dataset, "dataset") else dataset
@@ -42,6 +42,7 @@ def compute_size_distribution(dataset) -> tuple[np.ndarray, np.ndarray]:
 # ---------------------------------------------------------------------------
 # Node-feature samplers
 # ---------------------------------------------------------------------------
+
 
 def sample_atom_dirichlet_noise(
     total_nodes: int,
@@ -65,6 +66,7 @@ def sample_atom_dirichlet_noise(
 # ---------------------------------------------------------------------------
 # Batch sampler
 # ---------------------------------------------------------------------------
+
 
 def sample_prior_batch(
     n_molecules: int,
@@ -91,7 +93,9 @@ def sample_prior_batch(
     atom_counts = np.random.choice(size_values, size=n_molecules, p=size_probs)
     total_nodes = int(atom_counts.sum())
 
-    pos = torch.randn(total_nodes, 3, device=device).clamp(-prior_pos_clamp, prior_pos_clamp)
+    pos = torch.randn(total_nodes, 3, device=device).clamp(
+        -prior_pos_clamp, prior_pos_clamp
+    )
     x = sample_atom_dirichlet_noise(total_nodes, num_atom_types, device=device)[1]
 
     batch_vec = torch.repeat_interleave(

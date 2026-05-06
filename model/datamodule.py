@@ -1,6 +1,7 @@
 import sys
-import numpy as np
+
 import lightning.pytorch as pl
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Subset
@@ -69,11 +70,14 @@ class QM9DataModule(pl.LightningDataModule):
         # torch_geometric's QM9.process() has no None guard. Setting rdkit entries
         # to None in sys.modules makes `import rdkit` raise ImportError inside QM9,
         # forcing it to download and use the pre-processed qm9_v3.pt instead.
-        _rdkit_saved = {k: v for k, v in sys.modules.items()
-                        if k == 'rdkit' or k.startswith('rdkit.')}
+        _rdkit_saved = {
+            k: v
+            for k, v in sys.modules.items()
+            if k == "rdkit" or k.startswith("rdkit.")
+        }
         for k in list(_rdkit_saved):
             sys.modules[k] = None  # type: ignore[assignment]
-        sys.modules.setdefault('rdkit', None)  # type: ignore[assignment]
+        sys.modules.setdefault("rdkit", None)  # type: ignore[assignment]
         try:
             dataset = QM9(
                 self.root,
@@ -84,32 +88,38 @@ class QM9DataModule(pl.LightningDataModule):
             )
         finally:
             for k in list(sys.modules):
-                if sys.modules[k] is None and (k == 'rdkit' or k.startswith('rdkit.')):
+                if sys.modules[k] is None and (k == "rdkit" or k.startswith("rdkit.")):
                     del sys.modules[k]
             sys.modules.update(_rdkit_saved)
 
         n = len(dataset)
         n_train = min(_N_TRAIN, n)
-        n_val   = min(_N_VAL,   n - n_train)
-        n_test  = n - n_train - n_val
+        n_val = min(_N_VAL, n - n_train)
+        n_test = n - n_train - n_val
 
         # Reproducible permutation matching the EPT standard split (seed=0)
-        rng  = np.random.default_rng(0)
+        rng = np.random.default_rng(0)
         perm = rng.permutation(n)
         train_idx = perm[:n_train]
-        val_idx   = perm[n_train : n_train + n_val]
-        test_idx  = perm[n_train + n_val :]
+        val_idx = perm[n_train : n_train + n_val]
+        test_idx = perm[n_train + n_val :]
 
         if self.sample_frac < 1.0:
             # Subsample each split proportionally, with a fixed secondary seed
             srng = np.random.default_rng(42)
-            train_idx = srng.choice(train_idx, size=max(1, int(self.sample_frac * n_train)),  replace=False)
-            val_idx   = srng.choice(val_idx,   size=max(1, int(self.sample_frac * n_val)),    replace=False)
-            test_idx  = srng.choice(test_idx,  size=max(1, int(self.sample_frac * n_test)),   replace=False)
+            train_idx = srng.choice(
+                train_idx, size=max(1, int(self.sample_frac * n_train)), replace=False
+            )
+            val_idx = srng.choice(
+                val_idx, size=max(1, int(self.sample_frac * n_val)), replace=False
+            )
+            test_idx = srng.choice(
+                test_idx, size=max(1, int(self.sample_frac * n_test)), replace=False
+            )
 
         self.train_set = Subset(dataset, train_idx)
-        self.val_set   = Subset(dataset, val_idx)
-        self.test_set  = Subset(dataset, test_idx)
+        self.val_set = Subset(dataset, val_idx)
+        self.test_set = Subset(dataset, test_idx)
 
     def train_dataloader(self) -> DataLoader:
         return DataLoader(

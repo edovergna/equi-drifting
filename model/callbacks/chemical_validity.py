@@ -6,7 +6,8 @@ from lightning.pytorch import Callback, LightningModule, Trainer
 
 import wandb
 
-from ..mol_utils import batch_to_stability, batch_to_validity, heavy_atom_counts
+from ..mol_utils import (batch_to_stability, batch_to_validity,
+                         heavy_atom_counts)
 
 
 class ChemicalValidityCallback(Callback):
@@ -86,11 +87,15 @@ class ChemicalValidityCallback(Callback):
         validity = n_valid / n_total if n_total > 0 else 0.0
         heavy_mean = float(np.mean(heavy)) if heavy else 0.0
 
-        pl_module.log("chem/validity",       validity,         on_epoch=True, on_step=False)
-        pl_module.log("chem/uniqueness",      uniqueness,       on_epoch=True, on_step=False)
-        pl_module.log("chem/heavy_atom_mean", heavy_mean,       on_epoch=True, on_step=False)
-        pl_module.log("chem/atom_stability",  atom_stable_frac, on_epoch=True, on_step=False)
-        pl_module.log("chem/mol_stability",   mol_stable_frac,  on_epoch=True, on_step=False)
+        pl_module.log("chem/validity", validity, on_epoch=True, on_step=False)
+        pl_module.log("chem/uniqueness", uniqueness, on_epoch=True, on_step=False)
+        pl_module.log("chem/heavy_atom_mean", heavy_mean, on_epoch=True, on_step=False)
+        pl_module.log(
+            "chem/atom_stability", atom_stable_frac, on_epoch=True, on_step=False
+        )
+        pl_module.log(
+            "chem/mol_stability", mol_stable_frac, on_epoch=True, on_step=False
+        )
 
         logger = trainer.logger
         if logger is None or not hasattr(logger, "experiment"):

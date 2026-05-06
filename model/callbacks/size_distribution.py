@@ -1,10 +1,11 @@
 import io
 
-import numpy as np
 import matplotlib.pyplot as plt
-import wandb
-from PIL import Image as PILImage
+import numpy as np
 from lightning.pytorch import Callback, LightningModule, Trainer
+from PIL import Image as PILImage
+
+import wandb
 
 
 class SizeDistributionCallback(Callback):
@@ -21,14 +22,24 @@ class SizeDistributionCallback(Callback):
         self._accumulated: list[np.ndarray] = []
 
     def on_train_batch_end(
-        self, trainer: Trainer, pl_module: LightningModule, outputs, batch, batch_idx: int
+        self,
+        trainer: Trainer,
+        pl_module: LightningModule,
+        outputs,
+        batch,
+        batch_idx: int,
     ) -> None:
         counts = getattr(pl_module, "_last_sampled_counts", None)
         if counts is not None:
             self._accumulated.append(counts.copy())
 
-    def on_validation_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        if trainer.current_epoch % self.log_every_n_epochs != 0 or not self._accumulated:
+    def on_validation_epoch_end(
+        self, trainer: Trainer, pl_module: LightningModule
+    ) -> None:
+        if (
+            trainer.current_epoch % self.log_every_n_epochs != 0
+            or not self._accumulated
+        ):
             self._accumulated.clear()
             return
 
@@ -54,8 +65,17 @@ class SizeDistributionCallback(Callback):
             x = true_sizes
             w = 0.4
             fig, ax = plt.subplots(figsize=(10, 4))
-            ax.bar(x - w / 2, true_probs, w, label="QM9 (true)", color="steelblue", alpha=0.8)
-            ax.bar(x + w / 2, emp_probs[x], w, label="Sampled", color="tomato", alpha=0.8)
+            ax.bar(
+                x - w / 2,
+                true_probs,
+                w,
+                label="QM9 (true)",
+                color="steelblue",
+                alpha=0.8,
+            )
+            ax.bar(
+                x + w / 2, emp_probs[x], w, label="Sampled", color="tomato", alpha=0.8
+            )
             ax.set_xlabel("Atom count")
             ax.set_ylabel("Fraction")
             ax.set_title(f"Atom-count distribution — epoch {trainer.current_epoch}")

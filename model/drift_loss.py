@@ -51,18 +51,18 @@ def compute_drift_loss(
         raise TrainingDivergedException("No valid distances found; loss is unstable.")
 
     scale = valid.mean().detach().clamp(min=1e-3)
-    scale_inputs = (scale / (D ** 0.5)).clamp(min=1e-3)
+    scale_inputs = (scale / (D**0.5)).clamp(min=1e-3)
 
-    old_gen_scaled = old_gen / scale_inputs       # [N_gen, D]
-    phi_real_scaled = phi_real / scale_inputs     # [N_real, D]
+    old_gen_scaled = old_gen / scale_inputs  # [N_gen, D]
+    phi_real_scaled = phi_real / scale_inputs  # [N_real, D]
 
     # Squared norms in scaled space
-    gen_norms = (old_gen_scaled**2).sum(dim=1)      # [N_gen]
-    real_norms = (phi_real_scaled**2).sum(dim=1)    # [N_real]
+    gen_norms = (old_gen_scaled**2).sum(dim=1)  # [N_gen]
+    real_norms = (phi_real_scaled**2).sum(dim=1)  # [N_real]
 
     # Norm differences for attraction (gen vs real) and repulsion (gen vs gen)
-    diff_pos = gen_norms[:, None] - real_norms[None, :]    # [N_gen, N_real]
-    diff_neg = gen_norms[:, None] - gen_norms[None, :]     # [N_gen, N_gen]
+    diff_pos = gen_norms[:, None] - real_norms[None, :]  # [N_gen, N_real]
+    diff_neg = gen_norms[:, None] - gen_norms[None, :]  # [N_gen, N_gen]
 
     # Mask self-connections: gen[i] -> gen[i]
     diff_neg = diff_neg + torch.eye(N_gen, device=phi_gen.device) * 1e6
@@ -89,29 +89,31 @@ def compute_drift_loss(
     for tau in temperatures:
         tau_key = str(tau).replace(".", "_")
 
-        kernel_pos = torch.exp(-diff_pos**2 / tau)    # [N_gen, N_real]
-        kernel_neg = torch.exp(-diff_neg**2 / tau)    # [N_gen, N_gen]
+        kernel_pos = torch.exp(-(diff_pos**2) / tau)  # [N_gen, N_real]
+        kernel_neg = torch.exp(-(diff_neg**2) / tau)  # [N_gen, N_gen]
 
-        Z_p = kernel_pos.sum(dim=1).clamp(min=1e-8)   # [N_gen]
-        Z_q = kernel_neg.sum(dim=1).clamp(min=1e-8)   # [N_gen]
+        Z_p = kernel_pos.sum(dim=1).clamp(min=1e-8)  # [N_gen]
+        Z_q = kernel_neg.sum(dim=1).clamp(min=1e-8)  # [N_gen]
 
         # Gradient of k(x, y) w.r.t. x, summed over attraction/repulsion targets
-        grad_pos = (-4 / tau * kernel_pos * diff_pos).sum(dim=1)    # [N_gen]
-        grad_neg = (-4 / tau * kernel_neg * diff_neg).sum(dim=1)    # [N_gen]
+        grad_pos = (-4 / tau * kernel_pos * diff_pos).sum(dim=1)  # [N_gen]
+        grad_neg = (-4 / tau * kernel_neg * diff_neg).sum(dim=1)  # [N_gen]
 
-        drift_pos = (grad_pos / Z_p).unsqueeze(-1) * old_gen_scaled    # [N_gen, D]
-        drift_neg = (grad_neg / Z_q).unsqueeze(-1) * old_gen_scaled    # [N_gen, D]
+        drift_pos = (grad_pos / Z_p).unsqueeze(-1) * old_gen_scaled  # [N_gen, D]
+        drift_neg = (grad_neg / Z_q).unsqueeze(-1) * old_gen_scaled  # [N_gen, D]
 
-        total_force_R = drift_pos - drift_neg    # [N_gen, D]
+        total_force_R = drift_pos - drift_neg  # [N_gen, D]
 
-        f_norm_val = (total_force_R ** 2).mean()
+        f_norm_val = (total_force_R**2).mean()
         force_scale = torch.sqrt(f_norm_val.clamp(min=1e-8)).detach()
 
         V_across_taus = V_across_taus + total_force_R / force_scale
 
         with torch.no_grad():
             stats[f"force_scale_{tau_key}"] = force_scale.item()
-            stats[f"v_norm_{tau_key}"] = (total_force_R / force_scale).norm(dim=-1).mean().item()
+            stats[f"v_norm_{tau_key}"] = (
+                (total_force_R / force_scale).norm(dim=-1).mean().item()
+            )
 
     goal_scaled = (old_gen_scaled + V_across_taus).detach()
     gen_scaled = phi_gen / scale_inputs

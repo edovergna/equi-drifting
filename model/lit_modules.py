@@ -7,8 +7,7 @@ from torch.optim.lr_scheduler import OneCycleLR
 
 from ept.ept_loader import load_ept_feature_extractor
 
-from .drift_loss import (TrainingDivergedException,
-                         compute_drift_loss)
+from .drift_loss import TrainingDivergedException, compute_drift_loss
 from .egnn import EGNN
 from .geometry import (batch_size_for_logging, center_positions_per_graph,
                        per_graph_center_norms)
@@ -111,7 +110,9 @@ class DriftingMoleculeGenerator(LightningModule):
     def _forward(self, batch):
         """Shared forward pass: prior → EGNN → center → hard atoms → EPT embeddings."""
         n_molecules = batch_size_for_logging(batch)
-        x_prior, pos_prior, gen_batch_vec, gen_dense_edge_index = self._sample_prior_batch(n_molecules)
+        x_prior, pos_prior, gen_batch_vec, gen_dense_edge_index = (
+            self._sample_prior_batch(n_molecules)
+        )
 
         x_gen, _, pos_gen = self.generator(x_prior, pos_prior, gen_dense_edge_index)
         pos_gen = center_positions_per_graph(pos_gen, gen_batch_vec)
@@ -141,7 +142,7 @@ class DriftingMoleculeGenerator(LightningModule):
 
         if not (torch.isfinite(phi_gen).all() and torch.isfinite(phi_real).all()):
             with torch.no_grad():
-                bad_gen_mask = ~torch.isfinite(phi_gen).all(dim=-1)   # [num_graphs]
+                bad_gen_mask = ~torch.isfinite(phi_gen).all(dim=-1)  # [num_graphs]
                 bad_real_mask = ~torch.isfinite(phi_real).all(dim=-1)
                 bad_mol_mask = bad_gen_mask | bad_real_mask
 
@@ -153,7 +154,11 @@ class DriftingMoleculeGenerator(LightningModule):
                 pos_bad = pos_gen[atom_mask]
 
                 pos_norms_bad = pos_bad.norm(dim=-1)
-                max_dist_bad = torch.cdist(pos_bad, pos_bad).max() if pos_bad.shape[0] > 1 else pos_bad.new_tensor(0.0)
+                max_dist_bad = (
+                    torch.cdist(pos_bad, pos_bad).max()
+                    if pos_bad.shape[0] > 1
+                    else pos_bad.new_tensor(0.0)
+                )
 
                 gen_center_norms = per_graph_center_norms(pos_gen, gen_batch_vec)
                 real_center_norms = per_graph_center_norms(batch.pos, batch.batch)
@@ -186,7 +191,9 @@ class DriftingMoleculeGenerator(LightningModule):
         self.log("train_loss", loss, batch_size=bs, on_step=True, on_epoch=True)
 
         for key, val in stats.items():
-            self.log(f"drift_train/{key}", val, batch_size=bs, on_step=True, on_epoch=False)
+            self.log(
+                f"drift_train/{key}", val, batch_size=bs, on_step=True, on_epoch=False
+            )
 
         self.log(
             "train/lr",
@@ -267,9 +274,7 @@ class DriftingMoleculeGenerator(LightningModule):
 
     def test_step(self, batch, batch_idx):
         _, _, phi_gen, phi_real, _ = self._forward(batch)
-        test_loss, _ = compute_drift_loss(
-            phi_gen, phi_real, self.temperatures
-        )
+        test_loss, _ = compute_drift_loss(phi_gen, phi_real, self.temperatures)
 
         bs = batch_size_for_logging(batch)
         self.log(

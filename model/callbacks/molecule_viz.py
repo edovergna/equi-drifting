@@ -1,10 +1,10 @@
 import io
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import matplotlib.pyplot as plt
-from PIL import Image as PILImage
 from lightning.pytorch import Callback, LightningModule, Trainer
+from PIL import Image as PILImage
 
 import wandb
 
@@ -103,7 +103,11 @@ class MoleculeVisualizationCallback(Callback):
             real_atom_types = ref["real_atom_types"].argmax(dim=-1)
             images = {
                 "mol/random_gen": render_group(
-                    random_idx, ref["pos_gen"], ref["gen_atom_types"], gen_batch_vec, "gen"
+                    random_idx,
+                    ref["pos_gen"],
+                    ref["gen_atom_types"],
+                    gen_batch_vec,
+                    "gen",
                 ),
                 "mol/best_gen": render_group(
                     best_idx,
@@ -125,7 +129,9 @@ class MoleculeVisualizationCallback(Callback):
             }
 
             if gen_types is not None and real_types is not None:
-                images["mol/atom_type_dist"] = self._atom_dist_chart(gen_types, real_types)
+                images["mol/atom_type_dist"] = self._atom_dist_chart(
+                    gen_types, real_types
+                )
 
             logger.experiment.log(images, step=trainer.global_step)
 
@@ -152,9 +158,15 @@ class MoleculeVisualizationCallback(Callback):
             m = types == t
             if m.any():
                 ax.scatter(
-                    p[m, 0], p[m, 1], p[m, 2],
-                    c=color, s=120, label=name,
-                    depthshade=True, edgecolors="k", linewidths=0.3,
+                    p[m, 0],
+                    p[m, 1],
+                    p[m, 2],
+                    c=color,
+                    s=120,
+                    label=name,
+                    depthshade=True,
+                    edgecolors="k",
+                    linewidths=0.3,
                 )
 
         for i in range(len(p)):
@@ -164,7 +176,9 @@ class MoleculeVisualizationCallback(Callback):
                         [p[i, 0], p[j, 0]],
                         [p[i, 1], p[j, 1]],
                         [p[i, 2], p[j, 2]],
-                        "k-", alpha=0.25, linewidth=0.8,
+                        "k-",
+                        alpha=0.25,
+                        linewidth=0.8,
                     )
 
         ax.set_title(title, fontsize=9)

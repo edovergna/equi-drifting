@@ -63,7 +63,9 @@ def load_pretrained_generator(
     api = wandb.Api()
     run = api.run(f"{WANDB_PATH}/{wandb_run_id}")
 
-    print(f"Downloading components from wandb run: {WANDB_PATH}/{wandb_run_id} (variant={variant})")
+    print(
+        f"Downloading components from wandb run: {WANDB_PATH}/{wandb_run_id} (variant={variant})"
+    )
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = Path(tmp_dir)
@@ -76,6 +78,8 @@ def load_pretrained_generator(
             run, f"feature_extractor_{variant}.pth", tmp_path / "feature_extractor.pth"
         )
         if not found:
-            print(f"  feature_extractor_{variant}.pth not found — was not fine-tuned, skipping.")
+            print(
+                f"  feature_extractor_{variant}.pth not found — was not fine-tuned, skipping."
+            )
 
         lit_module.load_individual_components(tmp_path)
