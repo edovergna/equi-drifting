@@ -96,7 +96,7 @@ def sample_prior_batch(
     pos = torch.randn(total_nodes, 3, device=device).clamp(
         -prior_pos_clamp, prior_pos_clamp
     )
-    x = sample_atom_dirichlet_noise(total_nodes, num_atom_types, device=device)[1]
+    x = sample_atom_dirichlet_noise(total_nodes, num_atom_types, device=device)[0]
 
     batch_vec = torch.repeat_interleave(
         torch.arange(n_molecules, device=device),
