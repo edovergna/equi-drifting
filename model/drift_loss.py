@@ -2,6 +2,7 @@ from typing import Tuple
 
 import torch
 import torch.nn.functional as F
+import wandb
 
 
 class TrainingDivergedException(Exception):
@@ -83,6 +84,13 @@ def compute_drift_loss(
         stats["cosine_sim_to_nn"] = cos_sim_matrix.max(dim=1).values.mean().item()
         stats["nn_l2_distance"] = dist[:, N_gen:].min(dim=1).values.mean().item()
         stats["invalid_dist_frac"] = (~valid_mask).float().mean().item()
+
+        # Pairwise stats among generated embeddings (upper triangle only — one entry per pair)
+        triu_idx = torch.triu_indices(N_gen, N_gen, offset=1, device=phi_gen.device)
+        gen_cos_sim = (phi_gen_unit @ phi_gen_unit.T)[triu_idx[0], triu_idx[1]]
+        gen_l2_dist = dist[:, :N_gen][triu_idx[0], triu_idx[1]]
+        stats["gen_pairwise_cos_sim_hist"] = wandb.Histogram(gen_cos_sim.float().cpu().numpy())
+        stats["gen_pairwise_l2_dist_hist"] = wandb.Histogram(gen_l2_dist.float().cpu().numpy())
 
     V_across_taus = torch.zeros_like(old_gen_scaled)
 

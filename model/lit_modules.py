@@ -2,6 +2,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import wandb
 from lightning.pytorch import LightningModule
 from torch.optim.lr_scheduler import OneCycleLR
 
@@ -191,10 +192,21 @@ class DriftingMoleculeGenerator(LightningModule):
         bs = batch_size_for_logging(batch)
         self.log("train_loss", loss, batch_size=bs, on_step=True, on_epoch=True)
 
+        hist_stats = {k: v for k, v in stats.items() if isinstance(v, wandb.Histogram)}
         for key, val in stats.items():
+            if key in hist_stats:
+                continue
             self.log(
                 f"drift_train/{key}", val, batch_size=bs, on_step=True, on_epoch=False
             )
+        if hist_stats and hasattr(self.logger, "experiment"):
+            try:
+                self.logger.experiment.log(
+                    {f"drift_train/{k}": v for k, v in hist_stats.items()},
+                    step=self.global_step,
+                )
+            except Exception:
+                pass
 
         self.log(
             "train/lr",
@@ -234,7 +246,10 @@ class DriftingMoleculeGenerator(LightningModule):
             sync_dist=True,
         )
 
+        hist_stats = {k: v for k, v in stats.items() if isinstance(v, wandb.Histogram)}
         for key, val in stats.items():
+            if key in hist_stats:
+                continue
             self.log(
                 f"drift_val/{key}",
                 val,
@@ -243,6 +258,14 @@ class DriftingMoleculeGenerator(LightningModule):
                 on_epoch=True,
                 sync_dist=True,
             )
+        if hist_stats and hasattr(self.logger, "experiment"):
+            try:
+                self.logger.experiment.log(
+                    {f"drift_val/{k}": v for k, v in hist_stats.items()},
+                    step=self.global_step,
+                )
+            except Exception:
+                pass
 
         with torch.no_grad():
             gen_cn = per_graph_center_norms(pos_gen, gen_batch_vec)
