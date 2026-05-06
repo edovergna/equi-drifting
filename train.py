@@ -44,7 +44,6 @@ def main(args: argparse.Namespace):
         )
 
         generator_cfg = {
-            "in_node_nf": 7,
             "hidden_nf": args.hidden_dim,
             "n_layers": args.num_layers,
             "num_atom_types": 5,

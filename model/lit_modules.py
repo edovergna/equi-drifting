@@ -23,7 +23,6 @@ class DriftingMoleculeGenerator(LightningModule):
         super().__init__()
 
         default_generator_cfg = {
-            "in_node_nf": 5,
             "hidden_nf": 128,
             "n_layers": 2,
             "num_atom_types": 5,
@@ -60,7 +59,6 @@ class DriftingMoleculeGenerator(LightningModule):
 
     def _init_generator(self, cfg) -> EGNN:
         return EGNN(
-            in_node_nf=cfg["in_node_nf"],
             hidden_nf=cfg["hidden_nf"],
             n_layers=cfg["n_layers"],
             num_atom_types=cfg["num_atom_types"],
@@ -106,7 +104,7 @@ class DriftingMoleculeGenerator(LightningModule):
         atom_counts = np.random.choice(
             self._size_values, size=n_molecules, p=self._size_probs
         )
-        in_dim = self.generator_cfg["in_node_nf"]
+        in_dim = self.generator_cfg["num_atom_types"]
         total_nodes = int(atom_counts.sum())
 
         pos = torch.randn(total_nodes, 3, device=self.device).clamp(

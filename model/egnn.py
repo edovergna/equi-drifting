@@ -184,7 +184,6 @@ class BondHead(nn.Module):
 class EGNN(nn.Module):
     def __init__(
         self,
-        in_node_nf: int,
         hidden_nf: int,
         num_atom_types: int,
         num_bond_types: int,
@@ -195,7 +194,7 @@ class EGNN(nn.Module):
 
         self.compute_heads = predict_bond_types
 
-        self.embedding = nn.Linear(in_node_nf, hidden_nf)
+        self.embedding = nn.Linear(num_atom_types, hidden_nf)
 
         self.blocks = nn.ModuleList(
             [EquivariantBlock(hidden_nf) for _ in range(n_layers)]
