@@ -114,6 +114,8 @@ def compute_normalized_drift_loss(
 
     return loss, stats
 
+# ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+# ---------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 def compute_molecule_based_drift_loss(
     pos_gen: torch.Tensor,
@@ -129,7 +131,6 @@ def compute_molecule_based_drift_loss(
     Returns (loss, stats) where stats is a flat dict of float diagnostics safe to
     pass directly to self.log(). Raises TrainingDivergedException on non-finite loss.
     """
-    # TODO
 
     gen_distances, gen_angles = prep_batch_for_kernel(pos_gen, index)
     real_distances, real_angles = prep_batch_for_kernel(pos_real, index)
