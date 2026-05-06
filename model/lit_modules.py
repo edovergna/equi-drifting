@@ -28,6 +28,7 @@ class DriftingMoleculeGenerator(LightningModule):
             "num_atom_types": 5,
             "num_bond_types": 5,
             "predict_bond_types": False,
+            "pos_clamp": 20.0,
         }
         default_drift_cfg = {
             "lr": 1e-4,
@@ -49,6 +50,7 @@ class DriftingMoleculeGenerator(LightningModule):
         self._freeze_feature_extractor()
 
         self.temperatures = self.drift_cfg["temperatures"]
+        self.pos_clamp = self.generator_cfg["pos_clamp"]
 
     def _init_generator(self, cfg) -> EGNN:
         return EGNN(
@@ -88,6 +90,7 @@ class DriftingMoleculeGenerator(LightningModule):
         x_prior, pos_prior = self.sample_prior(batch.num_nodes)
         x_gen, _, pos_gen = self.generator(x_prior, pos_prior, batch.dense_edge_index)
         pos_gen = center_positions_per_graph(pos_gen, batch.batch)
+        pos_gen = pos_gen.clamp(-self.pos_clamp, self.pos_clamp)
         a_soft_gen = F.gumbel_softmax(x_gen, tau=1.0, hard=False, dim=-1)
 
         # EPT expects block_id[i] = block index for atom i (each atom is its own block,

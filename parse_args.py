@@ -68,6 +68,12 @@ def parse_args():
         default=6,
         help="Number of layers for the EGNN model.",
     )
+    parser.add_argument(
+        "--pos_clamp",
+        type=float,
+        default=20.0,
+        help="Clamp generated atom positions to [-pos_clamp, pos_clamp] after centering (Angstroms).",
+    )
     # Wandb args
     parser.add_argument(
         "--wandb_run_id",

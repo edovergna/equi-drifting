@@ -49,6 +49,7 @@ def main(args: argparse.Namespace):
             "num_atom_types": 5,
             "num_bond_types": 5,
             "predict_bond_types": args.predict_bond_types,
+            "pos_clamp": args.pos_clamp,
         }
 
         drift_cfg = {
