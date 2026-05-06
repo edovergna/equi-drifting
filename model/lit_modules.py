@@ -7,12 +7,12 @@ from torch.optim.lr_scheduler import OneCycleLR
 
 from ept.ept_loader import load_ept_feature_extractor
 
-from .datamodule import compute_size_distribution, get_dense_edge_index
 from .drift_loss import (TrainingDivergedException,
                          compute_drift_loss)
 from .egnn import EGNN
 from .geometry import (batch_size_for_logging, center_positions_per_graph,
                        per_graph_center_norms)
+from .sample_prior import compute_size_distribution, sample_prior_batch
 
 
 class DriftingMoleculeGenerator(LightningModule):
@@ -94,36 +94,17 @@ class DriftingMoleculeGenerator(LightningModule):
     def _sample_prior_batch(
         self, n_molecules: int
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Sample n_molecules from the prior using the QM9 atom-count distribution.
-
-        Returns (x, pos, batch_vec, dense_edge_index) all on self.device.
-        """
         if self._size_values is None or self._size_probs is None:
             self._init_size_distribution()
 
-        atom_counts = np.random.choice(
-            self._size_values, size=n_molecules, p=self._size_probs
+        x, pos, batch_vec, dense_edge_index, atom_counts = sample_prior_batch(
+            n_molecules,
+            self._size_values,
+            self._size_probs,
+            self.generator_cfg["num_atom_types"],
+            self.prior_pos_clamp,
+            self.device,
         )
-        in_dim = self.generator_cfg["num_atom_types"]
-        total_nodes = int(atom_counts.sum())
-
-        pos = torch.randn(total_nodes, 3, device=self.device).clamp(
-            -self.prior_pos_clamp, self.prior_pos_clamp
-        )
-        x = torch.randn(total_nodes, in_dim, device=self.device)
-
-        batch_vec = torch.repeat_interleave(
-            torch.arange(n_molecules, device=self.device),
-            torch.tensor(atom_counts, dtype=torch.long, device=self.device),
-        )
-
-        parts, offset = [], 0
-        for n in atom_counts:
-            n = int(n)
-            parts.append(get_dense_edge_index(n, self.device) + offset)
-            offset += n
-        dense_edge_index = torch.cat(parts, dim=1)
-
         self._last_sampled_counts = atom_counts  # read by SizeDistributionCallback
         return x, pos, batch_vec, dense_edge_index
 
