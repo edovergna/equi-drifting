@@ -4,7 +4,7 @@ import torch.nn as nn
 # EPT atom-vocab indices for the 5 QM9 atom types (H, C, N, O, F).
 # VOCAB.idx2atom = [pad, mask, global] + periodic_table_uppercase, so:
 #   H=3, He=4, Li=5, Be=6, B=7, C=8, N=9, O=10, F=11
-# These must match the column order of a_soft: col 0=H, 1=C, 2=N, 3=O, 4=F.
+# These must match the column order of a_hard: col 0=H, 1=C, 2=N, 3=O, 4=F.
 _QM9_EPT_ATOM_INDICES = [3, 8, 9, 10, 11]
 
 
@@ -100,21 +100,19 @@ class EPTFeatureExtractor(nn.Module):
     def forward(
         self,
         pos: torch.Tensor,
-        a_soft: torch.Tensor,
+        atom_types: torch.Tensor,
         block_id: torch.Tensor,
         batch_id: torch.Tensor,
         dense_edge_index: torch.Tensor,
     ):
         """
         pos: [N, 3] 3D coordinates
-        a_soft: [N, 5] Continuous atom probabilities (H, C, N, O, F)
+        atom_types: [N] Integer atom type indices (0=H, 1=C, 2=N, 3=O, 4=F)
         block_id: [N] atom i -> block i (arange, each atom is its own block)
         batch_id: [N] block/atom i -> graph index
         dense_edge_index: [2, E] Fully connected edges (globally indexed)
         """
-        # Bypass the non-differentiable nn.Embedding: soft-embed by taking the weighted
-        # sum of the EPT atom embeddings for the 5 QM9 types (H, C, N, O, F).
-        h_continuous = a_soft @ self.embed_weights[self.qm9_ept_indices, :]
+        h_continuous = self.embed_weights[self.qm9_ept_indices[atom_types], :]
 
         # Distance-based edge type embedding, matching EPT's RadialEdge training scheme.
         edge_attr = self._compute_edge_attr(pos, dense_edge_index)

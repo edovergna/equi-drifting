@@ -1,7 +1,7 @@
 from pathlib import Path
 
+import numpy as np
 import torch
-import torch.nn.functional as F
 from lightning.pytorch import LightningModule
 from torch.optim.lr_scheduler import OneCycleLR
 
@@ -9,12 +9,9 @@ from ept.ept_loader import load_ept_feature_extractor
 
 from .drift_loss import TrainingDivergedException, compute_drift_loss
 from .egnn import EGNN
-from .geometry import (
-    batch_size_for_logging,
-    center_positions_per_graph,
-    per_graph_center_norms,
-)
-from .sample_prior import sample_egnn_molecule_batch
+from .geometry import (batch_size_for_logging, center_positions_per_graph,
+                       per_graph_center_norms)
+from .sample_prior import compute_size_distribution, sample_prior_batch
 
 
 class DriftingMoleculeGenerator(LightningModule):
@@ -31,6 +28,8 @@ class DriftingMoleculeGenerator(LightningModule):
             "num_bond_types": 5,
             "coordinate_clamp_range": 3.0,
             "predict_bond_types": False,
+            "pos_clamp": 20.0,
+            "prior_pos_clamp": 3.0,
         }
         default_drift_cfg = {
             "lr": 1e-4,
@@ -52,6 +51,11 @@ class DriftingMoleculeGenerator(LightningModule):
         self._freeze_feature_extractor()
 
         self.temperatures = self.drift_cfg["temperatures"]
+        self.pos_clamp = self.generator_cfg["pos_clamp"]
+        self.prior_pos_clamp = self.generator_cfg["prior_pos_clamp"]
+
+        self._size_values: np.ndarray | None = None
+        self._size_probs: np.ndarray | None = None
 
     def _init_generator(self, cfg) -> EGNN:
         return EGNN(
@@ -70,58 +74,108 @@ class DriftingMoleculeGenerator(LightningModule):
         for p in self.feature_extractor.parameters():
             p.requires_grad = False
 
-    def sample_prior(self, batch) -> dict[str, torch.Tensor]:
-        node_counts = torch.bincount(batch.batch)
-        return sample_egnn_molecule_batch(
-            node_counts=node_counts,
-            clamp_range=self.generator_cfg["coordinate_clamp_range"],
-            num_atom_types=self.generator_cfg["num_atom_types"],
-            dtype=batch.pos.dtype,
-            device=batch.pos.device,
+    def set_size_distribution(self, sizes: np.ndarray, probs: np.ndarray) -> None:
+        self._size_values = sizes
+        self._size_probs = probs
+
+    def _init_size_distribution(self) -> None:
+        if self.trainer is not None and self.trainer.datamodule is not None:
+            dm = self.trainer.datamodule
+            if hasattr(dm, "train_set") and dm.train_set is not None:
+                sizes, probs = compute_size_distribution(dm.train_set)
+                self._size_values = sizes
+                self._size_probs = probs
+                return
+        raise RuntimeError(
+            "Atom size distribution not set. Call set_size_distribution() before sampling, "
+            "or ensure the model is bound to a trainer with a QM9DataModule."
         )
 
-    def _forward(self, batch):
-        """Shared forward pass: prior -> EGNN -> center -> soft atoms -> EPT embeddings."""
-        prior = self.sample_prior(batch)
-        x_gen, _, pos_gen = self.generator(
-            prior["x"],
-            prior["pos"],
-            prior["dense_edge_index"],
+    def _sample_prior_batch(
+        self, n_molecules: int
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        if self._size_values is None or self._size_probs is None:
+            self._init_size_distribution()
+
+        x, pos, batch_vec, dense_edge_index, atom_counts = sample_prior_batch(
+            n_molecules,
+            self._size_values,
+            self._size_probs,
+            self.generator_cfg["num_atom_types"],
+            self.prior_pos_clamp,
+            self.device,
         )
-        pos_gen = center_positions_per_graph(pos_gen, prior["batch"])
-        a_soft_gen = F.gumbel_softmax(x_gen, tau=1.0, hard=False, dim=-1)
+        self._last_sampled_counts = atom_counts  # read by SizeDistributionCallback
+        return x, pos, batch_vec, dense_edge_index
+
+    def _forward(self, batch):
+        """Shared forward pass: prior → EGNN → center → hard atoms → EPT embeddings."""
+        n_molecules = batch_size_for_logging(batch)
+        x_prior, pos_prior, gen_batch_vec, gen_dense_edge_index = (
+            self._sample_prior_batch(n_molecules)
+        )
+
+        x_gen, _, pos_gen = self.generator(x_prior, pos_prior, gen_dense_edge_index)
+        pos_gen = center_positions_per_graph(pos_gen, gen_batch_vec)
+        pos_gen = pos_gen.clamp(-self.pos_clamp, self.pos_clamp)
+        gen_atom_types = x_gen.softmax(dim=-1).argmax(dim=-1)
 
         # EPT expects block_id[i] = block index for atom i (each atom is its own block,
         # so block index = atom index), and batch_id[j] = graph index for block j.
-        block_id = torch.arange(batch.num_nodes, device=batch.batch.device)
-        batch_id = prior["batch"]
-
         phi_gen = self.feature_extractor(
             pos=pos_gen,
-            a_soft=a_soft_gen,
-            block_id=block_id,
-            batch_id=batch_id,
-            dense_edge_index=prior["dense_edge_index"],
+            atom_types=gen_atom_types,
+            block_id=torch.arange(pos_gen.shape[0], device=self.device),
+            batch_id=gen_batch_vec,
+            dense_edge_index=gen_dense_edge_index,
         )
         phi_real = self.feature_extractor(
             pos=batch.pos,
-            a_soft=batch.a_soft_real,
-            block_id=block_id,
-            batch_id=batch_id,
-            dense_edge_index=prior["dense_edge_index"],
+            atom_types=batch.real_atom_types.argmax(dim=-1),
+            block_id=torch.arange(batch.num_nodes, device=batch.batch.device),
+            batch_id=batch.batch,
+            dense_edge_index=batch.dense_edge_index,
         )
-        return pos_gen, a_soft_gen, phi_gen, phi_real
+        return pos_gen, gen_atom_types, phi_gen, phi_real, gen_batch_vec
 
     def training_step(self, batch, batch_idx):
-        pos_gen, _, phi_gen, phi_real = self._forward(batch)
+        pos_gen, _, phi_gen, phi_real, gen_batch_vec = self._forward(batch)
 
         if not (torch.isfinite(phi_gen).all() and torch.isfinite(phi_real).all()):
-            bad_gen = (~torch.isfinite(phi_gen)).sum().item()
-            bad_real = (~torch.isfinite(phi_real)).sum().item()
-            self.print(
-                f"\n[Step {self.global_step}] Non-finite embeddings - "
-                f"phi_gen: {bad_gen}, phi_real: {bad_real}. Stopping."
-            )
+            with torch.no_grad():
+                bad_gen_mask = ~torch.isfinite(phi_gen).all(dim=-1)  # [num_graphs]
+                bad_real_mask = ~torch.isfinite(phi_real).all(dim=-1)
+                bad_mol_mask = bad_gen_mask | bad_real_mask
+
+                n_bad_gen = bad_gen_mask.sum().item()
+                n_bad_real = bad_real_mask.sum().item()
+                n_total = bad_mol_mask.shape[0]
+
+                atom_mask = bad_mol_mask[gen_batch_vec]
+                pos_bad = pos_gen[atom_mask]
+
+                pos_norms_bad = pos_bad.norm(dim=-1)
+                max_dist_bad = (
+                    torch.cdist(pos_bad, pos_bad).max()
+                    if pos_bad.shape[0] > 1
+                    else pos_bad.new_tensor(0.0)
+                )
+
+                gen_center_norms = per_graph_center_norms(pos_gen, gen_batch_vec)
+                real_center_norms = per_graph_center_norms(batch.pos, batch.batch)
+                bad_gen_cn = gen_center_norms[bad_mol_mask]
+                bad_real_cn = real_center_norms[bad_mol_mask]
+
+                self.print(
+                    f"\n[Step {self.global_step}] Non-finite embeddings — "
+                    f"{n_bad_gen} gen mol(s), {n_bad_real} real mol(s) out of {n_total}.\n"
+                    f"  [bad mols] pos_gen norm   mean={pos_norms_bad.mean():.3f}  std={pos_norms_bad.std():.3f}\n"
+                    f"  [bad mols] max pairwise dist={max_dist_bad:.3f}\n"
+                    f"  [bad mols] gen center norm  mean={bad_gen_cn.mean():.3f}  std={bad_gen_cn.std():.3f}\n"
+                    f"  [bad mols] real center norm mean={bad_real_cn.mean():.3f}  std={bad_real_cn.std():.3f}\n"
+                    f"  Stopping."
+                )
+
             self.trainer.should_stop = True
             return torch.tensor(0.0, device=self.device, requires_grad=True)
 
@@ -151,7 +205,7 @@ class DriftingMoleculeGenerator(LightningModule):
 
         with torch.no_grad():
             pos_norms = pos_gen.norm(dim=-1)
-            gen_center_norms = per_graph_center_norms(pos_gen, batch.batch)
+            gen_center_norms = per_graph_center_norms(pos_gen, gen_batch_vec)
             real_center_norms = per_graph_center_norms(batch.pos, batch.batch)
             max_dist = torch.cdist(pos_gen, pos_gen).max()
 
@@ -165,7 +219,7 @@ class DriftingMoleculeGenerator(LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        pos_gen, a_soft_gen, phi_gen, phi_real = self._forward(batch)
+        pos_gen, gen_atom_types, phi_gen, phi_real, gen_batch_vec = self._forward(batch)
         val_loss, stats = compute_drift_loss(
             phi_gen, phi_real, temperatures=self.temperatures
         )
@@ -191,7 +245,7 @@ class DriftingMoleculeGenerator(LightningModule):
             )
 
         with torch.no_grad():
-            gen_cn = per_graph_center_norms(pos_gen, batch.batch)
+            gen_cn = per_graph_center_norms(pos_gen, gen_batch_vec)
             real_cn = per_graph_center_norms(batch.pos, batch.batch)
         self.log(
             "debug/val_gen_center_norm_mean",
@@ -212,14 +266,15 @@ class DriftingMoleculeGenerator(LightningModule):
             "phi_gen": phi_gen.detach().cpu(),
             "phi_real": phi_real.detach().cpu(),
             "pos_gen": pos_gen.detach().cpu(),
-            "a_soft_gen": a_soft_gen.detach().cpu(),
+            "gen_atom_types": gen_atom_types.detach().cpu(),
             "pos_real": batch.pos.detach().cpu(),
-            "a_soft_real": batch.a_soft_real.detach().cpu(),
+            "real_atom_types": batch.real_atom_types.detach().cpu(),
+            "gen_batch_vec": gen_batch_vec.detach().cpu(),
             "batch_vec": batch.batch.detach().cpu(),
         }
 
     def test_step(self, batch, batch_idx):
-        _, _, phi_gen, phi_real = self._forward(batch)
+        _, _, phi_gen, phi_real, _ = self._forward(batch)
         test_loss, _ = compute_drift_loss(phi_gen, phi_real, self.temperatures)
 
         bs = batch_size_for_logging(batch)

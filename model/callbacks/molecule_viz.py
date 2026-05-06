@@ -1,8 +1,10 @@
 import io
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from lightning.pytorch import Callback, LightningModule, Trainer
+from PIL import Image as PILImage
 
 import wandb
 
@@ -29,9 +31,10 @@ class MoleculeVisualizationCallback(Callback):
         "phi_gen",
         "phi_real",
         "pos_gen",
-        "a_soft_gen",
+        "gen_atom_types",
         "pos_real",
-        "a_soft_real",
+        "real_atom_types",
+        "gen_batch_vec",
         "batch_vec",
     }
 
@@ -58,8 +61,8 @@ class MoleculeVisualizationCallback(Callback):
             return
         if batch_idx == 0:
             self._ref = {k: outputs[k] for k in self._REQUIRED_KEYS}
-        self._gen_atom_types.append(outputs["a_soft_gen"].argmax(dim=-1).cpu())
-        self._real_atom_types.append(outputs["a_soft_real"].argmax(dim=-1).cpu())
+        self._gen_atom_types.append(outputs["gen_atom_types"].cpu())
+        self._real_atom_types.append(outputs["real_atom_types"].argmax(dim=-1).cpu())
 
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: LightningModule
@@ -79,8 +82,9 @@ class MoleculeVisualizationCallback(Callback):
             ref = self._ref
             phi_gen = ref["phi_gen"].float()
             phi_real = ref["phi_real"].float()
-            batch_vec = ref["batch_vec"]
-            n_graphs = int(batch_vec.max().item()) + 1
+            gen_batch_vec = ref["gen_batch_vec"]
+            real_batch_vec = ref["batch_vec"]
+            n_graphs = int(phi_gen.shape[0])
 
             nn_dists = torch.cdist(phi_gen, phi_real).min(dim=1).values
             all_idx = list(range(n_graphs))
@@ -90,35 +94,44 @@ class MoleculeVisualizationCallback(Callback):
             best_idx = ranked[: self.n_molecules]
             worst_idx = ranked[-self.n_molecules :]
 
-            def render_group(indices, pos, a_soft, label_prefix):
+            def render_group(indices, pos, atom_types, bvec, label_prefix):
                 return [
-                    self._render_mol(pos, a_soft, batch_vec, i, f"{label_prefix} #{i}")
+                    self._render_mol(pos, atom_types, bvec, i, f"{label_prefix} #{i}")
                     for i in indices
                 ]
 
+            real_atom_types = ref["real_atom_types"].argmax(dim=-1)
             images = {
                 "mol/random_gen": render_group(
-                    random_idx, ref["pos_gen"], ref["a_soft_gen"], "gen"
+                    random_idx,
+                    ref["pos_gen"],
+                    ref["gen_atom_types"],
+                    gen_batch_vec,
+                    "gen",
                 ),
                 "mol/best_gen": render_group(
                     best_idx,
                     ref["pos_gen"],
-                    ref["a_soft_gen"],
+                    ref["gen_atom_types"],
+                    gen_batch_vec,
                     f"best d={nn_dists[best_idx[0]]:.2f}",
                 ),
                 "mol/worst_gen": render_group(
                     worst_idx,
                     ref["pos_gen"],
-                    ref["a_soft_gen"],
+                    ref["gen_atom_types"],
+                    gen_batch_vec,
                     f"worst d={nn_dists[worst_idx[0]]:.2f}",
                 ),
                 "mol/real_ref": render_group(
-                    random_idx, ref["pos_real"], ref["a_soft_real"], "real"
+                    random_idx, ref["pos_real"], real_atom_types, real_batch_vec, "real"
                 ),
             }
 
             if gen_types is not None and real_types is not None:
-                images["mol/atom_type_dist"] = self._atom_dist_chart(gen_types, real_types)
+                images["mol/atom_type_dist"] = self._atom_dist_chart(
+                    gen_types, real_types
+                )
 
             logger.experiment.log(images, step=trainer.global_step)
 
@@ -128,17 +141,15 @@ class MoleculeVisualizationCallback(Callback):
     def _render_mol(
         self,
         pos: torch.Tensor,
-        a_soft: torch.Tensor,
+        atom_types: torch.Tensor,
         batch_vec: torch.Tensor,
         graph_idx: int,
         title: str = "",
     ) -> "wandb.Image":
-        import matplotlib.pyplot as plt
-        from PIL import Image as PILImage
 
         mask = batch_vec == graph_idx
         p = pos[mask].numpy()
-        types = a_soft[mask].argmax(dim=-1).numpy()
+        types = atom_types[mask].numpy()
 
         fig = plt.figure(figsize=(4, 4))
         ax = fig.add_subplot(111, projection="3d")
@@ -147,9 +158,15 @@ class MoleculeVisualizationCallback(Callback):
             m = types == t
             if m.any():
                 ax.scatter(
-                    p[m, 0], p[m, 1], p[m, 2],
-                    c=color, s=120, label=name,
-                    depthshade=True, edgecolors="k", linewidths=0.3,
+                    p[m, 0],
+                    p[m, 1],
+                    p[m, 2],
+                    c=color,
+                    s=120,
+                    label=name,
+                    depthshade=True,
+                    edgecolors="k",
+                    linewidths=0.3,
                 )
 
         for i in range(len(p)):
@@ -159,7 +176,9 @@ class MoleculeVisualizationCallback(Callback):
                         [p[i, 0], p[j, 0]],
                         [p[i, 1], p[j, 1]],
                         [p[i, 2], p[j, 2]],
-                        "k-", alpha=0.25, linewidth=0.8,
+                        "k-",
+                        alpha=0.25,
+                        linewidth=0.8,
                     )
 
         ax.set_title(title, fontsize=9)
@@ -175,8 +194,6 @@ class MoleculeVisualizationCallback(Callback):
     def _atom_dist_chart(
         self, gen_types: torch.Tensor, real_types: torch.Tensor
     ) -> "wandb.Image":
-        import matplotlib.pyplot as plt
-        from PIL import Image as PILImage
 
         n = len(_ATOM_NAMES)
         gen_frac = np.array(

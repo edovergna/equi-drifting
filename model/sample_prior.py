@@ -1,20 +1,47 @@
+import numpy as np
 import torch
 
+# ---------------------------------------------------------------------------
+# Dense edge-index cache
+# ---------------------------------------------------------------------------
 
-def sample_coordinate_noise(
-    total_nodes: int,
-    clamp_range: float,
-    dtype: torch.dtype = torch.float32,
-    device=None,
-) -> torch.Tensor:
-    """
-    Sample flat 3D coordinate noise for all nodes.
+_dense_edge_index_cache: dict[int, torch.Tensor] = {}
 
-    Returns:
-        pos: [total_nodes, 3]
-    """
-    pos = torch.randn(total_nodes, 3, device=device, dtype=dtype)
-    return pos.clamp(min=-float(clamp_range), max=float(clamp_range))
+
+def get_dense_edge_index(n: int, device: torch.device) -> torch.Tensor:
+    """Return a cached fully-connected (no self-loops) edge index for n nodes."""
+    if n not in _dense_edge_index_cache:
+        row = torch.arange(n).repeat_interleave(n)
+        col = torch.arange(n).repeat(n)
+        mask = row != col
+        _dense_edge_index_cache[n] = torch.stack([row[mask], col[mask]], dim=0)
+    return _dense_edge_index_cache[n].to(device)
+
+
+# ---------------------------------------------------------------------------
+# QM9 atom-count distribution
+# ---------------------------------------------------------------------------
+
+
+def compute_size_distribution(dataset) -> tuple[np.ndarray, np.ndarray]:
+    """Compute empirical atom-count distribution over the full underlying QM9 dataset."""
+    underlying = dataset.dataset if hasattr(dataset, "dataset") else dataset
+
+    if hasattr(underlying, "slices") and "pos" in underlying.slices:
+        sizes = torch.diff(underlying.slices["pos"])  # [n_molecules]
+    else:
+        sizes = torch.tensor([underlying[i].num_nodes for i in range(len(underlying))])
+
+    counts = torch.bincount(sizes.long())
+    mask = counts > 0
+    unique = torch.where(mask)[0].numpy().astype(int)
+    probs = (counts[mask].float() / counts[mask].sum()).numpy()
+    return unique, probs
+
+
+# ---------------------------------------------------------------------------
+# Node-feature samplers
+# ---------------------------------------------------------------------------
 
 
 def sample_atom_dirichlet_noise(
@@ -23,8 +50,7 @@ def sample_atom_dirichlet_noise(
     dtype: torch.dtype = torch.float32,
     device=None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Sample flat simplex-valued atom probabilities and their square-root map.
+    """Sample flat simplex-valued atom probabilities and their square-root map.
 
     Returns:
         A_prob: [total_nodes, num_atom_types]
@@ -37,108 +63,51 @@ def sample_atom_dirichlet_noise(
     return A_prob, S_sqrt
 
 
-def batch_vector_from_node_counts(node_counts, device=None) -> torch.Tensor:
-    """
-    node_counts: list/1D tensor of length B with number of real nodes per graph.
+# ---------------------------------------------------------------------------
+# Batch sampler
+# ---------------------------------------------------------------------------
+
+
+def sample_prior_batch(
+    n_molecules: int,
+    size_values: np.ndarray,
+    size_probs: np.ndarray,
+    num_atom_types: int,
+    prior_pos_clamp: float,
+    device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, np.ndarray]:
+    """Sample n_molecules from the prior using the QM9 atom-count distribution.
+
+    1. Draws atom counts for each molecule from the empirical QM9 distribution.
+    2. Samples Gaussian positions (clamped) and Dirichlet atom features per node.
+    3. Builds the batched dense_edge_index (fully-connected, no self-loops, offset
+       per molecule) and the batch membership vector.
 
     Returns:
-        batch: [sum(node_counts)], PyG graph id per node.
+        x:                 [total_nodes, num_atom_types]
+        pos:               [total_nodes, 3]
+        batch_vec:         [total_nodes]  — molecule index per node
+        dense_edge_index:  [2, total_edges]
+        atom_counts:       [n_molecules]  — numpy array of per-molecule sizes
     """
-    node_counts = torch.as_tensor(node_counts, device=device, dtype=torch.long)
-    if node_counts.dim() != 1:
-        raise ValueError("node_counts must be a 1D list or tensor")
-    if node_counts.numel() == 0:
-        raise ValueError("node_counts must contain at least one graph")
-    if torch.any(node_counts <= 0):
-        raise ValueError("all node counts must be positive")
+    atom_counts = np.random.choice(size_values, size=n_molecules, p=size_probs)
+    total_nodes = int(atom_counts.sum())
 
-    return torch.repeat_interleave(
-        torch.arange(node_counts.numel(), device=node_counts.device),
-        node_counts,
+    pos = torch.randn(total_nodes, 3, device=device).clamp(
+        -prior_pos_clamp, prior_pos_clamp
+    )
+    x = sample_atom_dirichlet_noise(total_nodes, num_atom_types, device=device)[1]
+
+    batch_vec = torch.repeat_interleave(
+        torch.arange(n_molecules, device=device),
+        torch.tensor(atom_counts, dtype=torch.long, device=device),
     )
 
+    parts, offset = [], 0
+    for n in atom_counts:
+        n = int(n)
+        parts.append(get_dense_edge_index(n, device) + offset)
+        offset += n
+    dense_edge_index = torch.cat(parts, dim=1)
 
-def dense_edge_index_from_node_counts(node_counts, device=None) -> torch.Tensor:
-    """
-    node_counts: list/1D tensor of length B with number of real nodes per graph.
-
-    Returns:
-        dense_edge_index: [2, E], fully connected within each graph, no self-loops.
-    """
-    node_counts = torch.as_tensor(node_counts, device=device, dtype=torch.long)
-    if node_counts.dim() != 1:
-        raise ValueError("node_counts must be a 1D list or tensor")
-    if node_counts.numel() == 0:
-        raise ValueError("node_counts must contain at least one graph")
-    if torch.any(node_counts <= 0):
-        raise ValueError("all node counts must be positive")
-
-    edge_indices = []
-    offset = 0
-    for count in node_counts.tolist():
-        local_nodes = torch.arange(count, device=node_counts.device)
-        src = local_nodes.repeat_interleave(count)
-        dst = local_nodes.repeat(count)
-        keep = src != dst
-        edge_indices.append(
-            torch.stack([src[keep] + offset, dst[keep] + offset], dim=0)
-        )
-        offset += count
-
-    return torch.cat(edge_indices, dim=1)
-
-
-def sample_egnn_molecule_batch(
-    node_counts,
-    clamp_range: float,
-    num_atom_types: int = 5,
-    dtype: torch.dtype = torch.float32,
-    device=None,
-) -> dict[str, torch.Tensor]:
-    """
-    Sample flat molecule-shaped prior noise for the EGNN.
-
-    node_counts: list/1D tensor of length B. node_counts[b] is the number of
-        nodes in graph b.
-
-    Returns:
-        x: [sum(node_counts), num_atom_types]
-        pos: [sum(node_counts), 3]
-        batch: [sum(node_counts)]
-    """
-    node_counts = torch.as_tensor(node_counts, device=device, dtype=torch.long)
-    batch = batch_vector_from_node_counts(node_counts, device=device)
-    dense_edge_index = dense_edge_index_from_node_counts(node_counts, device=device)
-    total_nodes = int(node_counts.sum().item())
-
-    pos = sample_coordinate_noise(
-        total_nodes=total_nodes,
-        clamp_range=clamp_range,
-        dtype=dtype,
-        device=device,
-    )
-    A_prob, S_sqrt = sample_atom_dirichlet_noise(
-        total_nodes=total_nodes,
-        num_atom_types=num_atom_types,
-        dtype=dtype,
-        device=device,
-    )
-
-    return {
-        "x": S_sqrt,
-        "pos": pos,
-        "batch": batch,
-        "dense_edge_index": dense_edge_index,
-        "A_prob": A_prob,
-        "S_sqrt": S_sqrt,
-    }
-
-
-def check_simplex(A_prob, atol=1e-5):
-    row_sums = A_prob.sum(dim=-1)
-    return torch.allclose(row_sums, torch.ones_like(row_sums), atol=atol)
-
-
-def check_sqrt_simplex(S_sqrt, atol=1e-5):
-    row_sums = (S_sqrt**2).sum(dim=-1)
-    return torch.allclose(row_sums, torch.ones_like(row_sums), atol=atol)
+    return x, pos, batch_vec, dense_edge_index, atom_counts

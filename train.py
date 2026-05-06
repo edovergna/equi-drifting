@@ -13,16 +13,11 @@ from lightning.pytorch.callbacks import EarlyStopping
 from lightning.pytorch.loggers import WandbLogger
 
 import wandb
-from model import (
-    ChemicalValidityCallback,
-    DriftingMoleculeGenerator,
-    EmbeddingMonitorCallback,
-    GeneratorCheckpointCallback,
-    GradientMonitorCallback,
-    MoleculeVisualizationCallback,
-    QM9DataModule,
-    initialize_training_config,
-)
+from model import (ChemicalValidityCallback, DriftingMoleculeGenerator,
+                   EmbeddingMonitorCallback, GeneratorCheckpointCallback,
+                   GradientMonitorCallback, MoleculeVisualizationCallback,
+                   QM9DataModule, SizeDistributionCallback,
+                   initialize_training_config)
 from model.wandb_utils import load_pretrained_generator
 from parse_args import parse_args
 
@@ -49,12 +44,13 @@ def main(args: argparse.Namespace):
         )
 
         generator_cfg = {
-            "in_node_nf": 7,
             "hidden_nf": args.hidden_dim,
             "n_layers": args.num_layers,
             "num_atom_types": 5,
             "num_bond_types": 5,
             "predict_bond_types": args.predict_bond_types,
+            "pos_clamp": args.pos_clamp,
+            "prior_pos_clamp": args.prior_pos_clamp,
         }
 
         drift_cfg = {
@@ -80,6 +76,7 @@ def main(args: argparse.Namespace):
                 n_molecules=4, bond_threshold=2.0, every_n_epochs=1
             ),
             ChemicalValidityCallback(),
+            SizeDistributionCallback(),
             gen_ckpt,
         ]
 
