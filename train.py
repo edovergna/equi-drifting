@@ -73,8 +73,6 @@ def main(args: argparse.Namespace):
 
         gen_ckpt = GeneratorCheckpointCallback(monitor="val_loss", mode="min")
 
-        gen_ckpt = GeneratorCheckpointCallback(monitor="val_loss", mode="min")
-
         callbacks = [
             GradientMonitorCallback(),
             EmbeddingMonitorCallback(),
