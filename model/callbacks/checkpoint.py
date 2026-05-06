@@ -28,7 +28,11 @@ class GeneratorCheckpointCallback(Callback):
         self._best_fe_state_dict: dict | None = None
 
     def _is_better(self, current: float) -> bool:
-        return current < self._best_score if self.mode == "min" else current > self._best_score
+        return (
+            current < self._best_score
+            if self.mode == "min"
+            else current > self._best_score
+        )
 
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: LightningModule
@@ -88,8 +92,12 @@ class GeneratorCheckpointCallback(Callback):
             return False
         pl_module.generator.load_state_dict(self._best_state_dict)
         if self._best_fe_state_dict is not None:
-            pl_module.feature_extractor.ept_model.load_state_dict(self._best_fe_state_dict)
-        print(f"Loaded best weights ({self.monitor}={self._best_score:.6f}) into model.")
+            pl_module.feature_extractor.ept_model.load_state_dict(
+                self._best_fe_state_dict
+            )
+        print(
+            f"Loaded best weights ({self.monitor}={self._best_score:.6f}) into model."
+        )
         return True
 
     def on_train_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
@@ -98,5 +106,7 @@ class GeneratorCheckpointCallback(Callback):
     def on_exception(
         self, trainer: Trainer, pl_module: LightningModule, exception: BaseException
     ) -> None:
-        print(f"\n[GeneratorCheckpointCallback] {type(exception).__name__} — saving weights.")
+        print(
+            f"\n[GeneratorCheckpointCallback] {type(exception).__name__} — saving weights."
+        )
         self._save_and_log(trainer, pl_module)

@@ -13,10 +13,16 @@ from lightning.pytorch.callbacks import EarlyStopping
 from lightning.pytorch.loggers import WandbLogger
 
 import wandb
-from model import (ChemicalValidityCallback, DriftingMoleculeGenerator,
-                   EmbeddingMonitorCallback, GeneratorCheckpointCallback,
-                   GradientMonitorCallback, MoleculeVisualizationCallback,
-                   QM9DataModule, initialize_training_config)
+from model import (
+    ChemicalValidityCallback,
+    DriftingMoleculeGenerator,
+    EmbeddingMonitorCallback,
+    GeneratorCheckpointCallback,
+    GradientMonitorCallback,
+    MoleculeVisualizationCallback,
+    QM9DataModule,
+    initialize_training_config,
+)
 from model.wandb_utils import load_pretrained_generator
 from parse_args import parse_args
 
@@ -61,7 +67,9 @@ def main(args: argparse.Namespace):
 
         if args.wandb_run_id:
             print(f"Loading pretrained generator from wandb run: {args.wandb_run_id}")
-            load_pretrained_generator(args.wandb_run_id, model, variant=args.wandb_variant)
+            load_pretrained_generator(
+                args.wandb_run_id, model, variant=args.wandb_variant
+            )
 
         gen_ckpt = GeneratorCheckpointCallback(monitor="val_loss", mode="min")
 
