@@ -22,7 +22,7 @@ class DriftingMoleculeGenerator(LightningModule):
         super().__init__()
 
         default_generator_cfg = {
-            "in_node_nf": 7,
+            "in_node_nf": 5,
             "hidden_nf": 128,
             "n_layers": 2,
             "num_atom_types": 5,
