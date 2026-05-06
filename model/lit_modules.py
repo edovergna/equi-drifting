@@ -26,6 +26,7 @@ class DriftingMoleculeGenerator(LightningModule):
             "n_layers": 2,
             "num_atom_types": 5,
             "num_bond_types": 5,
+            "coordinate_clamp_range": 3.0,
             "predict_bond_types": False,
             "pos_clamp": 20.0,
             "prior_pos_clamp": 3.0,
