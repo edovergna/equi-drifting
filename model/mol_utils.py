@@ -29,7 +29,7 @@ _STABLE_VALENCE = {1: 1, 6: 4, 7: 3, 8: 2, 9: 1}
 
 def batch_to_validity(
     pos: torch.Tensor,
-    a_soft: torch.Tensor,
+    atom_types: torch.Tensor,
     batch_vec: torch.Tensor,
 ) -> list[tuple[bool, str | None]]:
     """
@@ -43,25 +43,25 @@ def batch_to_validity(
     for g in range(n_graphs):
         mask = batch_vec == g
         p = pos[mask].numpy().astype(np.float64)
-        types = a_soft[mask].argmax(dim=-1).numpy()
+        types = atom_types[mask].numpy()
         results.append(_assess_molecule(p, types))
     return results
 
 
-def heavy_atom_counts(a_soft: torch.Tensor, batch_vec: torch.Tensor) -> list[int]:
+def heavy_atom_counts(atom_types: torch.Tensor, batch_vec: torch.Tensor) -> list[int]:
     """Returns the number of non-hydrogen atoms per graph in the batch."""
     n_graphs = int(batch_vec.max().item()) + 1
     counts = []
     for g in range(n_graphs):
         mask = batch_vec == g
-        types = a_soft[mask].argmax(dim=-1)
+        types = atom_types[mask]
         counts.append(int((types != 0).sum().item()))  # 0 == H in our encoding
     return counts
 
 
 def batch_to_stability(
     pos: torch.Tensor,
-    a_soft: torch.Tensor,
+    atom_types: torch.Tensor,
     batch_vec: torch.Tensor,
 ) -> tuple[float, float]:
     """
@@ -82,7 +82,7 @@ def batch_to_stability(
     for g in range(n_graphs):
         mask = batch_vec == g
         p = pos[mask].numpy().astype(np.float64)
-        types = a_soft[mask].argmax(dim=-1).numpy()
+        types = atom_types[mask].numpy()
         stable = _per_atom_stability(p, types)
         n_stable_atoms += int(stable.sum())
         total_atoms += len(stable)

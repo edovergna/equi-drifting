@@ -27,7 +27,7 @@ class EncodeAtomTypesTransform:
         )
 
         # Attach the result directly to the PyG Data object
-        data.a_soft_real = F.one_hot(real_indices, num_classes=5).float()
+        data.real_atom_types = F.one_hot(real_indices, num_classes=5).float()
 
         return data
 

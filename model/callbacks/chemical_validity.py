@@ -24,7 +24,7 @@ class ChemicalValidityCallback(Callback):
 
     def __init__(self):
         self._pos: list[torch.Tensor] = []
-        self._asoft: list[torch.Tensor] = []
+        self._ahard: list[torch.Tensor] = []
         self._batch: list[torch.Tensor] = []
         self._offset: int = 0
 
@@ -32,7 +32,7 @@ class ChemicalValidityCallback(Callback):
         self, trainer: Trainer, pl_module: LightningModule
     ) -> None:
         self._pos.clear()
-        self._asoft.clear()
+        self._ahard.clear()
         self._batch.clear()
         self._offset = 0
 
@@ -48,15 +48,15 @@ class ChemicalValidityCallback(Callback):
         if not isinstance(outputs, dict):
             return
         pos = outputs.get("pos_gen")
-        a_soft = outputs.get("a_soft_gen")
+        a_hard = outputs.get("gen_atom_types")
         bvec = outputs.get("batch_vec")
-        if pos is None or a_soft is None or bvec is None:
+        if pos is None or a_hard is None or bvec is None:
             return
         if self._offset >= self.MAX_MOLS:
             return
 
         self._pos.append(pos.cpu())
-        self._asoft.append(a_soft.cpu())
+        self._ahard.append(a_hard.cpu())
         self._batch.append(bvec.cpu() + self._offset)
         self._offset += int(bvec.max().item()) + 1
 
@@ -67,17 +67,17 @@ class ChemicalValidityCallback(Callback):
             return
 
         pos = torch.cat(self._pos, dim=0)
-        a_soft = torch.cat(self._asoft, dim=0)
+        a_hard = torch.cat(self._ahard, dim=0)
         bvec = torch.cat(self._batch, dim=0)
 
         n_graphs = int(bvec.max().item()) + 1
         if n_graphs > self.MAX_MOLS:
             keep = bvec < self.MAX_MOLS
-            pos, a_soft, bvec = pos[keep], a_soft[keep], bvec[keep]
+            pos, a_hard, bvec = pos[keep], a_hard[keep], bvec[keep]
 
-        results = batch_to_validity(pos, a_soft, bvec)
-        heavy = heavy_atom_counts(a_soft, bvec)
-        atom_stable_frac, mol_stable_frac = batch_to_stability(pos, a_soft, bvec)
+        results = batch_to_validity(pos, a_hard, bvec)
+        heavy = heavy_atom_counts(a_hard, bvec)
+        atom_stable_frac, mol_stable_frac = batch_to_stability(pos, a_hard, bvec)
 
         n_total = len(results)
         n_valid = sum(1 for ok, _ in results if ok)

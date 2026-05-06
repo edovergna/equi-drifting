@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import torch
-import torch.nn.functional as F
 from lightning.pytorch import LightningModule
 from torch.optim.lr_scheduler import OneCycleLR
 
@@ -80,12 +79,12 @@ class DriftingMoleculeGenerator(LightningModule):
         return x, pos
 
     def _forward(self, batch):
-        """Shared forward pass: prior → EGNN → center → soft atoms → EPT embeddings."""
-        x_prior, pos_prior = self.sample_prior(batch.num_nodes, in_dim=self.generator_cfg.in_node_nf)
+        """Shared forward pass: prior → EGNN → center → hard atoms → EPT embeddings."""
+        x_prior, pos_prior = self.sample_prior(batch.num_nodes, in_dim=self.generator_cfg["in_node_nf"])
         x_gen, _, pos_gen = self.generator(x_prior, pos_prior, batch.dense_edge_index)
         pos_gen = center_positions_per_graph(pos_gen, batch.batch)
         pos_gen = pos_gen.clamp(-self.pos_clamp, self.pos_clamp)
-        a_soft_gen = F.gumbel_softmax(x_gen, tau=1.0, hard=False, dim=-1)
+        gen_atom_types = x_gen.softmax(dim=-1).argmax(dim=-1)
 
         # EPT expects block_id[i] = block index for atom i (each atom is its own block,
         # so block index = atom index), and batch_id[j] = graph index for block j.
@@ -94,19 +93,19 @@ class DriftingMoleculeGenerator(LightningModule):
 
         phi_gen = self.feature_extractor(
             pos=pos_gen,
-            a_soft=a_soft_gen,
+            atom_types=gen_atom_types,
             block_id=block_id,
             batch_id=batch_id,
             dense_edge_index=batch.dense_edge_index,
         )
         phi_real = self.feature_extractor(
             pos=batch.pos,
-            a_soft=batch.a_soft_real,
+            atom_types=batch.real_atom_types.argmax(dim=-1),
             block_id=block_id,
             batch_id=batch_id,
             dense_edge_index=batch.dense_edge_index,
         )
-        return pos_gen, a_soft_gen, phi_gen, phi_real
+        return pos_gen, gen_atom_types, phi_gen, phi_real
 
     def training_step(self, batch, batch_idx):
         pos_gen, _, phi_gen, phi_real = self._forward(batch)
@@ -183,7 +182,7 @@ class DriftingMoleculeGenerator(LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        pos_gen, a_soft_gen, phi_gen, phi_real = self._forward(batch)
+        pos_gen, gen_atom_types, phi_gen, phi_real = self._forward(batch)
         val_loss, stats = compute_drift_loss(
             phi_gen, phi_real, temperatures=self.temperatures
         )
@@ -230,9 +229,9 @@ class DriftingMoleculeGenerator(LightningModule):
             "phi_gen": phi_gen.detach().cpu(),
             "phi_real": phi_real.detach().cpu(),
             "pos_gen": pos_gen.detach().cpu(),
-            "a_soft_gen": a_soft_gen.detach().cpu(),
+            "gen_atom_types": gen_atom_types.detach().cpu(),
             "pos_real": batch.pos.detach().cpu(),
-            "a_soft_real": batch.a_soft_real.detach().cpu(),
+            "real_atom_types": batch.real_atom_types.detach().cpu(),
             "batch_vec": batch.batch.detach().cpu(),
         }
 

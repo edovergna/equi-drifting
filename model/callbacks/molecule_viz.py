@@ -29,9 +29,9 @@ class MoleculeVisualizationCallback(Callback):
         "phi_gen",
         "phi_real",
         "pos_gen",
-        "a_soft_gen",
+        "gen_atom_types",
         "pos_real",
-        "a_soft_real",
+        "real_atom_types",
         "batch_vec",
     }
 
@@ -58,8 +58,8 @@ class MoleculeVisualizationCallback(Callback):
             return
         if batch_idx == 0:
             self._ref = {k: outputs[k] for k in self._REQUIRED_KEYS}
-        self._gen_atom_types.append(outputs["a_soft_gen"].argmax(dim=-1).cpu())
-        self._real_atom_types.append(outputs["a_soft_real"].argmax(dim=-1).cpu())
+        self._gen_atom_types.append(outputs["gen_atom_types"].cpu())
+        self._real_atom_types.append(outputs["real_atom_types"].argmax(dim=-1).cpu())
 
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: LightningModule
@@ -90,30 +90,31 @@ class MoleculeVisualizationCallback(Callback):
             best_idx = ranked[: self.n_molecules]
             worst_idx = ranked[-self.n_molecules :]
 
-            def render_group(indices, pos, a_soft, label_prefix):
+            def render_group(indices, pos, atom_types, label_prefix):
                 return [
-                    self._render_mol(pos, a_soft, batch_vec, i, f"{label_prefix} #{i}")
+                    self._render_mol(pos, atom_types, batch_vec, i, f"{label_prefix} #{i}")
                     for i in indices
                 ]
 
+            real_atom_types = ref["real_atom_types"].argmax(dim=-1)
             images = {
                 "mol/random_gen": render_group(
-                    random_idx, ref["pos_gen"], ref["a_soft_gen"], "gen"
+                    random_idx, ref["pos_gen"], ref["gen_atom_types"], "gen"
                 ),
                 "mol/best_gen": render_group(
                     best_idx,
                     ref["pos_gen"],
-                    ref["a_soft_gen"],
+                    ref["gen_atom_types"],
                     f"best d={nn_dists[best_idx[0]]:.2f}",
                 ),
                 "mol/worst_gen": render_group(
                     worst_idx,
                     ref["pos_gen"],
-                    ref["a_soft_gen"],
+                    ref["gen_atom_types"],
                     f"worst d={nn_dists[worst_idx[0]]:.2f}",
                 ),
                 "mol/real_ref": render_group(
-                    random_idx, ref["pos_real"], ref["a_soft_real"], "real"
+                    random_idx, ref["pos_real"], real_atom_types, "real"
                 ),
             }
 
@@ -128,7 +129,7 @@ class MoleculeVisualizationCallback(Callback):
     def _render_mol(
         self,
         pos: torch.Tensor,
-        a_soft: torch.Tensor,
+        atom_types: torch.Tensor,
         batch_vec: torch.Tensor,
         graph_idx: int,
         title: str = "",
@@ -138,7 +139,7 @@ class MoleculeVisualizationCallback(Callback):
 
         mask = batch_vec == graph_idx
         p = pos[mask].numpy()
-        types = a_soft[mask].argmax(dim=-1).numpy()
+        types = atom_types[mask].numpy()
 
         fig = plt.figure(figsize=(4, 4))
         ax = fig.add_subplot(111, projection="3d")
