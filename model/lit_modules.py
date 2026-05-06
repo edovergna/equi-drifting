@@ -29,6 +29,7 @@ class DriftingMoleculeGenerator(LightningModule):
             "num_bond_types": 5,
             "predict_bond_types": False,
             "pos_clamp": 20.0,
+            "prior_pos_clamp": 3.0,
         }
         default_drift_cfg = {
             "lr": 1e-4,
@@ -51,6 +52,7 @@ class DriftingMoleculeGenerator(LightningModule):
 
         self.temperatures = self.drift_cfg["temperatures"]
         self.pos_clamp = self.generator_cfg["pos_clamp"]
+        self.prior_pos_clamp = self.generator_cfg["prior_pos_clamp"]
 
     def _init_generator(self, cfg) -> EGNN:
         return EGNN(
@@ -71,13 +73,10 @@ class DriftingMoleculeGenerator(LightningModule):
             p.requires_grad = False
 
     def sample_prior(self, num_nodes: int, in_dim: int) -> tuple[torch.Tensor, torch.Tensor]:
-        # TODO:
-        # Sample positions
-        pos = torch.randn(num_nodes, 3, device=self.device)
-
-        # Sample node features; this is just the 5 possible bond types for QM9
+        pos = torch.randn(num_nodes, 3, device=self.device).clamp(
+            -self.prior_pos_clamp, self.prior_pos_clamp
+        )
         x = torch.randn(num_nodes, in_dim, device=self.device)
-
         return x, pos
 
     def _forward(self, batch):

@@ -71,8 +71,14 @@ def parse_args():
     parser.add_argument(
         "--pos_clamp",
         type=float,
-        default=20.0,
+        default=10.0,
         help="Clamp generated atom positions to [-pos_clamp, pos_clamp] after centering (Angstroms).",
+    )
+    parser.add_argument(
+        "--prior_pos_clamp",
+        type=float,
+        default=3.0,
+        help="Clamp prior position samples to [-prior_pos_clamp, prior_pos_clamp] standard deviations.",
     )
     # Wandb args
     parser.add_argument(
