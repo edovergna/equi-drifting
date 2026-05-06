@@ -14,19 +14,19 @@ def compute_drift_loss(
     temperatures: Tuple[float, ...] = (0.02, 0.05, 0.2),
 ) -> Tuple[torch.Tensor, dict]:
     """
-    Faithful PyTorch translation of the original JAX drift_loss.
+    Norm-based kernel drifting field.
 
-    Key design choices that match the original:
-    - targets = [stop_grad(gen), phi_real]; gen acts as its own negatives
-    - diagonal mask only blocks gen[i]->gen[i] self-connections
+    k(x, y) = exp(-1/tau * (||x||^2 - ||y||^2)^2)
+
+    - gen acts as its own negatives; diagonal masked to block gen[i]->gen[i]
     - scale = dist.mean(); scale_inputs = scale / sqrt(D) normalises coords to O(1)
-    - per-R force normalisation: force_scale = sqrt(mean(force^2))
+    - per-tau force normalisation: force_scale = sqrt(mean(force^2))
     - loss is computed in scaled-coordinate space: mse(gen/scale_inputs, goal_scaled)
 
     Args:
-        phi_gen:  [N_gen, D]
-        phi_real: [N_real, D]
-        R_list:   kernel bandwidths (equivalent to tau in the paper)
+        phi_gen:      [N_gen, D]
+        phi_real:     [N_real, D]
+        temperatures: kernel bandwidths (tau)
 
     Returns:
         loss, stats
@@ -35,14 +35,12 @@ def compute_drift_loss(
     phi_real = phi_real.float()
 
     N_gen, D = phi_gen.shape
-    N_real = phi_real.shape[0]
-    N_targets = N_gen + N_real
 
     old_gen = phi_gen.detach()
-    targets = torch.cat([old_gen, phi_real], dim=0)  # [N_targets, D]
+    targets = torch.cat([old_gen, phi_real], dim=0)  # [N_gen + N_real, D]
 
-    # Distances from each gen sample to all targets
-    dist = torch.cdist(old_gen, targets)  # [N_gen, N_targets]
+    # Distances from each gen sample to all targets (used for scale + stats)
+    dist = torch.cdist(old_gen, targets)  # [N_gen, N_gen + N_real]
 
     # Scale: mean pairwise distance (uniform weights)
     all_dists = dist.flatten()
@@ -56,23 +54,28 @@ def compute_drift_loss(
     scale_inputs = (scale / (D ** 0.5)).clamp(min=1e-3)
 
     old_gen_scaled = old_gen / scale_inputs       # [N_gen, D]
-    targets_scaled = targets / scale_inputs        # [N_targets, D]
-    dist_normed = dist / scale                     # [N_gen, N_targets]
+    phi_real_scaled = phi_real / scale_inputs     # [N_real, D]
 
-    # Mask self-connections: gen[i] -> target[i] (gen block only)
-    diag_mask = torch.zeros(N_gen, N_targets, device=phi_gen.device)
-    diag_mask[:, :N_gen] = torch.eye(N_gen, device=phi_gen.device)
-    dist_normed = dist_normed + diag_mask * 100.0
+    # Squared norms in scaled space
+    gen_norms = (old_gen_scaled**2).sum(dim=1)      # [N_gen]
+    real_norms = (phi_real_scaled**2).sum(dim=1)    # [N_real]
+
+    # Norm differences for attraction (gen vs real) and repulsion (gen vs gen)
+    diff_pos = gen_norms[:, None] - real_norms[None, :]    # [N_gen, N_real]
+    diff_neg = gen_norms[:, None] - gen_norms[None, :]     # [N_gen, N_gen]
+
+    # Mask self-connections: gen[i] -> gen[i]
+    diff_neg = diff_neg + torch.eye(N_gen, device=phi_gen.device) * 1e6
 
     stats = {}
     with torch.no_grad():
         stats["scale_S"] = scale_inputs.item()
 
-        gen_norms = old_gen_scaled.norm(dim=-1)
-        real_norms = (phi_real / scale_inputs).norm(dim=-1)
-        stats["phi_gen_norm_mean"] = gen_norms.mean().item()
-        stats["phi_gen_norm_std"] = gen_norms.std().item()
-        stats["phi_real_norm_mean"] = real_norms.mean().item()
+        gen_norms_l2 = old_gen_scaled.norm(dim=-1)
+        real_norms_l2 = phi_real_scaled.norm(dim=-1)
+        stats["phi_gen_norm_mean"] = gen_norms_l2.mean().item()
+        stats["phi_gen_norm_std"] = gen_norms_l2.std().item()
+        stats["phi_real_norm_mean"] = real_norms_l2.mean().item()
 
         phi_gen_unit = F.normalize(old_gen, dim=-1)
         phi_real_unit = F.normalize(phi_real, dim=-1)
@@ -85,29 +88,21 @@ def compute_drift_loss(
 
     for tau in temperatures:
         tau_key = str(tau).replace(".", "_")
-        logits = -dist_normed / tau
 
-        A_row = F.softmax(logits, dim=-1)
-        A_col = F.softmax(logits, dim=-2)
-        A = torch.sqrt(torch.clamp(A_row * A_col, min=1e-6))
+        kernel_pos = torch.exp(-diff_pos**2 / tau)    # [N_gen, N_real]
+        kernel_neg = torch.exp(-diff_neg**2 / tau)    # [N_gen, N_gen]
 
-        # Split affinities into gen-gen and gen-real blocks
-        aff_neg = A[:, :N_gen]
-        aff_pos = A[:, N_gen:]
+        Z_p = kernel_pos.sum(dim=1).clamp(min=1e-8)   # [N_gen]
+        Z_q = kernel_neg.sum(dim=1).clamp(min=1e-8)   # [N_gen]
 
-        sum_pos = aff_pos.sum(dim=-1, keepdim=True)
-        sum_neg = aff_neg.sum(dim=-1, keepdim=True)
+        # Gradient of k(x, y) w.r.t. x, summed over attraction/repulsion targets
+        grad_pos = (-4 / tau * kernel_pos * diff_pos).sum(dim=1)    # [N_gen]
+        grad_neg = (-4 / tau * kernel_neg * diff_neg).sum(dim=1)    # [N_gen]
 
-        r_coeff_neg = -aff_neg * sum_pos
-        r_coeff_pos = aff_pos * sum_neg
+        drift_pos = (grad_pos / Z_p).unsqueeze(-1) * old_gen_scaled    # [N_gen, D]
+        drift_neg = (grad_neg / Z_q).unsqueeze(-1) * old_gen_scaled    # [N_gen, D]
 
-        R_coeff = torch.cat([r_coeff_neg, r_coeff_pos], dim=1)
-
-        total_force_R = R_coeff @ targets_scaled
-
-        # Centering correction (always ~0 with uniform weights, kept for faithfulness)
-        total_coeffs = R_coeff.sum(dim=-1)  # [N_gen]
-        total_force_R = total_force_R - total_coeffs.unsqueeze(-1) * old_gen_scaled
+        total_force_R = drift_pos - drift_neg    # [N_gen, D]
 
         f_norm_val = (total_force_R ** 2).mean()
         force_scale = torch.sqrt(f_norm_val.clamp(min=1e-8)).detach()
@@ -115,22 +110,8 @@ def compute_drift_loss(
         V_across_taus = V_across_taus + total_force_R / force_scale
 
         with torch.no_grad():
-            row_entropy = -(A_row * (A_row + 1e-30).log()).sum(dim=-1).mean()
-            row_entropy_uniform = torch.log(
-                torch.tensor(N_targets, device=A_row.device, dtype=torch.float)
-            )
-            stats[f"attn_entropy_{tau_key}"] = row_entropy.item()
-            stats[f"attn_entropy_rel_{tau_key}"] = (row_entropy / row_entropy_uniform).item()
             stats[f"force_scale_{tau_key}"] = force_scale.item()
             stats[f"v_norm_{tau_key}"] = (total_force_R / force_scale).norm(dim=-1).mean().item()
-            stats[f"frac_zero_dists_{tau_key}"] = (A_row == 0).float().mean().item()
-
-            pos_mass = aff_pos.sum(dim=-1)
-            neg_mass = aff_neg.sum(dim=-1)
-            stats[f"attn_pos_mass_frac_{tau_key}"] = (
-                (pos_mass / (pos_mass + neg_mass).clamp_min(1e-8)).mean().item()
-            )
-            stats[f"total_coeffs_abs_mean_{tau_key}"] = total_coeffs.abs().mean().item()
 
     goal_scaled = (old_gen_scaled + V_across_taus).detach()
     gen_scaled = phi_gen / scale_inputs
