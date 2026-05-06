@@ -115,12 +115,36 @@ class DriftingMoleculeGenerator(LightningModule):
         pos_gen, _, phi_gen, phi_real = self._forward(batch)
 
         if not (torch.isfinite(phi_gen).all() and torch.isfinite(phi_real).all()):
-            bad_gen = (~torch.isfinite(phi_gen)).sum().item()
-            bad_real = (~torch.isfinite(phi_real)).sum().item()
-            self.print(
-                f"\n[Step {self.global_step}] Non-finite embeddings — "
-                f"phi_gen: {bad_gen}, phi_real: {bad_real}. Stopping."
-            )
+            with torch.no_grad():
+                bad_gen_mask = ~torch.isfinite(phi_gen).all(dim=-1)   # [num_graphs]
+                bad_real_mask = ~torch.isfinite(phi_real).all(dim=-1)
+                bad_mol_mask = bad_gen_mask | bad_real_mask
+
+                n_bad_gen = bad_gen_mask.sum().item()
+                n_bad_real = bad_real_mask.sum().item()
+                n_total = bad_mol_mask.shape[0]
+
+                atom_mask = bad_mol_mask[batch.batch]
+                pos_bad = pos_gen[atom_mask]
+
+                pos_norms_bad = pos_bad.norm(dim=-1)
+                max_dist_bad = torch.cdist(pos_bad, pos_bad).max() if pos_bad.shape[0] > 1 else pos_bad.new_tensor(0.0)
+
+                gen_center_norms = per_graph_center_norms(pos_gen, batch.batch)
+                real_center_norms = per_graph_center_norms(batch.pos, batch.batch)
+                bad_gen_cn = gen_center_norms[bad_mol_mask]
+                bad_real_cn = real_center_norms[bad_mol_mask]
+
+                self.print(
+                    f"\n[Step {self.global_step}] Non-finite embeddings — "
+                    f"{n_bad_gen} gen mol(s), {n_bad_real} real mol(s) out of {n_total}.\n"
+                    f"  [bad mols] pos_gen norm   mean={pos_norms_bad.mean():.3f}  std={pos_norms_bad.std():.3f}\n"
+                    f"  [bad mols] max pairwise dist={max_dist_bad:.3f}\n"
+                    f"  [bad mols] gen center norm  mean={bad_gen_cn.mean():.3f}  std={bad_gen_cn.std():.3f}\n"
+                    f"  [bad mols] real center norm mean={bad_real_cn.mean():.3f}  std={bad_real_cn.std():.3f}\n"
+                    f"  Stopping."
+                )
+
             self.trainer.should_stop = True
             return torch.tensor(0.0, device=self.device, requires_grad=True)
 
