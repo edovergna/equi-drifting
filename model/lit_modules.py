@@ -14,7 +14,7 @@ from .geometry import (
     center_positions_per_graph,
     per_graph_center_norms,
 )
-from .documented_priors import sample_egnn_molecule_batch
+from .sample_prior import sample_egnn_molecule_batch
 
 
 class DriftingMoleculeGenerator(LightningModule):
@@ -29,6 +29,7 @@ class DriftingMoleculeGenerator(LightningModule):
             "n_layers": 2,
             "num_atom_types": 5,
             "num_bond_types": 5,
+            "coordinate_clamp_range": 3.0,
             "predict_bond_types": False,
         }
         default_drift_cfg = {
@@ -51,9 +52,6 @@ class DriftingMoleculeGenerator(LightningModule):
         self._freeze_feature_extractor()
 
         self.temperatures = self.drift_cfg["temperatures"]
-        self.sigma_by_n = None
-        self.global_sigma = None
-        self.alpha_atom = None
 
     def _init_generator(self, cfg) -> EGNN:
         return EGNN(
@@ -72,51 +70,12 @@ class DriftingMoleculeGenerator(LightningModule):
         for p in self.feature_extractor.parameters():
             p.requires_grad = False
 
-    def _load_prior_statistics_from_datamodule(self) -> None:
-        datamodule = getattr(self.trainer, "datamodule", None)
-        if datamodule is None:
-            return
-
-        if not all(
-            hasattr(datamodule, attr)
-            for attr in ("sigma_by_n", "global_sigma", "alpha_atom")
-        ):
-            return
-
-        self.sigma_by_n = datamodule.sigma_by_n
-        self.global_sigma = datamodule.global_sigma
-        self.alpha_atom = datamodule.alpha_atom
-
-    def on_fit_start(self) -> None:
-        self._load_prior_statistics_from_datamodule()
-
-    def on_test_start(self) -> None:
-        self._load_prior_statistics_from_datamodule()
-
     def sample_prior(self, batch) -> dict[str, torch.Tensor]:
-        if (
-            self.sigma_by_n is None
-            or self.global_sigma is None
-            or self.alpha_atom is None
-        ):
-            self._load_prior_statistics_from_datamodule()
-
-        if (
-            self.sigma_by_n is None
-            or self.global_sigma is None
-            or self.alpha_atom is None
-        ):
-            raise RuntimeError(
-                "Prior statistics are not initialized. The datamodule must provide "
-                "sigma_by_n, global_sigma, and alpha_atom."
-            )
-
         node_counts = torch.bincount(batch.batch)
         return sample_egnn_molecule_batch(
             node_counts=node_counts,
-            sigma_by_n=self.sigma_by_n,
-            global_sigma=self.global_sigma,
-            alpha_atom=self.alpha_atom,
+            clamp_range=self.generator_cfg["coordinate_clamp_range"],
+            num_atom_types=self.generator_cfg["num_atom_types"],
             dtype=batch.pos.dtype,
             device=batch.pos.device,
         )
