@@ -14,7 +14,7 @@ from .geometry import (
     center_positions_per_graph,
     per_graph_center_norms,
 )
-from .priors import sample_molecular_prior
+from .documented_priors import sample_egnn_molecule_batch
 
 
 class DriftingMoleculeGenerator(LightningModule):
@@ -25,7 +25,6 @@ class DriftingMoleculeGenerator(LightningModule):
         super().__init__()
 
         default_generator_cfg = {
-            "in_node_nf": 7,
             "hidden_nf": 128,
             "n_layers": 2,
             "num_atom_types": 5,
@@ -52,10 +51,12 @@ class DriftingMoleculeGenerator(LightningModule):
         self._freeze_feature_extractor()
 
         self.temperatures = self.drift_cfg["temperatures"]
+        self.sigma_by_n = None
+        self.global_sigma = None
+        self.alpha_atom = None
 
     def _init_generator(self, cfg) -> EGNN:
         return EGNN(
-            in_node_nf=cfg["in_node_nf"],
             hidden_nf=cfg["hidden_nf"],
             n_layers=cfg["n_layers"],
             num_atom_types=cfg["num_atom_types"],
@@ -71,42 +72,70 @@ class DriftingMoleculeGenerator(LightningModule):
         for p in self.feature_extractor.parameters():
             p.requires_grad = False
 
-    def _sample_prior(self, num_nodes: int) -> tuple[torch.Tensor, torch.Tensor]:
+    def _load_prior_statistics_from_datamodule(self) -> None:
+        datamodule = getattr(self.trainer, "datamodule", None)
+        if datamodule is None:
+            return
 
-        # Sample positions
-        pos = torch.randn(num_nodes, 3, device=self.device)
+        if not all(
+            hasattr(datamodule, attr)
+            for attr in ("sigma_by_n", "global_sigma", "alpha_atom")
+        ):
+            return
 
-        # Sample node features
-        # We sample a 7-dimensional feature space, because the
-        # node features are composed by a 5-dim one-hot encoding
-        # of the atom type + 6 more dimensions for the other features (charge, etc.).
-        # We can summarize the 5-dim one-hot encoding in a single dimension,
-        # hence, we sample 7 dimensions to cover all the node features
-        x = torch.randn(num_nodes, 7, device=self.device)
+        self.sigma_by_n = datamodule.sigma_by_n
+        self.global_sigma = datamodule.global_sigma
+        self.alpha_atom = datamodule.alpha_atom
 
-    def sample_prior(self, batch) -> tuple[torch.Tensor, torch.Tensor]:
-        atom_type_probs = batch.a_soft_real.mean(dim=0)
-        prior = sample_molecular_prior(
-            batch_vec=batch.batch,
-            num_atom_types=self.generator_cfg["num_atom_types"],
-            in_node_nf=self.generator_cfg["in_node_nf"],
-            atom_type_probs=atom_type_probs,
-            reference_pos=batch.pos,
+    def on_fit_start(self) -> None:
+        self._load_prior_statistics_from_datamodule()
+
+    def on_test_start(self) -> None:
+        self._load_prior_statistics_from_datamodule()
+
+    def sample_prior(self, batch) -> dict[str, torch.Tensor]:
+        if (
+            self.sigma_by_n is None
+            or self.global_sigma is None
+            or self.alpha_atom is None
+        ):
+            self._load_prior_statistics_from_datamodule()
+
+        if (
+            self.sigma_by_n is None
+            or self.global_sigma is None
+            or self.alpha_atom is None
+        ):
+            raise RuntimeError(
+                "Prior statistics are not initialized. The datamodule must provide "
+                "sigma_by_n, global_sigma, and alpha_atom."
+            )
+
+        node_counts = torch.bincount(batch.batch)
+        return sample_egnn_molecule_batch(
+            node_counts=node_counts,
+            sigma_by_n=self.sigma_by_n,
+            global_sigma=self.global_sigma,
+            alpha_atom=self.alpha_atom,
             dtype=batch.pos.dtype,
+            device=batch.pos.device,
         )
-        return prior["x"], prior["pos"]
 
     def _forward(self, batch):
-        """Shared forward pass: prior → EGNN → center → soft atoms → EPT embeddings."""
-        x_prior, pos_prior = self.sample_prior(batch)
-        x_gen, _, pos_gen = self.generator(x_prior, pos_prior, batch.dense_edge_index)
-        pos_gen = center_positions_per_graph(pos_gen, batch.batch)
+        """Shared forward pass: prior -> EGNN -> center -> soft atoms -> EPT embeddings."""
+        prior = self.sample_prior(batch)
+        x_gen, _, pos_gen = self.generator(
+            prior["x"],
+            prior["pos"],
+            batch.dense_edge_index,
+        )
+        pos_gen = center_positions_per_graph(pos_gen, prior["batch"])
         a_soft_gen = F.gumbel_softmax(x_gen, tau=1.0, hard=False, dim=-1)
 
         # EPT expects block_id[i] = block index for atom i (each atom is its own block,
         # so block index = atom index), and batch_id[j] = graph index for block j.
         block_id = torch.arange(batch.num_nodes, device=batch.batch.device)
-        batch_id = batch.batch
+        batch_id = prior["batch"]
 
         phi_gen = self.feature_extractor(
             pos=pos_gen,
@@ -131,7 +160,7 @@ class DriftingMoleculeGenerator(LightningModule):
             bad_gen = (~torch.isfinite(phi_gen)).sum().item()
             bad_real = (~torch.isfinite(phi_real)).sum().item()
             self.print(
-                f"\n[Step {self.global_step}] Non-finite embeddings — "
+                f"\n[Step {self.global_step}] Non-finite embeddings - "
                 f"phi_gen: {bad_gen}, phi_real: {bad_real}. Stopping."
             )
             self.trainer.should_stop = True
