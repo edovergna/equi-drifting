@@ -70,18 +70,13 @@ class DriftingMoleculeGenerator(LightningModule):
         for p in self.feature_extractor.parameters():
             p.requires_grad = False
 
-    def sample_prior(self, num_nodes: int) -> tuple[torch.Tensor, torch.Tensor]:
-
+    def sample_prior(self, num_nodes: int, in_dim: int) -> tuple[torch.Tensor, torch.Tensor]:
+        # TODO:
         # Sample positions
         pos = torch.randn(num_nodes, 3, device=self.device)
 
-        # Sample node features
-        # We sample a 7-dimensional feature space, because the
-        # node features are composed by a 5-dim one-hot encoding
-        # of the atom type + 6 more dimensions for the other features (charge, etc.).
-        # We can summarize the 5-dim one-hot encoding in a single dimension,
-        # hence, we sample 7 dimensions to cover all the node features
-        x = torch.randn(num_nodes, 7, device=self.device)
+        # Sample node features; this is just the 5 possible bond types for QM9
+        x = torch.randn(num_nodes, in_dim, device=self.device)
 
         return x, pos
 
