@@ -33,7 +33,7 @@ def main(args: argparse.Namespace):
 
     run = wandb.init(
         entity="equivariant-drifting",
-        project="tests-kristian",
+        project="tests-col-daniel",
         group=args.group_tag,
         mode="offline" if args.offline else "online",
         config=vars(args),
@@ -70,6 +70,8 @@ def main(args: argparse.Namespace):
             load_pretrained_generator(
                 args.wandb_run_id, model, variant=args.wandb_variant
             )
+
+        gen_ckpt = GeneratorCheckpointCallback(monitor="val_loss", mode="min")
 
         gen_ckpt = GeneratorCheckpointCallback(monitor="val_loss", mode="min")
 
