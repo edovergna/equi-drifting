@@ -274,14 +274,8 @@ class DriftingMoleculeGenerator(LightningModule):
                 on_epoch=True,
                 sync_dist=True,
             )
-        if hist_stats and hasattr(self.logger, "experiment"):
-            try:
-                self.logger.experiment.log(
-                    {f"drift_val/{k}": v for k, v in hist_stats.items()},
-                    step=self.global_step,
-                )
-            except Exception:
-                pass
+        if hist_stats:
+            self._val_hist_stats = {f"drift_val/{k}": v for k, v in hist_stats.items()}
 
         with torch.no_grad():
             gen_cn = per_graph_center_norms(pos_gen, gen_batch_vec)
@@ -311,6 +305,15 @@ class DriftingMoleculeGenerator(LightningModule):
             "gen_batch_vec": gen_batch_vec.detach().cpu(),
             "batch_vec": batch.batch.detach().cpu(),
         }
+
+    def on_validation_epoch_end(self):
+        hist_stats = getattr(self, "_val_hist_stats", {})
+        if hist_stats and hasattr(self, "logger") and hasattr(self.logger, "experiment"):
+            try:
+                self.logger.experiment.log(hist_stats, step=self.global_step)
+            except Exception:
+                pass
+        self._val_hist_stats = {}
 
     def test_step(self, batch, batch_idx):
         _, _, phi_gen, phi_real, _ = self._forward(batch)
