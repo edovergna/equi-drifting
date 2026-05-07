@@ -114,6 +114,7 @@ class DriftingMoleculeGenerator(LightningModule):
             self.device,
         )
         self._last_sampled_counts = atom_counts  # read by SizeDistributionCallback
+        self._last_sampled_atom_probs = x.detach().cpu().numpy()  # read by AtomTypeDistributionCallback
         return x, pos, batch_vec, dense_edge_index
 
     def _forward(self, batch):
