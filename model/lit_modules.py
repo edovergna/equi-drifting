@@ -145,12 +145,14 @@ class DriftingMoleculeGenerator(LightningModule):
         elif self.pos_clamp_type == "tanh":
             norm = pos_gen.norm(dim=-1, keepdim=True)
             rescale = torch.tanh(norm / self.norm_pos_clamp) / (norm / self.norm_pos_clamp + 1e-8)
-            rescale.register_hook(lambda g: setattr(self, "_norm_rescale_grad", g.abs().mean().item()))
+            if not self.trainer.sanity_checking:
+                rescale.register_hook(lambda g: setattr(self, "_norm_rescale_grad", g.abs().mean().item()))
             pos_gen = pos_gen * rescale
         else:  # geom
             norm = pos_gen.norm(dim=-1)
             rescale = 1 / (1 + (norm / self.c_pos_clamp) ** self.p_pos_clamp)
-            rescale.register_hook(lambda g: setattr(self, "_norm_rescale_grad", g.abs().mean().item()))
+            if not self.trainer.sanity_checking:
+                rescale.register_hook(lambda g: setattr(self, "_norm_rescale_grad", g.abs().mean().item()))
             pos_gen = pos_gen * rescale.unsqueeze(-1)
         # gen_atom_types = x_gen.softmax(dim=-1).argmax(dim=-1)
         gen_atom_types = F.gumbel_softmax(x_gen, tau=self.atom_type_temp, hard=True)
