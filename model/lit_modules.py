@@ -75,6 +75,7 @@ class DriftingMoleculeGenerator(LightningModule):
 
         self._size_values: np.ndarray | None = None
         self._size_probs: np.ndarray | None = None
+        self._norm_rescale_grad: float | None = None
 
     def _init_generator(self, cfg) -> EGNN:
         return EGNN(
@@ -138,15 +139,18 @@ class DriftingMoleculeGenerator(LightningModule):
         x_gen, _, pos_gen = self.generator(x_prior, pos_prior, gen_dense_edge_index)
         pos_gen = center_positions_per_graph(pos_gen, gen_batch_vec)
 
+        self._norm_rescale_grad = None
         if self.pos_clamp_type == "hard":
             pos_gen = pos_gen.clamp(-self.pos_clamp, self.pos_clamp)
         elif self.pos_clamp_type == "tanh":
             norm = pos_gen.norm(dim=-1, keepdim=True)
             rescale = torch.tanh(norm / self.norm_pos_clamp) / (norm / self.norm_pos_clamp + 1e-8)
+            rescale.register_hook(lambda g: setattr(self, "_norm_rescale_grad", g.abs().mean().item()))
             pos_gen = pos_gen * rescale
         else:  # geom
             norm = pos_gen.norm(dim=-1)
             rescale = 1 / (1 + (norm / self.c_pos_clamp) ** self.p_pos_clamp)
+            rescale.register_hook(lambda g: setattr(self, "_norm_rescale_grad", g.abs().mean().item()))
             pos_gen = pos_gen * rescale.unsqueeze(-1)
         # gen_atom_types = x_gen.softmax(dim=-1).argmax(dim=-1)
         gen_atom_types = F.gumbel_softmax(x_gen, tau=self.atom_type_temp, hard=True)
@@ -178,6 +182,10 @@ class DriftingMoleculeGenerator(LightningModule):
             return compute_inverse_attn_drift_loss(phi_gen, phi_real, self.temperatures)
         else:
             return compute_norm_based_drift_loss(phi_gen, phi_real, self.temperatures)
+
+    def on_after_backward(self):
+        if self._norm_rescale_grad is not None:
+            self.log("geom/norm_rescale_grad", self._norm_rescale_grad, on_step=True, on_epoch=False)
 
     def training_step(self, batch, batch_idx):
         pos_gen, _, phi_gen, phi_real, gen_batch_vec = self._forward(batch)
