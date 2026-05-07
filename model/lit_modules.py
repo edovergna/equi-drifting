@@ -2,6 +2,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 import wandb
 from lightning.pytorch import LightningModule
 from torch.optim.lr_scheduler import OneCycleLR
@@ -119,7 +120,8 @@ class DriftingMoleculeGenerator(LightningModule):
         x_gen, _, pos_gen = self.generator(x_prior, pos_prior, gen_dense_edge_index)
         pos_gen = center_positions_per_graph(pos_gen, gen_batch_vec)
         pos_gen = pos_gen.clamp(-self.pos_clamp, self.pos_clamp)
-        gen_atom_types = x_gen.softmax(dim=-1).argmax(dim=-1)
+        # gen_atom_types = x_gen.softmax(dim=-1).argmax(dim=-1)
+        gen_atom_types = F.gumbel_softmax(x_gen, tau=1.0, hard=True)
 
         # EPT expects block_id[i] = block index for atom i (each atom is its own block,
         # so block index = atom index), and batch_id[j] = graph index for block j.
