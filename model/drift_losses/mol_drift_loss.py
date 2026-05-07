@@ -41,6 +41,7 @@ def compute_molecule_based_drift_loss(
     exp_pos = torch.clamp(kernel_pos.sum(dim=1) / N_pos, min=1e-8)
     exp_neg = torch.clamp(kernel_neg.sum(dim=1) / N_neg, min=1e-8)
 
+    # TODO: check up tomorrow whether it is allowed to use the log 
     log_exp_pos = torch.log(exp_pos)
     log_exp_neg = torch.log(exp_neg)
 
@@ -60,9 +61,10 @@ def compute_molecule_based_drift_loss(
     target_positions = (pos_gen + v_positions).detach()
 
     # Target for atom types is through the exponential mapping of the spherical space:
-    v_types = (
-        v_types - ((x_gen * v_types).sum(dim=-1, keepdim=True)) * x_gen
-    )  # Tangent projection of drifting field
+    # TODO: Check whether tangent projection is necessary
+    # v_types = (
+    #     v_types - ((x_gen * v_types).sum(dim=-1, keepdim=True)) * x_gen
+    # )  # Tangent projection of drifting field
     v_types_norm = torch.clamp(torch.norm(v_types, dim=-1, keepdim=True), min=1e-8)
     target_types = (
         torch.cos(v_types_norm) * x_gen
@@ -107,7 +109,7 @@ def compute_molecule_based_drift_loss(
     return loss, stats
 
 
-# TODO
+# TO BE CHECKED
 def prep_batch_for_kernel(positions: torch.Tensor, index: torch.Tensor):
     """
     Returns for a batch of molecules (per molecule); the pairwise distances between atoms,
@@ -132,12 +134,11 @@ def prep_batch_for_kernel(positions: torch.Tensor, index: torch.Tensor):
     #         angles[i, j, k] = cosine of the angle j-i-k (atom i is the vertex) if i, j, k
     #         are all in the same molecule and j != i and k != i, else 0.
     N = positions.shape[0]
-    device = positions.device
 
     # --- Sparse pairwise distances ---
     # Only store intra-molecule, non-self pairs: avoids building a dense [N, N, 3] diff tensor
     same_mol = index.unsqueeze(0) == index.unsqueeze(1)  # [N, N]
-    not_self = ~torch.eye(N, dtype=torch.bool, device=device)  # [N, N]
+    not_self = ~torch.eye(N, dtype=torch.bool, device=positions.device)  # [N, N]
     valid_pair = same_mol & not_self  # [N, N]
 
     i_idx, j_idx = valid_pair.nonzero(as_tuple=True)  # [E] each
@@ -174,8 +175,8 @@ def prep_batch_for_kernel(positions: torch.Tensor, index: torch.Tensor):
         unit_ik = vec_ik / vec_ik.norm(dim=-1, keepdim=True).clamp(min=1e-8)  # [T, 3]
         angle_values = (unit_ij * unit_ik).sum(dim=-1)  # [T] cosines
     else:
-        t_i = t_j = t_k = torch.zeros(0, dtype=torch.long, device=device)
-        angle_values = torch.zeros(0, device=device)
+        t_i = t_j = t_k = torch.zeros(0, dtype=torch.long, device=positions.device)
+        angle_values = torch.zeros(0, device=positions.device)
 
     angles = torch.sparse_coo_tensor(
         torch.stack([t_i, t_j, t_k]), angle_values, size=(N, N, N)
