@@ -129,7 +129,7 @@ class DriftingMoleculeGenerator(LightningModule):
 
         x_gen, _, pos_gen = self.generator(x_prior, pos_prior, gen_dense_edge_index)
         pos_gen = center_positions_per_graph(pos_gen, gen_batch_vec)
-        pos_gen = pos_gen.clamp(-self.pos_clamp, self.pos_clamp)
+        pos_gen = self.pos_clamp * torch.tanh(pos_gen / self.pos_clamp)
         # gen_atom_types = x_gen.softmax(dim=-1).argmax(dim=-1)
         gen_atom_types = F.gumbel_softmax(x_gen, tau=self.atom_type_temp, hard=True)
 
