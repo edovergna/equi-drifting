@@ -134,7 +134,7 @@ class DriftingMoleculeGenerator(LightningModule):
         )
         phi_real = self.feature_extractor(
             pos=batch.pos,
-            atom_types=batch.real_atom_types.argmax(dim=-1),
+            atom_types=batch.real_atom_types,
             block_id=torch.arange(batch.num_nodes, device=batch.batch.device),
             batch_id=batch.batch,
             dense_edge_index=batch.dense_edge_index,
