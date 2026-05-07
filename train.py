@@ -28,7 +28,7 @@ def main(args: argparse.Namespace):
 
     run = wandb.init(
         entity="equivariant-drifting",
-        project="tests-col-daniel",
+        project="fixed-gradient-flow",
         group=args.group_tag,
         mode="offline" if args.offline else "online",
         config=vars(args),
@@ -77,8 +77,8 @@ def main(args: argparse.Namespace):
                 n_molecules=4, bond_threshold=2.0, every_n_epochs=1
             ),
             ChemicalValidityCallback(),
-            SizeDistributionCallback(),
-            AtomTypeDistributionCallback(),
+            # SizeDistributionCallback(),
+            # AtomTypeDistributionCallback(),
             gen_ckpt,
         ]
 
