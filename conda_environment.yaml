@@ -5,6 +5,7 @@ channels:
 dependencies:
   - python=3.11.11
   - pip
+  - rdkit
   - pip:
     - "torch==2.8.0"
     - "--index-url=https://download.pytorch.org/whl/cu126"
