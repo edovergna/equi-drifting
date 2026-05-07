@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from lightning.pytorch import LightningModule
@@ -46,6 +47,12 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
         )
 
         self.generator = self._init_generator(self.generator_cfg)
+        
+        self.pos_clamp = self.generator_cfg["pos_clamp"]
+        self.prior_pos_clamp = self.generator_cfg["prior_pos_clamp"]
+
+        self._size_values: np.ndarray | None = None
+        self._size_probs: np.ndarray | None = None
 
     def _init_generator(self, cfg) -> EGNN:
         return EGNN(
@@ -55,6 +62,23 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
             num_atom_types=cfg["num_atom_types"],
             num_bond_types=cfg["num_bond_types"],
             predict_bond_types=cfg["predict_bond_types"],
+        )
+    
+    def set_size_distribution(self, sizes: np.ndarray, probs: np.ndarray) -> None:
+        self._size_values = sizes
+        self._size_probs = probs
+
+    def _init_size_distribution(self) -> None:
+        if self.trainer is not None and self.trainer.datamodule is not None:
+            dm = self.trainer.datamodule
+            if hasattr(dm, "train_set") and dm.train_set is not None:
+                sizes, probs = compute_size_distribution(dm.train_set)
+                self._size_values = sizes
+                self._size_probs = probs
+                return
+        raise RuntimeError(
+            "Atom size distribution not set. Call set_size_distribution() before sampling, "
+            "or ensure the model is bound to a trainer with a QM9DataModule."
         )
 
     def _sample_prior_batch(
