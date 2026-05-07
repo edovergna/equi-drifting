@@ -21,7 +21,7 @@ from model import (ChemicalValidityCallback, DriftingMoleculeGenerator,
 from model.wandb_utils import load_pretrained_generator
 from parse_args import parse_args
 
-
+# TODO: to link up with riemannian generator
 def main(args: argparse.Namespace):
 
     device, precision, deterministic, benchmark = initialize_training_config(args)
