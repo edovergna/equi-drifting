@@ -80,6 +80,12 @@ def parse_args():
         help="Number of layers for the EGNN model.",
     )
     parser.add_argument(
+        "--atom_type_temp",
+        type=float,
+        default=1.0,
+        help="Temperature (tau) for Gumbel-softmax atom type sampling during generation.",
+    )
+    parser.add_argument(
         "--pos_clamp",
         type=float,
         default=10.0,

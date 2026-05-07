@@ -43,6 +43,7 @@ class DriftingMoleculeGenerator(LightningModule):
             "weight_decay": 1e-4,
             "temperatures": [0.02, 0.05, 0.2],
             "loss_variant": "norm_based",
+            "atom_type_temp": 1.0,
             "pct_start": 0.1,
             "div_factor": 25.0,
             "final_div_factor": 1e4,
@@ -60,6 +61,7 @@ class DriftingMoleculeGenerator(LightningModule):
 
         self.temperatures = self.drift_cfg["temperatures"]
         self.loss_variant = self.drift_cfg["loss_variant"]
+        self.atom_type_temp = self.drift_cfg.get("atom_type_temp", 1.0)
         self.pos_clamp = self.generator_cfg["pos_clamp"]
         self.prior_pos_clamp = self.generator_cfg["prior_pos_clamp"]
 
@@ -129,7 +131,7 @@ class DriftingMoleculeGenerator(LightningModule):
         pos_gen = center_positions_per_graph(pos_gen, gen_batch_vec)
         pos_gen = pos_gen.clamp(-self.pos_clamp, self.pos_clamp)
         # gen_atom_types = x_gen.softmax(dim=-1).argmax(dim=-1)
-        gen_atom_types = F.gumbel_softmax(x_gen, tau=1.0, hard=True)
+        gen_atom_types = F.gumbel_softmax(x_gen, tau=self.atom_type_temp, hard=True)
 
         # EPT expects block_id[i] = block index for atom i (each atom is its own block,
         # so block index = atom index), and batch_id[j] = graph index for block j.

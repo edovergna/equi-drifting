@@ -58,6 +58,7 @@ def main(args: argparse.Namespace):
             "weight_decay": args.weight_decay,
             "temperatures": args.temperatures,
             "loss_variant": args.loss_variant,
+            "atom_type_temp": args.atom_type_temp,
         }
 
         model = DriftingMoleculeGenerator(generator_cfg, drift_cfg)
