@@ -50,6 +50,10 @@ def main(args: argparse.Namespace):
             "num_bond_types": 5,
             "predict_bond_types": args.predict_bond_types,
             "pos_clamp": args.pos_clamp,
+            "pos_clamp_type": args.pos_clamp_type,
+            "c_pos_clamp": args.c_pos_clamp,
+            "p_pos_clamp": args.p_pos_clamp,
+            "norm_pos_clamp": args.norm_pos_clamp,
             "prior_pos_clamp": args.prior_pos_clamp,
         }
 

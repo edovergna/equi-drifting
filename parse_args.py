@@ -92,6 +92,35 @@ def parse_args():
         help="Clamp generated atom positions to [-pos_clamp, pos_clamp] after centering (Angstroms).",
     )
     parser.add_argument(
+        "--pos_clamp_type",
+        type=str,
+        default="geom",
+        choices=["hard", "tanh", "geom"],
+        help=(
+            "Position clamping strategy: 'hard' (hard clamp to ±pos_clamp), "
+            "'tanh' (tanh rescaling with norm_pos_clamp scale), "
+            "'geom' (geometric rescale with c_pos_clamp and p_pos_clamp)."
+        ),
+    )
+    parser.add_argument(
+        "--c_pos_clamp",
+        type=float,
+        default=5.0,
+        help="Scale parameter (Angstroms) for geom pos clamp: rescale = 1 / (1 + (|pos| / c)^p).",
+    )
+    parser.add_argument(
+        "--p_pos_clamp",
+        type=float,
+        default=4.0,
+        help="Power parameter for geom pos clamp: rescale = 1 / (1 + (|pos| / c)^p).",
+    )
+    parser.add_argument(
+        "--norm_pos_clamp",
+        type=float,
+        default=10.0,
+        help="Normalization scale (Angstroms) for tanh pos clamp: pos_out = pos_clamp * tanh(|pos| / norm_pos_clamp).",
+    )
+    parser.add_argument(
         "--prior_pos_clamp",
         type=float,
         default=3.0,

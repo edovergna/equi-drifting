@@ -36,6 +36,10 @@ class DriftingMoleculeGenerator(LightningModule):
             "coordinate_clamp_range": 3.0,
             "predict_bond_types": False,
             "pos_clamp": 20.0,
+            "pos_clamp_type": "geom",
+            "c_pos_clamp": 5.0,
+            "p_pos_clamp": 4.0,
+            "norm_pos_clamp": 10.0,
             "prior_pos_clamp": 3.0,
         }
         default_drift_cfg = {
@@ -63,6 +67,10 @@ class DriftingMoleculeGenerator(LightningModule):
         self.loss_variant = self.drift_cfg["loss_variant"]
         self.atom_type_temp = self.drift_cfg.get("atom_type_temp", 1.0)
         self.pos_clamp = self.generator_cfg["pos_clamp"]
+        self.pos_clamp_type = self.generator_cfg["pos_clamp_type"]
+        self.c_pos_clamp = self.generator_cfg["c_pos_clamp"]
+        self.p_pos_clamp = self.generator_cfg["p_pos_clamp"]
+        self.norm_pos_clamp = self.generator_cfg["norm_pos_clamp"]
         self.prior_pos_clamp = self.generator_cfg["prior_pos_clamp"]
 
         self._size_values: np.ndarray | None = None
@@ -129,9 +137,17 @@ class DriftingMoleculeGenerator(LightningModule):
 
         x_gen, _, pos_gen = self.generator(x_prior, pos_prior, gen_dense_edge_index)
         pos_gen = center_positions_per_graph(pos_gen, gen_batch_vec)
-        norm_pos_gen = pos_gen.norm(dim=-1) / self.pos_clamp
-        rescale = torch.tanh(norm_pos_gen) / (norm_pos_gen + 1e-8)
-        pos_gen = pos_gen * rescale.unsqueeze(-1)
+
+        if self.pos_clamp_type == "hard":
+            pos_gen = pos_gen.clamp(-self.pos_clamp, self.pos_clamp)
+        elif self.pos_clamp_type == "tanh":
+            norm = pos_gen.norm(dim=-1, keepdim=True)
+            rescale = torch.tanh(norm / self.norm_pos_clamp) / (norm / self.norm_pos_clamp + 1e-8)
+            pos_gen = pos_gen * rescale
+        else:  # geom
+            norm = pos_gen.norm(dim=-1)
+            rescale = 1 / (1 + (norm / self.c_pos_clamp) ** self.p_pos_clamp)
+            pos_gen = pos_gen * rescale.unsqueeze(-1)
         # gen_atom_types = x_gen.softmax(dim=-1).argmax(dim=-1)
         gen_atom_types = F.gumbel_softmax(x_gen, tau=self.atom_type_temp, hard=True)
 
