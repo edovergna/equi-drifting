@@ -339,8 +339,8 @@ def compute_norm_based_drift_loss(
         Z_p = kernel_pos.sum(dim=1).clamp(min=1e-8)  # [N_gen]
         Z_q = kernel_neg.sum(dim=1).clamp(min=1e-8)  # [N_gen]
 
-        grad_pos = (-4 / tau * kernel_pos * diff_pos).sum(dim=1)  # [N_gen]
-        grad_neg = (-4 / tau * kernel_neg * diff_neg).sum(dim=1)  # [N_gen]
+        grad_pos = (kernel_pos * diff_pos).sum(dim=1)  # [N_gen]
+        grad_neg = (kernel_neg * diff_neg).sum(dim=1)  # [N_gen]
 
         drift_pos = (grad_pos / Z_p).unsqueeze(-1) * old_gen_scaled  # [N_gen, D]
         drift_neg = (grad_neg / Z_q).unsqueeze(-1) * old_gen_scaled  # [N_gen, D]
