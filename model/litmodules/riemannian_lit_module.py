@@ -5,13 +5,12 @@ import torch.nn.functional as F
 from lightning.pytorch import LightningModule
 from torch.optim.lr_scheduler import OneCycleLR
 
-from ept.ept_loader import load_ept_feature_extractor
-
 from ..drift_losses.mol_drift_loss import (TrainingDivergedException,
                          compute_molecule_based_drift_loss)
 from ..egnn import EGNN
 from ..geometry import (batch_size_for_logging, center_positions_per_graph,
                        per_graph_center_norms)
+from ..sample_prior import compute_size_distribution, sample_prior_batch
 
 
 class RiemannianDriftingMoleculeGenerator(LightningModule):
@@ -21,14 +20,15 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
     def __init__(self, generator_cfg=None, drift_cfg=None):
         super().__init__()
 
-        # TODO: check these later with the Riemannian
         default_generator_cfg = {
-            "in_node_nf": 5,
             "hidden_nf": 128,
             "n_layers": 2,
             "num_atom_types": 5,
             "num_bond_types": 5,
+            "coordinate_clamp_range": 5.0,
             "predict_bond_types": False,
+            "pos_clamp": 10.0,
+            "prior_pos_clamp": 5.0,
         }
         default_drift_cfg = {
             "lr": 1e-4,
@@ -57,39 +57,50 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
             predict_bond_types=cfg["predict_bond_types"],
         )
 
-    def sample_prior(self, num_nodes: int, in_dim: int) -> tuple[torch.Tensor, torch.Tensor]:
-        # TODO: add proper prior sampling
+    def _sample_prior_batch(
+        self, n_molecules: int
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        if self._size_values is None or self._size_probs is None:
+            self._init_size_distribution()
 
-        # Sample positions
-        pos = torch.randn(num_nodes, 3, device=self.device)
-
-        # Sample node features; in Riemannian space, this is just the 5 possible bond types for QM9
-        x = torch.randn(num_nodes, in_dim, device=self.device)
-
-        # TODO: we need to add smtg that divides these samples into molecules, currently in the forward
-        # we just use the actual indexes. We should generate these probably instead as well
-
-        return x, pos
+        x, pos, batch_vec, dense_edge_index, atom_counts = sample_prior_batch(
+            n_molecules,
+            self._size_values,
+            self._size_probs,
+            self.generator_cfg["num_atom_types"],
+            self.prior_pos_clamp,
+            self.device,
+        )
+        self._last_sampled_counts = atom_counts  # read by SizeDistributionCallback
+        return x, pos, batch_vec, dense_edge_index
 
     def _forward(self, batch):
         """Forward pass of generation for soft atom types: prior → EGNN → center → soft atoms."""
 
-        # TODO: add transformation to Riemannian space for atom types
-        x_prior, pos_prior = self.sample_prior(num_nodes=batch.num_nodes, in_dim=self.generator_cfg.in_node_nf)
-        x_gen, _, pos_gen = self.generator(x_prior, pos_prior, batch.dense_edge_index)
-        pos_gen = center_positions_per_graph(pos_gen, batch.batch)
+        n_molecules = batch_size_for_logging(batch)
+        x_prior, pos_prior, gen_batch_vec, gen_dense_edge_index = (
+            self._sample_prior_batch(n_molecules)
+        )
+
+        x_gen, _, pos_gen = self.generator(x_prior, pos_prior, gen_dense_edge_index)
+        pos_gen = center_positions_per_graph(pos_gen, gen_batch_vec)
+        pos_gen = pos_gen.clamp(-self.pos_clamp, self.pos_clamp)
+
+        # Turn x_gen into probabilities
+        x_gen = x_gen.softmax(dim=-1)
+
+        # Note: projection to spherical space is only done in loss for drifting, the probabilities here are what
+        # we actually use
 
         return pos_gen, x_gen
 
     def training_step(self, batch, batch_idx):
         pos_gen, x_gen = self._forward(batch)
-        pos_real, x_real = batch.pos, batch.a_soft_real
+        pos_real, x_real = batch.pos, batch.real_atom_types
 
-        
-        # TODO: sync with new drift loss function
         try:
-            loss, stats = compute_normalized_drift_loss(
-                phi_gen, phi_real, self.temperatures
+            loss, stats = compute_molecule_based_drift_loss(
+                pos_gen, x_gen, pos_real, x_real, index=batch.batch
             )
         except TrainingDivergedException as e:
             self.print(f"\n[Step {self.global_step}] {e}\nStopping training.")
@@ -125,11 +136,13 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        # TODO
-        pos_gen, a_soft_gen, phi_gen, phi_real = self._forward(batch)
-        val_loss, stats = compute_normalized_drift_loss(
-            phi_gen, phi_real, self.temperatures
-        )
+
+        pos_gen, x_gen = self._forward(batch)
+        pos_real, x_real = batch.pos, batch.real_atom_types
+
+        val_loss, stats = compute_molecule_based_drift_loss(
+                pos_gen, x_gen, pos_real, x_real, index=batch.batch
+            )
 
         bs = batch_size_for_logging(batch)
         self.log(
@@ -169,6 +182,7 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
             sync_dist=True,
         )
 
+        # TODO: ASK DANIEL what these are used for
         return {
             "phi_gen": phi_gen.detach().cpu(),
             "phi_real": phi_real.detach().cpu(),
@@ -181,10 +195,12 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
 
     def test_step(self, batch, batch_idx):
         # TODO
-        _, _, phi_gen, phi_real = self._forward(batch)
-        test_loss, _ = compute_normalized_drift_loss(
-            phi_gen, phi_real, self.temperatures
-        )
+        pos_gen, x_gen = self._forward(batch)
+        pos_real, x_real = batch.pos, batch.real_atom_types
+
+        test_loss, _ = compute_molecule_based_drift_loss(
+                pos_gen, x_gen, pos_real, x_real, index=batch.batch
+            )
 
         bs = batch_size_for_logging(batch)
         self.log(

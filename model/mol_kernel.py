@@ -7,25 +7,19 @@ def prep_batch_for_kernel(positions: torch.Tensor, index: torch.Tensor):
     """
     Returns for a batch of molecules (per molecule); the pairwise distances between atoms,
     the angles between the connections of atoms.
+
+    Args:
+        positions: [Total_Atoms, 3] 3D coordinates for all atoms across the batch.
+        index:     [Total_Atoms]    molecule index per atom (0-based, contiguous integers).
+
+    Returns:
+        distances: [Total_Atoms, Total_Atoms]
+            distances[i, j] = ||pos_i - pos_j|| if i and j are in the same molecule, else 0.
+        angles: [Total_Atoms, Total_Atoms, Total_Atoms]
+            angles[i, j, k] = cosine of the angle j-i-k (atom i is the vertex) if i, j, k
+            are all in the same molecule and j != i and k != i, else 0.
     """
-    # For a batch [Total_Atoms, 3], it should return a tensor that stores the distances between atoms
-    # within molecules, and a tensor that stores the angles between connections of atoms within molcules.
-    # Shape for distance tensor should be ig [Total_Atoms, Total_Atoms], where we skip the calculation based
-    # on the indexing for which atoms belong to which molecule.
-    # Shape for angle tensor should be ig . Again skip based on molecules,
-    # and the angle stored is for the first index of the tensor as "the middle atom", so that the angle between the
-    # connections of this atom with the other atoms are checked. It stores cosine angles.
-    #
-    # Args:
-    #     positions: [Total_Atoms, 3] 3D coordinates for all atoms across the batch.
-    #     index:     [Total_Atoms]    molecule index per atom (0-based, contiguous integers).
-    #
-    # Returns:
-    #     distances: [Total_Atoms, Total_Atoms]
-    #         distances[i, j] = ||pos_i - pos_j|| if i and j are in the same molecule, else 0.
-    #     angles: [Total_Atoms, Total_Atoms, Total_Atoms]
-    #         angles[i, j, k] = cosine of the angle j-i-k (atom i is the vertex) if i, j, k
-    #         are all in the same molecule and j != i and k != i, else 0.
+    
     N = positions.shape[0]
 
     # --- Sparse pairwise distances ---
