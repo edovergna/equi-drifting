@@ -11,7 +11,8 @@ from ..drift_losses.mol_drift_loss import (TrainingDivergedException,
 from ..egnn import EGNN
 from ..geometry import (batch_size_for_logging, center_positions_per_graph,
                        per_graph_center_norms)
-from ..sample_prior import compute_size_distribution, sample_prior_batch
+from ..sample_prior import (compute_size_distribution, sample_prior_batch)
+from ..spherical_utils import (probs_to_sphere, sphere_to_probs)
 
 
 class RiemannianDriftingMoleculeGenerator(LightningModule):
@@ -53,6 +54,9 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
 
         self._size_values: np.ndarray | None = None
         self._size_probs: np.ndarray | None = None
+
+        # TODO: make it a configurable parameter
+        self.eps = 1e-8
 
     def _init_generator(self, cfg) -> EGNN:
         return EGNN(
@@ -106,17 +110,17 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
             self._sample_prior_batch(n_molecules)
         )
 
-        x_gen, _, pos_gen = self.generator(x_prior, pos_prior, gen_dense_edge_index)
+        x_logits, _, pos_gen = self.generator(x_prior, pos_prior, gen_dense_edge_index)
         pos_gen = center_positions_per_graph(pos_gen, gen_batch_vec)
         pos_gen = pos_gen.clamp(-self.pos_clamp, self.pos_clamp)
 
         # Turn x_gen into probabilities
-        x_gen = x_gen.softmax(dim=-1)
+        x_prob = F.softmax(x_logits, dim=-1)
 
-        # Note: projection to spherical space is only done in loss for drifting, the probabilities here are what
-        # we actually use
+        # Project to spherical space 
+        x_sphere = probs_to_sphere(x_prob, self.eps)
 
-        return pos_gen, x_gen
+        return pos_gen, x_sphere
 
     def training_step(self, batch, batch_idx):
         pos_gen, x_gen = self._forward(batch)
@@ -160,7 +164,6 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-
         pos_gen, x_gen = self._forward(batch)
         pos_real, x_real = batch.pos, batch.real_atom_types
 
@@ -218,7 +221,6 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
         }
 
     def test_step(self, batch, batch_idx):
-        # TODO
         pos_gen, x_gen = self._forward(batch)
         pos_real, x_real = batch.pos, batch.real_atom_types
 
