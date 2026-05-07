@@ -8,7 +8,12 @@ from torch.optim.lr_scheduler import OneCycleLR
 
 from ept.ept_loader import load_ept_feature_extractor
 
-from .drift_loss import TrainingDivergedException, compute_drift_loss
+from .drift_loss import (
+    TrainingDivergedException,
+    compute_norm_based_drift_loss,
+    compute_inverse_attn_drift_loss,
+    original_compute_drift_loss,
+)
 from .egnn import EGNN
 from .geometry import (batch_size_for_logging, center_positions_per_graph,
                        per_graph_center_norms)
@@ -36,6 +41,7 @@ class DriftingMoleculeGenerator(LightningModule):
             "lr": 1e-4,
             "weight_decay": 1e-4,
             "temperatures": [0.02, 0.05, 0.2],
+            "loss_variant": "norm_based",
             "pct_start": 0.1,
             "div_factor": 25.0,
             "final_div_factor": 1e4,
@@ -52,6 +58,7 @@ class DriftingMoleculeGenerator(LightningModule):
         self._freeze_feature_extractor()
 
         self.temperatures = self.drift_cfg["temperatures"]
+        self.loss_variant = self.drift_cfg["loss_variant"]
         self.pos_clamp = self.generator_cfg["pos_clamp"]
         self.prior_pos_clamp = self.generator_cfg["prior_pos_clamp"]
 
@@ -139,6 +146,16 @@ class DriftingMoleculeGenerator(LightningModule):
         )
         return pos_gen, gen_atom_types, phi_gen, phi_real, gen_batch_vec
 
+    def _compute_loss(
+        self, phi_gen: torch.Tensor, phi_real: torch.Tensor
+    ) -> tuple[torch.Tensor, dict]:
+        if self.loss_variant == "original":
+            return original_compute_drift_loss(phi_gen, phi_real, self.temperatures)
+        elif self.loss_variant == "inverse_attn":
+            return compute_inverse_attn_drift_loss(phi_gen, phi_real, self.temperatures)
+        else:
+            return compute_norm_based_drift_loss(phi_gen, phi_real, self.temperatures)
+
     def training_step(self, batch, batch_idx):
         pos_gen, _, phi_gen, phi_real, gen_batch_vec = self._forward(batch)
 
@@ -181,9 +198,7 @@ class DriftingMoleculeGenerator(LightningModule):
             return torch.tensor(0.0, device=self.device, requires_grad=True)
 
         try:
-            loss, stats = compute_drift_loss(
-                phi_gen, phi_real, temperatures=self.temperatures
-            )
+            loss, stats = self._compute_loss(phi_gen, phi_real)
         except TrainingDivergedException as e:
             self.print(f"\n[Step {self.global_step}] {e}\nStopping training.")
             self.trainer.should_stop = True
@@ -232,9 +247,7 @@ class DriftingMoleculeGenerator(LightningModule):
 
     def validation_step(self, batch, batch_idx):
         pos_gen, gen_atom_types, phi_gen, phi_real, gen_batch_vec = self._forward(batch)
-        val_loss, stats = compute_drift_loss(
-            phi_gen, phi_real, temperatures=self.temperatures
-        )
+        val_loss, stats = self._compute_loss(phi_gen, phi_real)
 
         bs = batch_size_for_logging(batch)
         self.log(
@@ -298,7 +311,7 @@ class DriftingMoleculeGenerator(LightningModule):
 
     def test_step(self, batch, batch_idx):
         _, _, phi_gen, phi_real, _ = self._forward(batch)
-        test_loss, _ = compute_drift_loss(phi_gen, phi_real, self.temperatures)
+        test_loss, _ = self._compute_loss(phi_gen, phi_real)
 
         bs = batch_size_for_logging(batch)
         self.log(

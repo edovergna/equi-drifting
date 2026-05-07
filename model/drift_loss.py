@@ -9,7 +9,257 @@ class TrainingDivergedException(Exception):
     """Raised when the drift loss becomes non-finite. Triggers a clean training stop."""
 
 
-def compute_drift_loss(
+def _attention_weighted_field(
+    phi_gen_w: torch.Tensor,
+    phi_real_w: torch.Tensor,
+    dist_pos_w: torch.Tensor,
+    dist_neg_w: torch.Tensor,
+    tau_eff: float,
+    weighting: str,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Bidirectionally-normalized attention + drifting field.
+
+    weighting="coupled":      W_pos = A_pos * ΣA_neg,  W_neg = A_neg * ΣA_pos
+    weighting="inverse_attn": W_pos = A_pos / ΣA_pos,  W_neg = A_neg / ΣA_neg
+
+    Returns (V, A_row, A_pos, A_neg).
+    """
+    logit = torch.cat([-dist_pos_w / tau_eff, -dist_neg_w / tau_eff], dim=1)
+    A_row = F.softmax(logit, dim=-1)
+    A_col = F.softmax(logit, dim=-2)
+    A = torch.sqrt(torch.clamp(A_row * A_col, min=1e-30))
+
+    N_real = phi_real_w.shape[0]
+    N_gen = phi_gen_w.shape[0]
+    A_pos, A_neg = torch.split(A, [N_real, N_gen], dim=1)
+
+    if weighting == "coupled":
+        W_pos = A_pos * A_neg.sum(dim=1, keepdim=True)
+        W_neg = A_neg * A_pos.sum(dim=1, keepdim=True)
+    else:  # inverse_attn
+        W_pos = A_pos / A_pos.sum(dim=1, keepdim=True).clamp_min(1e-5)
+        W_neg = A_neg / A_neg.sum(dim=1, keepdim=True).clamp_min(1e-5)
+
+    V = W_pos @ phi_real_w - W_neg @ phi_gen_w
+    return V, A_row, A_pos, A_neg
+
+
+def _shared_embedding_stats(
+    phi_gen_w: torch.Tensor,
+    phi_real_w: torch.Tensor,
+    dist_pos_raw: torch.Tensor,
+) -> dict[str, float]:
+    """Geometric stats shared across all drift loss variants."""
+    gen_norms = phi_gen_w.norm(dim=-1)
+    real_norms = phi_real_w.norm(dim=-1)
+    phi_gen_unit = F.normalize(phi_gen_w, dim=-1)
+    phi_real_unit = F.normalize(phi_real_w, dim=-1)
+    cos_sim = (phi_gen_unit @ phi_real_unit.T).max(dim=1).values
+    return {
+        "phi_gen_norm_mean": gen_norms.mean().item(),
+        "phi_gen_norm_std": gen_norms.std().item(),
+        "phi_real_norm_mean": real_norms.mean().item(),
+        "cosine_sim_to_nn": cos_sim.mean().item(),
+        "nn_l2_distance": dist_pos_raw.min(dim=1).values.mean().item(),
+    }
+
+
+def original_compute_drift_loss(
+    phi_gen: torch.Tensor,
+    phi_real: torch.Tensor,
+    temperatures: tuple[float, ...] = (0.02, 0.05, 0.2),
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """
+    Faithful PyTorch translation of Algorithm 2 from
+    'Generative Modeling via Drifting' — coupled attention weighting, multi-tau.
+
+    - targets = [stop_grad(gen), phi_real]; gen acts as its own negatives
+    - scale = dist.mean(); scale_inputs = scale / sqrt(D) normalises coords to O(1)
+    - attention uses dist / scale as input (not dist / scale_inputs)
+    - per-tau force normalisation: force_scale = sqrt(mean(force^2))
+
+    Args:
+        phi_gen:      [N_gen, D]
+        phi_real:     [N_real, D]
+        temperatures: kernel bandwidths (tau)
+
+    Returns:
+        loss, stats
+    """
+    phi_gen = phi_gen.float()
+    phi_real = phi_real.float()
+
+    N_gen, D = phi_gen.shape
+    N_real = phi_real.shape[0]
+    N_targets = N_gen + N_real
+
+    old_gen = phi_gen.detach()
+    targets = torch.cat([old_gen, phi_real], dim=0)  # [N_targets, D]
+
+    dist = torch.cdist(old_gen, targets)  # [N_gen, N_targets]
+
+    all_dists = dist.flatten()
+    valid_mask = torch.isfinite(all_dists) & (all_dists < 1e5)
+    valid = all_dists[valid_mask]
+
+    if valid.numel() == 0:
+        raise TrainingDivergedException("No valid distances found; loss is unstable.")
+
+    scale = valid.mean().detach().clamp(min=1e-3)
+    scale_inputs = (scale / (D**0.5)).clamp(min=1e-3)
+
+    old_gen_scaled = old_gen / scale_inputs    # [N_gen, D]
+    phi_real_scaled = phi_real / scale_inputs  # [N_real, D]
+
+    # Attention distances: normalise by scale (not scale_inputs)
+    dist_pos_normed = dist[:, N_gen:] / scale           # [N_gen, N_real]
+    dist_neg_normed = dist[:, :N_gen].clone() / scale   # [N_gen, N_gen]
+    dist_neg_normed.fill_diagonal_(1e8)                  # mask self-connections
+
+    stats: dict[str, float] = {}
+    with torch.no_grad():
+        stats["scale_S"] = scale_inputs.item()
+        stats.update(_shared_embedding_stats(old_gen_scaled, phi_real_scaled, dist[:, N_gen:]))
+        stats["invalid_dist_frac"] = (~valid_mask).float().mean().item()
+
+    V_across_taus = torch.zeros_like(old_gen_scaled)
+
+    for tau in temperatures:
+        tau_key = str(tau).replace(".", "_")
+
+        V_tau, A_row, A_pos, A_neg = _attention_weighted_field(
+            old_gen_scaled, phi_real_scaled, dist_pos_normed, dist_neg_normed, tau, "coupled"
+        )
+
+        f_norm_val = (V_tau**2).mean()
+        force_scale = torch.sqrt(f_norm_val.clamp(min=1e-8)).detach()
+        V_tau_norm = V_tau / force_scale
+        V_across_taus += V_tau_norm
+
+        with torch.no_grad():
+            row_entropy = -(A_row * (A_row + 1e-30).log()).sum(dim=-1).mean()
+            row_entropy_uniform = torch.log(
+                torch.tensor(N_targets, device=A_row.device, dtype=torch.float)
+            )
+            pos_mass = A_pos.sum(dim=1)
+            neg_mass = A_neg.sum(dim=1)
+            stats[f"attn_entropy_{tau_key}"] = row_entropy.item()
+            stats[f"attn_entropy_rel_{tau_key}"] = (row_entropy / row_entropy_uniform).item()
+            stats[f"force_scale_{tau_key}"] = force_scale.item()
+            stats[f"v_norm_{tau_key}"] = V_tau_norm.norm(dim=-1).mean().item()
+            stats[f"frac_zero_dists_{tau_key}"] = (A_row == 0).float().mean().item()
+            stats[f"attn_pos_mass_frac_{tau_key}"] = (
+                pos_mass / (pos_mass + neg_mass).clamp_min(1e-8)
+            ).mean().item()
+
+    goal_scaled = (old_gen_scaled + V_across_taus).detach()
+    gen_scaled = phi_gen / scale_inputs
+
+    loss = F.mse_loss(gen_scaled, goal_scaled)
+
+    if not torch.isfinite(loss):
+        raise TrainingDivergedException(
+            f"Non-finite loss ({loss.item()!r}). "
+            f"phi_gen range: [{phi_gen.min().item():.3g}, {phi_gen.max().item():.3g}], "
+            f"phi_real range: [{phi_real.min().item():.3g}, {phi_real.max().item():.3g}], "
+            f"scale={scale_inputs.item():.3g}"
+        )
+
+    return loss, stats
+
+
+def compute_inverse_attn_drift_loss(
+    phi_gen: torch.Tensor,
+    phi_real: torch.Tensor,
+    temperatures: list[float],
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """
+    Normalized drifting field loss (inverse attention weighting, multi-tau).
+
+    Returns (loss, stats). Raises TrainingDivergedException on non-finite loss.
+    """
+    phi_gen = torch.nan_to_num(phi_gen.float(), nan=0.0, posinf=1e4, neginf=-1e4)
+    phi_real = torch.nan_to_num(phi_real.float(), nan=0.0, posinf=1e4, neginf=-1e4)
+
+    N_gen, D = phi_gen.shape
+    N_real = phi_real.shape[0]
+    N_targets = N_gen + N_real
+
+    dist_pos = torch.cdist(phi_gen, phi_real)
+    dist_neg = torch.cdist(phi_gen, phi_gen)
+    dist_neg.fill_diagonal_(1e6)
+
+    all_dists = torch.cat([dist_pos.flatten(), dist_neg.flatten()])
+    valid_mask = torch.isfinite(all_dists) & (all_dists < 1e5)
+    valid_dists = all_dists[valid_mask]
+
+    if valid_dists.numel() == 0:
+        S = torch.tensor(1.0, device=phi_gen.device, dtype=phi_gen.dtype)
+    else:
+        S = (valid_dists.mean() / (D**0.5)).detach()
+    S = S.clamp(min=1e-5, max=1e3)
+
+    phi_gen_w = phi_gen / S
+    phi_real_w = phi_real / S
+    dist_pos_w = dist_pos / S
+    dist_neg_w = dist_neg / S
+
+    stats: dict[str, float] = {}
+    with torch.no_grad():
+        stats["scale_S"] = S.item()
+        stats["invalid_dist_frac"] = (~valid_mask).float().mean().item()
+        stats.update(_shared_embedding_stats(phi_gen_w, phi_real_w, dist_pos))
+
+    aggregated_v = torch.zeros_like(phi_gen_w)
+
+    for tau in temperatures:
+        tau_key = str(tau).replace(".", "_")
+        tau_eff = tau * (D**0.5)
+
+        V_tau, A_row, A_pos, A_neg = _attention_weighted_field(
+            phi_gen_w, phi_real_w, dist_pos_w, dist_neg_w, tau_eff, "inverse_attn"
+        )
+
+        lambda_tau = (
+            torch.sqrt(((V_tau**2).sum(dim=-1).mean() / D).clamp(min=1e-10))
+            .detach()
+            .clamp(min=1e-5, max=1e3)
+        )
+        V_tau_norm = V_tau / lambda_tau
+        aggregated_v += V_tau_norm
+
+        with torch.no_grad():
+            row_entropy = -(A_row * (A_row + 1e-30).log()).sum(dim=-1).mean()
+            row_entropy_uniform = torch.log(
+                torch.tensor(N_targets, device=A_row.device, dtype=torch.float)
+            )
+            pos_mass = A_pos.sum(dim=1)
+            neg_mass = A_neg.sum(dim=1)
+            stats[f"attn_entropy_{tau_key}"] = row_entropy.item()
+            stats[f"attn_entropy_rel_{tau_key}"] = (row_entropy / row_entropy_uniform).item()
+            stats[f"lambda_{tau_key}"] = lambda_tau.item()
+            stats[f"v_norm_{tau_key}"] = V_tau_norm.norm(dim=-1).mean().item()
+            stats[f"frac_zero_dists_{tau_key}"] = (A_row == 0).float().mean().item()
+            stats[f"attn_pos_mass_frac_{tau_key}"] = (
+                pos_mass / (pos_mass + neg_mass).clamp_min(1e-8)
+            ).mean().item()
+
+    target = (phi_gen_w + aggregated_v).detach()
+    loss = F.mse_loss(phi_gen_w, target)
+
+    if not torch.isfinite(loss):
+        raise TrainingDivergedException(
+            f"Non-finite loss ({loss.item()!r}). "
+            f"phi_gen range: [{phi_gen.min().item():.3g}, {phi_gen.max().item():.3g}], "
+            f"phi_real range: [{phi_real.min().item():.3g}, {phi_real.max().item():.3g}], "
+            f"S={S.item():.3g}"
+        )
+
+    return loss, stats
+
+
+def compute_norm_based_drift_loss(
     phi_gen: torch.Tensor,
     phi_real: torch.Tensor,
     temperatures: Tuple[float, ...] = (0.02, 0.05, 0.2),
@@ -40,10 +290,8 @@ def compute_drift_loss(
     old_gen = phi_gen.detach()
     targets = torch.cat([old_gen, phi_real], dim=0)  # [N_gen + N_real, D]
 
-    # Distances from each gen sample to all targets (used for scale + stats)
     dist = torch.cdist(old_gen, targets)  # [N_gen, N_gen + N_real]
 
-    # Scale: mean pairwise distance (uniform weights)
     all_dists = dist.flatten()
     valid_mask = torch.isfinite(all_dists) & (all_dists < 1e5)
     valid = all_dists[valid_mask]
@@ -65,27 +313,15 @@ def compute_drift_loss(
     diff_pos = gen_norms[:, None] - real_norms[None, :]  # [N_gen, N_real]
     diff_neg = gen_norms[:, None] - gen_norms[None, :]  # [N_gen, N_gen]
 
-    # Mask self-connections: gen[i] -> gen[i]
     diff_neg = diff_neg + torch.eye(N_gen, device=phi_gen.device) * 1e6
 
     stats = {}
     with torch.no_grad():
         stats["scale_S"] = scale_inputs.item()
-
-        gen_norms_l2 = old_gen_scaled.norm(dim=-1)
-        real_norms_l2 = phi_real_scaled.norm(dim=-1)
-        stats["phi_gen_norm_mean"] = gen_norms_l2.mean().item()
-        stats["phi_gen_norm_std"] = gen_norms_l2.std().item()
-        stats["phi_real_norm_mean"] = real_norms_l2.mean().item()
-
-        phi_gen_unit = F.normalize(old_gen, dim=-1)
-        phi_real_unit = F.normalize(phi_real, dim=-1)
-        cos_sim_matrix = phi_gen_unit @ phi_real_unit.T  # [N_gen, N_real]
-        stats["cosine_sim_to_nn"] = cos_sim_matrix.max(dim=1).values.mean().item()
-        stats["nn_l2_distance"] = dist[:, N_gen:].min(dim=1).values.mean().item()
+        stats.update(_shared_embedding_stats(old_gen_scaled, phi_real_scaled, dist[:, N_gen:]))
         stats["invalid_dist_frac"] = (~valid_mask).float().mean().item()
 
-        # Pairwise stats among generated embeddings (upper triangle only — one entry per pair)
+        phi_gen_unit = F.normalize(old_gen, dim=-1)
         triu_idx = torch.triu_indices(N_gen, N_gen, offset=1, device=phi_gen.device)
         gen_cos_sim = (phi_gen_unit @ phi_gen_unit.T)[triu_idx[0], triu_idx[1]]
         gen_l2_dist = dist[:, :N_gen][triu_idx[0], triu_idx[1]]
@@ -103,7 +339,6 @@ def compute_drift_loss(
         Z_p = kernel_pos.sum(dim=1).clamp(min=1e-8)  # [N_gen]
         Z_q = kernel_neg.sum(dim=1).clamp(min=1e-8)  # [N_gen]
 
-        # Gradient of k(x, y) w.r.t. x, summed over attraction/repulsion targets
         grad_pos = (-4 / tau * kernel_pos * diff_pos).sum(dim=1)  # [N_gen]
         grad_neg = (-4 / tau * kernel_neg * diff_neg).sum(dim=1)  # [N_gen]
 

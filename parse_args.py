@@ -57,6 +57,17 @@ def parse_args():
         help="Temperature values for the drifting field (space-separated, e.g. --temperatures 0.02 0.05 0.2).",
     )
     parser.add_argument(
+        "--loss_variant",
+        type=str,
+        default="norm_based",
+        choices=["original", "inverse_attn", "norm_based"],
+        help=(
+            "Drift loss variant: 'original' (coupled attention weighting, single tau), "
+            "'inverse_attn' (normalized attention weighting, multi-tau), "
+            "'norm_based' (norm-difference kernel, multi-tau)."
+        ),
+    )
+    parser.add_argument(
         "--hidden_dim",
         type=int,
         default=64,
