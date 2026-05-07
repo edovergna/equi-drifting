@@ -112,7 +112,8 @@ class EPTFeatureExtractor(nn.Module):
         batch_id: [N] block/atom i -> graph index
         dense_edge_index: [2, E] Fully connected edges (globally indexed)
         """
-        h_continuous = self.embed_weights[self.qm9_ept_indices[atom_types], :]
+        qm9_weights = self.embed_weights[self.qm9_ept_indices]  # [5, D]
+        h_continuous = atom_types @ qm9_weights 
 
         # Distance-based edge type embedding, matching EPT's RadialEdge training scheme.
         edge_attr = self._compute_edge_attr(pos, dense_edge_index)
