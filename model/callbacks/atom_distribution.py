@@ -87,7 +87,7 @@ class AtomTypeDistributionCallback(Callback):
                         PILImage.open(buf).copy()
                     )
                 },
-                step=trainer.global_step,
+                commit=False,
             )
         except Exception as e:
             print(f"[AtomTypeDistributionCallback] Skipped: {e}")

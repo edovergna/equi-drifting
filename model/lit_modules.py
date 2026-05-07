@@ -221,7 +221,7 @@ class DriftingMoleculeGenerator(LightningModule):
             try:
                 self.logger.experiment.log(
                     {f"drift_train/{k}": v for k, v in hist_stats.items()},
-                    step=self.global_step,
+                    commit=False,
                 )
             except Exception:
                 pass
@@ -310,7 +310,7 @@ class DriftingMoleculeGenerator(LightningModule):
         hist_stats = getattr(self, "_val_hist_stats", {})
         if hist_stats and hasattr(self, "logger") and hasattr(self.logger, "experiment"):
             try:
-                self.logger.experiment.log(hist_stats, step=self.global_step)
+                self.logger.experiment.log(hist_stats, commit=False)
             except Exception:
                 pass
         self._val_hist_stats = {}

@@ -88,7 +88,7 @@ class SizeDistributionCallback(Callback):
             buf.seek(0)
             logger.experiment.log(
                 {"prior/size_distribution": wandb.Image(PILImage.open(buf).copy())},
-                step=trainer.global_step,
+                commit=False,
             )
         except Exception as e:
             print(f"[SizeDistributionCallback] Skipped: {e}")

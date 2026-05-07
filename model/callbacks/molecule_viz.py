@@ -133,7 +133,7 @@ class MoleculeVisualizationCallback(Callback):
                     gen_types, real_types
                 )
 
-            logger.experiment.log(images, step=trainer.global_step)
+            logger.experiment.log(images, commit=False)
 
         except Exception as e:
             print(f"[MoleculeVisualizationCallback] Skipped: {e}")
