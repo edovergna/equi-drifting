@@ -232,9 +232,15 @@ class DriftingMoleculeGenerator(LightningModule):
 
     def validation_step(self, batch, batch_idx):
         pos_gen, gen_atom_types, phi_gen, phi_real, gen_batch_vec = self._forward(batch)
-        val_loss, stats = compute_drift_loss(
-            phi_gen, phi_real, temperatures=self.temperatures
-        )
+        try:
+            val_loss, stats = compute_drift_loss(
+                phi_gen, phi_real, temperatures=self.temperatures
+            )
+        except TrainingDivergedException as e:
+            self.print(f"\n[Validation step {self.global_step}] {e}\nStopping training.")
+            self.trainer.should_stop = True
+            val_loss = torch.tensor(0.0, device=self.device)
+            stats = {}
 
         bs = batch_size_for_logging(batch)
         self.log(

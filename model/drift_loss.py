@@ -9,6 +9,14 @@ class TrainingDivergedException(Exception):
     """Raised when the drift loss becomes non-finite. Triggers a clean training stop."""
 
 
+def _finite_wandb_histogram(values: torch.Tensor) -> wandb.Histogram | None:
+    values = values.detach().float()
+    values = values[torch.isfinite(values)]
+    if values.numel() == 0:
+        return None
+    return wandb.Histogram(values.cpu().numpy())
+
+
 def compute_drift_loss(
     phi_gen: torch.Tensor,
     phi_real: torch.Tensor,
@@ -34,6 +42,13 @@ def compute_drift_loss(
     """
     phi_gen = phi_gen.float()
     phi_real = phi_real.float()
+
+    if not torch.isfinite(phi_gen).all() or not torch.isfinite(phi_real).all():
+        bad_gen = (~torch.isfinite(phi_gen).all(dim=-1)).sum().item()
+        bad_real = (~torch.isfinite(phi_real).all(dim=-1)).sum().item()
+        raise TrainingDivergedException(
+            f"Non-finite embeddings ({bad_gen} gen, {bad_real} real)."
+        )
 
     N_gen, D = phi_gen.shape
 
@@ -89,8 +104,12 @@ def compute_drift_loss(
         triu_idx = torch.triu_indices(N_gen, N_gen, offset=1, device=phi_gen.device)
         gen_cos_sim = (phi_gen_unit @ phi_gen_unit.T)[triu_idx[0], triu_idx[1]]
         gen_l2_dist = dist[:, :N_gen][triu_idx[0], triu_idx[1]]
-        stats["gen_pairwise_cos_sim_hist"] = wandb.Histogram(gen_cos_sim.float().cpu().numpy())
-        stats["gen_pairwise_l2_dist_hist"] = wandb.Histogram(gen_l2_dist.float().cpu().numpy())
+        gen_cos_sim_hist = _finite_wandb_histogram(gen_cos_sim)
+        gen_l2_dist_hist = _finite_wandb_histogram(gen_l2_dist)
+        if gen_cos_sim_hist is not None:
+            stats["gen_pairwise_cos_sim_hist"] = gen_cos_sim_hist
+        if gen_l2_dist_hist is not None:
+            stats["gen_pairwise_l2_dist_hist"] = gen_l2_dist_hist
 
     V_across_taus = torch.zeros_like(old_gen_scaled)
 
