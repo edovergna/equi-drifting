@@ -26,14 +26,6 @@ _STABLE_VALENCE = {1: 1, 6: 4, 7: 3, 8: 2, 9: 1}
 # Public API
 # ---------------------------------------------------------------------------
 
-def _ensure_atom_ids(atom_types: torch.Tensor) -> torch.Tensor:
-    # One-hot / probabilities
-    if atom_types.ndim == 2:
-        return atom_types.argmax(dim=-1)
-
-    # Already integer IDs
-    return atom_types
-
 
 def batch_to_validity(
     pos: torch.Tensor,
@@ -46,7 +38,6 @@ def batch_to_validity(
     `identifier` is a canonical SMILES string when RDKit is available, or a
     molecular formula string otherwise (useful for uniqueness tracking).
     """
-    atom_types = _ensure_atom_ids(atom_types)
     n_graphs = int(batch_vec.max().item()) + 1
     results: list[tuple[bool, str | None]] = []
     for g in range(n_graphs):
@@ -59,7 +50,6 @@ def batch_to_validity(
 
 def heavy_atom_counts(atom_types: torch.Tensor, batch_vec: torch.Tensor) -> list[int]:
     """Returns the number of non-hydrogen atoms per graph in the batch."""
-    atom_types = _ensure_atom_ids(atom_types)
     n_graphs = int(batch_vec.max().item()) + 1
     counts = []
     for g in range(n_graphs):
@@ -84,7 +74,6 @@ def batch_to_stability(
         atom_stable_frac  — fraction of all atoms that are stable
         mol_stable_frac   — fraction of molecules where all atoms are stable
     """
-    atom_types = _ensure_atom_ids(atom_types)
     n_graphs = int(batch_vec.max().item()) + 1
     total_atoms = 0
     n_stable_atoms = 0
