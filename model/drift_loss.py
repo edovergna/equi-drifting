@@ -37,7 +37,7 @@ def compute_drift_loss(
 
     N_gen, D = phi_gen.shape
 
-    old_gen = phi_gen.detach()
+    old_gen = phi_gen.copy()
     targets = torch.cat([old_gen, phi_real], dim=0)  # [N_gen + N_real, D]
 
     # Distances from each gen sample to all targets (used for scale + stats)
