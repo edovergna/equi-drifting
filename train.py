@@ -17,18 +17,17 @@ from model import (ChemicalValidityCallback, DriftingMoleculeGenerator,
                    EmbeddingMonitorCallback, GeneratorCheckpointCallback,
                    GradientMonitorCallback, MoleculeVisualizationCallback,
                    QM9DataModule, SizeDistributionCallback,
-                   initialize_training_config)
+                   initialize_training_config, RiemannianDriftingMoleculeGenerator)
 from model.wandb_utils import load_pretrained_generator
 from parse_args import parse_args
 
-# TODO: to link up with riemannian generator
 def main(args: argparse.Namespace):
 
     device, precision, deterministic, benchmark = initialize_training_config(args)
 
     run = wandb.init(
         entity="equivariant-drifting",
-        project="tests-col-daniel",
+        project="riemannian",
         group=args.group_tag,
         mode="offline" if args.offline else "online",
         config=vars(args),
@@ -59,7 +58,7 @@ def main(args: argparse.Namespace):
             "temperatures": args.temperatures,
         }
 
-        model = DriftingMoleculeGenerator(generator_cfg, drift_cfg)
+        model = RiemannianDriftingMoleculeGenerator(generator_cfg, drift_cfg)
 
         if args.wandb_run_id:
             print(f"Loading pretrained generator from wandb run: {args.wandb_run_id}")
