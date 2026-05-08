@@ -19,7 +19,7 @@ def prep_batch_for_kernel(positions: torch.Tensor, index: torch.Tensor):
             angles[i, j, k] = cosine of the angle j-i-k (atom i is the vertex) if i, j, k
             are all in the same molecule and j != i and k != i, else 0.
     """
-    
+
     N = positions.shape[0]
 
     # --- Sparse pairwise distances ---
@@ -84,14 +84,16 @@ def prep_batch_for_kernel(positions: torch.Tensor, index: torch.Tensor):
 
 # TODO
 def molecule_kernel(
-    gen_distances: torch.Tensor,
-    gen_angles: torch.Tensor,
+    pos_gen: torch.Tensor,
     x_gen: torch.Tensor,
-    real_distances: torch.Tensor,
-    real_angles: torch.Tensor,
+    pos_real: torch.Tensor,
     x_real: torch.Tensor,
     index: torch.Tensor,
 ):
     """
     Calculates the molecule kernel between each combination of real versus generated molecules
     """
+    gen_distances, gen_angles = prep_batch_for_kernel(pos_gen, index)
+    real_distances, real_angles = prep_batch_for_kernel(pos_real, index)
+
+    

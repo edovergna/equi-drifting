@@ -42,6 +42,16 @@ def sphere_project_tangent(x: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
     return v - (x * v).sum(dim=-1, keepdim=True) * x
 
 
+def product_tangent_norm(v: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    """
+    Product metric norm:
+        ||v||_g^2 = sum_l ||v_l||_2^2
+    v: [N_atoms, 5]
+    returns: [N_atoms, 1]
+    """
+    return torch.clamp(torch.norm(v, dim=-1, keepdim=True), min=1e-8)
+
+
 def sphere_log(x: torch.Tensor, y: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     """
     Positionwise sphere log map on S^3.

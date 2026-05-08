@@ -128,7 +128,7 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
 
         try:
             loss, stats = compute_molecule_based_drift_loss(
-                pos_gen, x_gen, pos_real, x_real, index=batch.batch
+                pos_gen, x_gen, pos_real, x_real, index=batch.batch, eps=self.eps
             )
         except TrainingDivergedException as e:
             self.print(f"\n[Step {self.global_step}] {e}\nStopping training.")
@@ -168,7 +168,7 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
         pos_real, x_real = batch.pos, batch.real_atom_types
 
         val_loss, stats = compute_molecule_based_drift_loss(
-                pos_gen, x_gen, pos_real, x_real, index=batch.batch
+                pos_gen, x_gen, pos_real, x_real, index=batch.batch, eps=self.eps
             )
 
         bs = batch_size_for_logging(batch)
@@ -225,7 +225,7 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
         pos_real, x_real = batch.pos, batch.real_atom_types
 
         test_loss, _ = compute_molecule_based_drift_loss(
-                pos_gen, x_gen, pos_real, x_real, index=batch.batch
+                pos_gen, x_gen, pos_real, x_real, index=batch.batch, eps=self.eps
             )
 
         bs = batch_size_for_logging(batch)
