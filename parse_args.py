@@ -37,7 +37,7 @@ def parse_args():
         "--seed", type=int, default=42, help="Random seed for reproducibility."
     )
     parser.add_argument(
-        "--batch_size", type=int, default=128, help="Batch size for training."
+        "--n_real_molecules", type=int, default=128, help="Number of real molecules per batch."
     )
     parser.add_argument(
         "--num_workers", type=int, default=2, help="Number of workers for data loading."

@@ -52,7 +52,7 @@ class QM9DataModule(pl.LightningDataModule):
     def __init__(
         self,
         root: str = "data/QM9",
-        batch_size: int = 128,
+        n_real_molecules: int = 128,
         num_workers: int = 4,
         force_reload: bool = False,
         sample_frac: float = 1.0,
@@ -60,7 +60,7 @@ class QM9DataModule(pl.LightningDataModule):
     ):
         super().__init__()
         self.root = root
-        self.batch_size = batch_size
+        self.n_real_molecules = n_real_molecules
         self.num_workers = num_workers
         self.force_reload = force_reload
         self.sample_frac = sample_frac
@@ -130,7 +130,7 @@ class QM9DataModule(pl.LightningDataModule):
     def train_dataloader(self) -> DataLoader:
         return DataLoader(
             self.train_set,
-            batch_size=self.batch_size,
+            batch_size=self.n_real_molecules,
             shuffle=True,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
@@ -140,7 +140,7 @@ class QM9DataModule(pl.LightningDataModule):
     def val_dataloader(self) -> DataLoader:
         return DataLoader(
             self.val_set,
-            batch_size=self.batch_size,
+            batch_size=self.n_real_molecules,
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,
@@ -150,7 +150,7 @@ class QM9DataModule(pl.LightningDataModule):
     def test_dataloader(self) -> DataLoader:
         return DataLoader(
             self.test_set,
-            batch_size=self.batch_size,
+            batch_size=self.n_real_molecules,
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,
