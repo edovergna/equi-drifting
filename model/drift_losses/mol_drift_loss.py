@@ -34,7 +34,7 @@ def compute_molecule_based_drift_loss(
         x_leaf = x_gen.detach().requires_grad_(True)
 
         kernel_pos = molecule_kernel(pos_leaf, x_leaf, pos_real, x_real, gen_index, real_index)
-        kernel_neg = molecule_kernel(pos_leaf, x_leaf, pos_real=pos_leaf, x_real=x_leaf, gen_index=gen_index, real_index=gen_index)
+        kernel_neg = molecule_kernel(pos_leaf, x_leaf, pos_real=pos_leaf, x_real=x_leaf, gen_index=gen_index, real_index=gen_index, same_samples=True)
 
         N_pos, N_neg = kernel_pos.shape[1], kernel_neg.shape[1]
         exp_pos = torch.clamp(kernel_pos.sum(dim=1) / N_pos, min=1e-8)
@@ -43,7 +43,7 @@ def compute_molecule_based_drift_loss(
         # TODO: check up whether it is allowed to use the log
         log_exp_pos = torch.log(exp_pos)
         log_exp_neg = torch.log(exp_neg)
-
+  
         # Both inputs requested in one call to avoid retain_graph issues
         grad_pos_pos, grad_types_pos = torch.autograd.grad(
             outputs=log_exp_pos.sum(), inputs=[pos_leaf, x_leaf]
@@ -51,7 +51,7 @@ def compute_molecule_based_drift_loss(
         grad_pos_neg, grad_types_neg = torch.autograd.grad(
             outputs=log_exp_neg.sum(), inputs=[pos_leaf, x_leaf]
         )
-
+    
     v_positions = grad_pos_pos - grad_pos_neg
     v_types = grad_types_pos - grad_types_neg
 
