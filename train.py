@@ -37,7 +37,7 @@ def main(args: argparse.Namespace):
     try:
         datamodule = QM9DataModule(
             root=args.root,
-            batch_size=args.n_real_molecules,
+            n_real_molecules=args.n_real_molecules,
             num_workers=min(args.num_workers, args.n_real_molecules),
             force_reload=args.force_reload,
             sample_frac=args.sample_frac,
