@@ -13,11 +13,18 @@ from lightning.pytorch.callbacks import EarlyStopping
 from lightning.pytorch.loggers import WandbLogger
 
 import wandb
-from model import (AtomTypeDistributionCallback, ChemicalValidityCallback,
-                   DriftingMoleculeGenerator, EmbeddingMonitorCallback,
-                   GeneratorCheckpointCallback, GradientMonitorCallback,
-                   MoleculeVisualizationCallback, QM9DataModule,
-                   SizeDistributionCallback, initialize_training_config)
+from model import (
+    AtomTypeDistributionCallback,
+    ChemicalValidityCallback,
+    DriftingMoleculeGenerator,
+    EmbeddingMonitorCallback,
+    GeneratorCheckpointCallback,
+    GradientMonitorCallback,
+    MoleculeVisualizationCallback,
+    QM9DataModule,
+    SizeDistributionCallback,
+    initialize_training_config,
+)
 from model.wandb_utils import load_pretrained_generator
 from parse_args import parse_args
 
@@ -28,7 +35,7 @@ def main(args: argparse.Namespace):
 
     run = wandb.init(
         entity="equivariant-drifting",
-        project="fixed-gradient-flow",
+        project="dutch-daniel-tests",
         group=args.group_tag,
         mode="offline" if args.offline else "online",
         config=vars(args),
