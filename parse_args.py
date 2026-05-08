@@ -16,6 +16,12 @@ def parse_args():
         help="Whether to force reload the QM9 dataset (required after modifying pre_transform).",
     )
     parser.add_argument(
+        "--n_gen_molecules",
+        type=int,
+        default=64,
+        help="Number of molecules to generate per forward pass during training and validation.",
+    )
+    parser.add_argument(
         "--sample_frac",
         type=float,
         default=1.0,
