@@ -61,7 +61,6 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
 
     def _init_generator(self, cfg) -> EGNN:
         return EGNN(
-            in_node_nf=cfg["in_node_nf"],
             hidden_nf=cfg["hidden_nf"],
             n_layers=cfg["n_layers"],
             num_atom_types=cfg["num_atom_types"],
