@@ -16,8 +16,7 @@ from .drift_loss import (
     original_compute_drift_loss,
 )
 from .egnn import EGNN
-from .geometry import (batch_size_for_logging, center_positions_per_graph,
-                       per_graph_center_norms)
+from .geometry import (center_positions_per_graph, per_graph_center_norms)
 from .sample_prior import compute_size_distribution, sample_prior_batch
 
 
@@ -237,7 +236,7 @@ class DriftingMoleculeGenerator(LightningModule):
             self.trainer.should_stop = True
             return torch.tensor(0.0, device=self.device, requires_grad=True)
 
-        bs = batch_size_for_logging(batch) + self.n_gen_molecules
+        bs = self.n_gen_molecules
         self.log("train_loss", loss, batch_size=bs, on_step=True, on_epoch=True)
 
         hist_stats = {k: v for k, v in stats.items() if isinstance(v, wandb.Histogram)}
@@ -282,7 +281,7 @@ class DriftingMoleculeGenerator(LightningModule):
         pos_gen, gen_atom_types, phi_gen, phi_real, gen_batch_vec = self._forward(batch)
         val_loss, stats = self._compute_loss(phi_gen, phi_real)
 
-        bs = batch_size_for_logging(batch) + self.n_gen_molecules
+        bs = self.n_gen_molecules
         self.log(
             "val_loss",
             val_loss,
@@ -349,7 +348,7 @@ class DriftingMoleculeGenerator(LightningModule):
         _, _, phi_gen, phi_real, _ = self._forward(batch)
         test_loss, _ = self._compute_loss(phi_gen, phi_real)
 
-        bs = batch_size_for_logging(batch) + self.n_gen_molecules
+        bs = self.n_gen_molecules
         self.log(
             "test_loss",
             test_loss,
