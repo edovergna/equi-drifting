@@ -56,8 +56,8 @@ def compute_molecule_based_drift_loss(
         target_positions = (pos_gen + v_positions)
 
         # Target for atom types is through the exponential mapping of the spherical space:
-        v_types_norm = product_tangent_norm(v_types, eps)
         # TODO: add step scaling of drifting field for atom types
+        # v_types_norm = product_tangent_norm(v_types, eps)
         target_types = sphere_exp(x_gen, v_types, eps)
 
     # Next, calculate loss per riemannian manifold, then combine by the summing the squared distances:
