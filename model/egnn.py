@@ -217,7 +217,7 @@ class EGNN(nn.Module):
         radial = (coord_diff**2).sum(dim=-1, keepdim=True)
         # Keep gradients finite when radial == 0 by moving eps inside sqrt.
         norm = (radial + eps).sqrt()
-        return radial, coord_diff / norm
+        return norm, coord_diff / norm
 
     def forward(self, x: torch.Tensor, pos: torch.Tensor, edge_index: torch.Tensor):
         x = self.embedding(x)
