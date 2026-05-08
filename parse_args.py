@@ -22,6 +22,12 @@ def parse_args():
         help="Fraction of each split to use (0 < sample_frac <= 1.0). Useful for quick iteration runs.",
     )
     parser.add_argument(
+        "--max_num_atoms",
+        type=int,
+        default=None,
+        help="Keep only molecules with at most this many atoms (inclusive). None means no filter.",
+    )
+    parser.add_argument(
         "--seed", type=int, default=42, help="Random seed for reproducibility."
     )
     parser.add_argument(

@@ -28,7 +28,7 @@ def main(args: argparse.Namespace):
 
     run = wandb.init(
         entity="equivariant-drifting",
-        project="fixed-gradient-flow",
+        project="one-real-molecule",
         group=args.group_tag,
         mode="offline" if args.offline else "online",
         config=vars(args),
@@ -41,6 +41,7 @@ def main(args: argparse.Namespace):
             num_workers=args.num_workers,
             force_reload=args.force_reload,
             sample_frac=args.sample_frac,
+            max_num_atoms=args.max_num_atoms,
         )
 
         generator_cfg = {

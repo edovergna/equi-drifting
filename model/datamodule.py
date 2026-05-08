@@ -56,6 +56,7 @@ class QM9DataModule(pl.LightningDataModule):
         num_workers: int = 4,
         force_reload: bool = False,
         sample_frac: float = 1.0,
+        max_num_atoms: int | None = None,
     ):
         super().__init__()
         self.root = root
@@ -63,6 +64,7 @@ class QM9DataModule(pl.LightningDataModule):
         self.num_workers = num_workers
         self.force_reload = force_reload
         self.sample_frac = sample_frac
+        self.max_num_atoms = max_num_atoms
         self.pin_memory = torch.cuda.is_available()
 
     def setup(self, stage=None):
@@ -91,6 +93,10 @@ class QM9DataModule(pl.LightningDataModule):
                 if sys.modules[k] is None and (k == "rdkit" or k.startswith("rdkit.")):
                     del sys.modules[k]
             sys.modules.update(_rdkit_saved)
+
+        if self.max_num_atoms is not None:
+            keep = [i for i, d in enumerate(dataset) if d.num_nodes <= self.max_num_atoms]
+            dataset = dataset.index_select(keep)
 
         n = len(dataset)
         n_train = min(_N_TRAIN, n)
