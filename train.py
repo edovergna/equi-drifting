@@ -38,7 +38,7 @@ def main(args: argparse.Namespace):
         datamodule = QM9DataModule(
             root=args.root,
             batch_size=args.batch_size,
-            num_workers=args.num_workers,
+            num_workers=min(args.num_workers, args.batch_size),
             force_reload=args.force_reload,
             sample_frac=args.sample_frac,
             max_num_atoms=args.max_num_atoms,
@@ -81,7 +81,7 @@ def main(args: argparse.Namespace):
             GradientMonitorCallback(),
             EmbeddingMonitorCallback(),
             MoleculeVisualizationCallback(
-                n_molecules=4, bond_threshold=2.0, every_n_epochs=1
+                n_molecules=min(4, args.batch_size), bond_threshold=2.0, every_n_epochs=1
             ),
             ChemicalValidityCallback(),
             # SizeDistributionCallback(),
