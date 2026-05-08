@@ -105,7 +105,7 @@ class ChemicalValidityCallback(Callback):
             for ident, cnt in Counter(valid_ids).most_common(50):
                 table.add_data(ident, cnt)
             logger.experiment.log(
-                {"chem/valid_smiles": table}, step=trainer.global_step
+                {"chem/valid_smiles": table}, commit=False
             )
         except Exception:
             pass

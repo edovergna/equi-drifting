@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn.functional as F
+import wandb
 from lightning.pytorch import LightningModule
 from torch.optim.lr_scheduler import OneCycleLR
 
@@ -138,8 +139,21 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
         bs = batch_size_for_logging(batch)
         self.log("train_loss", loss, batch_size=bs, on_step=True, on_epoch=True)
 
+        hist_stats = {k: v for k, v in stats.items() if isinstance(v, wandb.Histogram)}
         for key, val in stats.items():
-            self.log(f"drift_train/{key}", val, batch_size=bs, on_step=True, on_epoch=False)
+            if key in hist_stats:
+                continue
+            self.log(
+                f"drift_train/{key}", val, batch_size=bs, on_step=True, on_epoch=False
+            )
+        if hist_stats and hasattr(self.logger, "experiment"):
+            try:
+                self.logger.experiment.log(
+                    {f"drift_train/{k}": v for k, v in hist_stats.items()},
+                    commit=False,
+                )
+            except Exception:
+                pass
 
         self.log(
             "train/lr",
@@ -181,7 +195,10 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
             sync_dist=True,
         )
 
+        hist_stats = {k: v for k, v in stats.items() if isinstance(v, wandb.Histogram)}
         for key, val in stats.items():
+            if key in hist_stats:
+                continue
             self.log(
                 f"drift_val/{key}",
                 val,
@@ -190,6 +207,8 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
                 on_epoch=True,
                 sync_dist=True,
             )
+        if hist_stats:
+            self._val_hist_stats = {f"drift_val/{k}": v for k, v in hist_stats.items()}
 
         with torch.no_grad():
             gen_cn = per_graph_center_norms(pos_gen, gen_batch_vec)
@@ -221,6 +240,15 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
             "gen_batch_vec": gen_batch_vec.detach().cpu(),
             "batch_vec": batch.batch.detach().cpu()
         }
+    
+    def on_validation_epoch_end(self):
+        hist_stats = getattr(self, "_val_hist_stats", {})
+        if hist_stats and hasattr(self, "logger") and hasattr(self.logger, "experiment"):
+            try:
+                self.logger.experiment.log(hist_stats, commit=False)
+            except Exception:
+                pass
+        self._val_hist_stats = {}
 
     def test_step(self, batch, batch_idx):
         pos_gen, x_gen, gen_batch_vec = self._forward(batch)

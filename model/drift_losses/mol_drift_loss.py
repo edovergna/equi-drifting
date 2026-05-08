@@ -73,9 +73,9 @@ def compute_molecule_based_drift_loss(
     combined_distances = euclidean_distances + spherical_distances
 
     # Calculate final loss as the expectation over the distances per molecule
-    num_molecules = int(index.max().item()) + 1
+    num_molecules = int(gen_index.max().item()) + 1
     sum_per_molecule = torch.zeros(num_molecules, device=combined_distances.device, dtype=combined_distances.dtype)
-    sum_per_molecule.scatter_add_(0, index, combined_distances)
+    sum_per_molecule.scatter_add_(0, gen_index, combined_distances)
     loss = sum_per_molecule.mean()
 
     if not torch.isfinite(loss):
