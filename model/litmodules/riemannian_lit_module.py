@@ -120,15 +120,15 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
         # Project to spherical space 
         x_sphere = probs_to_sphere(x_prob, self.eps)
 
-        return pos_gen, x_sphere
+        return pos_gen, x_sphere, gen_batch_vec
 
     def training_step(self, batch, batch_idx):
-        pos_gen, x_gen = self._forward(batch)
+        pos_gen, x_gen, gen_batch_vec = self._forward(batch)
         pos_real, x_real = batch.pos, batch.real_atom_types
 
         try:
             loss, stats = compute_molecule_based_drift_loss(
-                pos_gen, x_gen, pos_real, x_real, index=batch.batch, eps=self.eps
+                pos_gen, x_gen, pos_real, x_real, gen_index=gen_batch_vec, real_index=batch.batch, eps=self.eps
             )
         except TrainingDivergedException as e:
             self.print(f"\n[Step {self.global_step}] {e}\nStopping training.")
@@ -150,7 +150,7 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
 
         with torch.no_grad():
             pos_norms = pos_gen.norm(dim=-1)
-            gen_center_norms = per_graph_center_norms(pos_gen, batch.batch)
+            gen_center_norms = per_graph_center_norms(pos_gen, gen_batch_vec)
             real_center_norms = per_graph_center_norms(batch.pos, batch.batch)
             max_dist = torch.cdist(pos_gen, pos_gen).max()
 
@@ -164,11 +164,11 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        pos_gen, x_gen = self._forward(batch)
+        pos_gen, x_gen, gen_batch_vec = self._forward(batch)
         pos_real, x_real = batch.pos, batch.real_atom_types
 
         val_loss, stats = compute_molecule_based_drift_loss(
-                pos_gen, x_gen, pos_real, x_real, index=batch.batch, eps=self.eps
+                pos_gen, x_gen, pos_real, x_real, gen_index=gen_batch_vec, real_index=batch.batch, eps=self.eps
             )
 
         bs = batch_size_for_logging(batch)
@@ -192,7 +192,7 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
             )
 
         with torch.no_grad():
-            gen_cn = per_graph_center_norms(pos_gen, batch.batch)
+            gen_cn = per_graph_center_norms(pos_gen, gen_batch_vec)
             real_cn = per_graph_center_norms(batch.pos, batch.batch)
         self.log(
             "debug/val_gen_center_norm_mean",
@@ -209,23 +209,25 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
             sync_dist=True,
         )
 
-        # TODO: ASK DANIEL what these are used for
+        # Project sphere embeddings back to probabilities
+        with torch.no_grad():
+            x_prob = sphere_to_probs(x_gen, self.eps)
+
         return {
-            "phi_gen": phi_gen.detach().cpu(),
-            "phi_real": phi_real.detach().cpu(),
             "pos_gen": pos_gen.detach().cpu(),
-            "a_soft_gen": a_soft_gen.detach().cpu(),
+            "gen_atom_types": x_prob.detach().cpu().argmax(dim=-1),
             "pos_real": batch.pos.detach().cpu(),
-            "a_soft_real": batch.a_soft_real.detach().cpu(),
-            "batch_vec": batch.batch.detach().cpu(),
+            "real_atom_types": batch.real_atom_types.detach().cpu(),
+            "gen_batch_vec": gen_batch_vec.detach().cpu(),
+            "batch_vec": batch.batch.detach().cpu()
         }
 
     def test_step(self, batch, batch_idx):
-        pos_gen, x_gen = self._forward(batch)
+        pos_gen, x_gen, gen_batch_vec = self._forward(batch)
         pos_real, x_real = batch.pos, batch.real_atom_types
 
         test_loss, _ = compute_molecule_based_drift_loss(
-                pos_gen, x_gen, pos_real, x_real, index=batch.batch, eps=self.eps
+                pos_gen, x_gen, pos_real, x_real, gen_index=gen_batch_vec, real_index=batch.batch, eps=self.eps
             )
 
         bs = batch_size_for_logging(batch)

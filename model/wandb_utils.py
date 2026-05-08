@@ -5,6 +5,7 @@ from pathlib import Path
 import wandb
 
 from .litmodules.encoder_lit_module import DriftingMoleculeGenerator
+from .litmodules.riemannian_lit_module import RiemannianDriftingMoleculeGenerator
 
 WANDB_ENTITY = "equivariant-drifting"
 WANDB_PROJECT = "col-daniel-tests"

@@ -1,6 +1,5 @@
 import torch
 
-# TODO: refactor to have spherical functions here
 
 def sphere_normalize(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     """

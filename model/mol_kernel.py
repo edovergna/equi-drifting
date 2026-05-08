@@ -88,12 +88,12 @@ def molecule_kernel(
     x_gen: torch.Tensor,
     pos_real: torch.Tensor,
     x_real: torch.Tensor,
-    index: torch.Tensor,
+    gen_index: torch.Tensor,
+    real_index: torch.Tensor,
 ):
     """
     Calculates the molecule kernel between each combination of real versus generated molecules
     """
-    gen_distances, gen_angles = prep_batch_for_kernel(pos_gen, index)
-    real_distances, real_angles = prep_batch_for_kernel(pos_real, index)
+    gen_distances, gen_angles = prep_batch_for_kernel(pos_gen, gen_index)
+    real_distances, real_angles = prep_batch_for_kernel(pos_real, real_index)
 
-    

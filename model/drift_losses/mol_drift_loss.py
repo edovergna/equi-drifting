@@ -13,7 +13,8 @@ def compute_molecule_based_drift_loss(
     x_gen: torch.Tensor,
     pos_real: torch.Tensor,
     x_real: torch.Tensor,
-    index: torch.Tensor,
+    gen_index: torch.Tensor,
+    real_index: torch.Tensor,
     eps: float = 1e-8
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """
@@ -28,8 +29,8 @@ def compute_molecule_based_drift_loss(
     # We take the gradient of the log of the expectation of the kernel and then subtract to obtain the drifting field.
 
     with torch.no_grad():
-        kernel_pos = molecule_kernel(pos_gen, x_gen, pos_real, x_real, index)  # shape: [Num_Gen_Mol, Num_Real_Mol]
-        kernel_neg = molecule_kernel(pos_gen, x_gen, pos_real=pos_gen, x_real=x_gen, index=index)  # shape: [Num_Gen_Mol, Num_Gen_Mol]
+        kernel_pos = molecule_kernel(pos_gen, x_gen, pos_real, x_real, gen_index, real_index)  # shape: [Num_Gen_Mol, Num_Real_Mol]
+        kernel_neg = molecule_kernel(pos_gen, x_gen, pos_real=pos_gen, x_real=x_gen, gen_index=gen_index, real_index=real_index)  # shape: [Num_Gen_Mol, Num_Gen_Mol]
 
         N_pos, N_neg = kernel_pos.shape[1], kernel_neg.shape[1]
         exp_pos = torch.clamp(kernel_pos.sum(dim=1) / N_pos, min=1e-8)
