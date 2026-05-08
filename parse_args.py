@@ -57,6 +57,17 @@ def parse_args():
         help="Temperature values for the drifting field (space-separated, e.g. --temperatures 0.02 0.05 0.2).",
     )
     parser.add_argument(
+        "--loss_variant",
+        type=str,
+        default="norm_based",
+        choices=["original", "inverse_attn", "norm_based"],
+        help=(
+            "Drift loss variant: 'original' (coupled attention weighting, single tau), "
+            "'inverse_attn' (normalized attention weighting, multi-tau), "
+            "'norm_based' (norm-difference kernel, multi-tau)."
+        ),
+    )
+    parser.add_argument(
         "--hidden_dim",
         type=int,
         default=64,
@@ -69,10 +80,45 @@ def parse_args():
         help="Number of layers for the EGNN model.",
     )
     parser.add_argument(
+        "--atom_type_temp",
+        type=float,
+        default=1.0,
+        help="Temperature (tau) for Gumbel-softmax atom type sampling during generation.",
+    )
+    parser.add_argument(
         "--pos_clamp",
         type=float,
         default=10.0,
         help="Clamp generated atom positions to [-pos_clamp, pos_clamp] after centering (Angstroms).",
+    )
+    parser.add_argument(
+        "--pos_clamp_type",
+        type=str,
+        default="geom",
+        choices=["hard", "tanh", "geom"],
+        help=(
+            "Position clamping strategy: 'hard' (hard clamp to ±pos_clamp), "
+            "'tanh' (tanh rescaling with norm_pos_clamp scale), "
+            "'geom' (geometric rescale with c_pos_clamp and p_pos_clamp)."
+        ),
+    )
+    parser.add_argument(
+        "--c_pos_clamp",
+        type=float,
+        default=5.0,
+        help="Scale parameter (Angstroms) for geom pos clamp: rescale = 1 / (1 + (|pos| / c)^p).",
+    )
+    parser.add_argument(
+        "--p_pos_clamp",
+        type=float,
+        default=4.0,
+        help="Power parameter for geom pos clamp: rescale = 1 / (1 + (|pos| / c)^p).",
+    )
+    parser.add_argument(
+        "--norm_pos_clamp",
+        type=float,
+        default=10.0,
+        help="Normalization scale (Angstroms) for tanh pos clamp: pos_out = pos_clamp * tanh(|pos| / norm_pos_clamp).",
     )
     parser.add_argument(
         "--prior_pos_clamp",

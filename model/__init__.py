@@ -1,7 +1,7 @@
-from .callbacks import (ChemicalValidityCallback, EmbeddingMonitorCallback,
-                        GeneratorCheckpointCallback, GradientMonitorCallback,
-                        MoleculeVisualizationCallback, SizeDistributionCallback, AtomTypeDistributionCallback)
-
+from .callbacks import (AtomTypeDistributionCallback, ChemicalValidityCallback,
+                        EmbeddingMonitorCallback, GeneratorCheckpointCallback,
+                        GradientMonitorCallback, MoleculeVisualizationCallback,
+                        SizeDistributionCallback)
 from .datamodule import QM9DataModule
 from .litmodules.encoder_lit_module import DriftingMoleculeGenerator
 from .litmodules.riemannian_lit_module import RiemannianDriftingMoleculeGenerator

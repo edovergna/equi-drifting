@@ -6,6 +6,8 @@ from rdkit import Chem
 from rdkit.Chem import Conformer, RWMol
 from rdkit.Chem.rdDetermineBonds import DetermineBonds
 from rdkit.rdBase import BlockLogs
+from rdkit.Chem.rdchem import BondType
+
 
 # QM9 atom ordering matches EncodeAtomTypesTransform: {H, C, N, O, F}
 _ATOMIC_NUMS = [1, 6, 7, 8, 9]
@@ -145,8 +147,6 @@ def _rdkit_assess(
 
 
 def _add_bonds_by_distance(mol, positions: np.ndarray, atomic_nums: list[int]) -> None:
-    from rdkit.Chem.rdchem import BondType
-
     n = len(positions)
     for i in range(n):
         for j in range(i + 1, n):

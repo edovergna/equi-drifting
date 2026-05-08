@@ -2,16 +2,21 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 import wandb
 from lightning.pytorch import LightningModule
 from torch.optim.lr_scheduler import OneCycleLR
 
 from ept.ept_loader import load_ept_feature_extractor
 
-from ..drift_losses.encoder_drift_loss import (TrainingDivergedException,
-                         compute_drift_loss)
-from ..egnn import EGNN
-from ..geometry import (batch_size_for_logging, center_positions_per_graph,
+from .drift_loss import (
+    TrainingDivergedException,
+    compute_norm_based_drift_loss,
+    compute_inverse_attn_drift_loss,
+    original_compute_drift_loss,
+)
+from .egnn import EGNN
+from .geometry import (batch_size_for_logging, center_positions_per_graph,
                        per_graph_center_norms)
 from ..sample_prior import compute_size_distribution, sample_prior_batch
 
@@ -31,12 +36,18 @@ class DriftingMoleculeGenerator(LightningModule):
             "coordinate_clamp_range": 3.0,
             "predict_bond_types": False,
             "pos_clamp": 20.0,
+            "pos_clamp_type": "geom",
+            "c_pos_clamp": 5.0,
+            "p_pos_clamp": 4.0,
+            "norm_pos_clamp": 10.0,
             "prior_pos_clamp": 3.0,
         }
         default_drift_cfg = {
             "lr": 1e-4,
             "weight_decay": 1e-4,
             "temperatures": [0.02, 0.05, 0.2],
+            "loss_variant": "norm_based",
+            "atom_type_temp": 1.0,
             "pct_start": 0.1,
             "div_factor": 25.0,
             "final_div_factor": 1e4,
@@ -53,11 +64,18 @@ class DriftingMoleculeGenerator(LightningModule):
         self._freeze_feature_extractor()
 
         self.temperatures = self.drift_cfg["temperatures"]
+        self.loss_variant = self.drift_cfg["loss_variant"]
+        self.atom_type_temp = self.drift_cfg.get("atom_type_temp", 1.0)
         self.pos_clamp = self.generator_cfg["pos_clamp"]
+        self.pos_clamp_type = self.generator_cfg["pos_clamp_type"]
+        self.c_pos_clamp = self.generator_cfg["c_pos_clamp"]
+        self.p_pos_clamp = self.generator_cfg["p_pos_clamp"]
+        self.norm_pos_clamp = self.generator_cfg["norm_pos_clamp"]
         self.prior_pos_clamp = self.generator_cfg["prior_pos_clamp"]
 
         self._size_values: np.ndarray | None = None
         self._size_probs: np.ndarray | None = None
+        self._norm_rescale_grad: float | None = None
 
     def _init_generator(self, cfg) -> EGNN:
         return EGNN(
@@ -108,6 +126,7 @@ class DriftingMoleculeGenerator(LightningModule):
             self.device,
         )
         self._last_sampled_counts = atom_counts  # read by SizeDistributionCallback
+        self._last_sampled_atom_probs = x.detach().cpu().numpy()  # read by AtomTypeDistributionCallback
         return x, pos, batch_vec, dense_edge_index
 
     def _forward(self, batch):
@@ -119,8 +138,24 @@ class DriftingMoleculeGenerator(LightningModule):
 
         x_gen, _, pos_gen = self.generator(x_prior, pos_prior, gen_dense_edge_index)
         pos_gen = center_positions_per_graph(pos_gen, gen_batch_vec)
-        pos_gen = pos_gen.clamp(-self.pos_clamp, self.pos_clamp)
-        gen_atom_types = x_gen.softmax(dim=-1).argmax(dim=-1)
+
+        self._norm_rescale_grad = None
+        if self.pos_clamp_type == "hard":
+            pos_gen = pos_gen.clamp(-self.pos_clamp, self.pos_clamp)
+        elif self.pos_clamp_type == "tanh":
+            norm = pos_gen.norm(dim=-1, keepdim=True)
+            rescale = torch.tanh(norm / self.norm_pos_clamp) / (norm / self.norm_pos_clamp + 1e-8)
+            if not self.trainer.sanity_checking:
+                rescale.register_hook(lambda g: setattr(self, "_norm_rescale_grad", g.abs().mean().item()))
+            pos_gen = pos_gen * rescale
+        else:  # geom
+            norm = pos_gen.norm(dim=-1)
+            rescale = 1 / (1 + (norm / self.c_pos_clamp) ** self.p_pos_clamp)
+            if not self.trainer.sanity_checking:
+                rescale.register_hook(lambda g: setattr(self, "_norm_rescale_grad", g.abs().mean().item()))
+            pos_gen = pos_gen * rescale.unsqueeze(-1)
+        # gen_atom_types = x_gen.softmax(dim=-1).argmax(dim=-1)
+        gen_atom_types = F.gumbel_softmax(x_gen, tau=self.atom_type_temp, hard=True)
 
         # EPT expects block_id[i] = block index for atom i (each atom is its own block,
         # so block index = atom index), and batch_id[j] = graph index for block j.
@@ -133,12 +168,26 @@ class DriftingMoleculeGenerator(LightningModule):
         )
         phi_real = self.feature_extractor(
             pos=batch.pos,
-            atom_types=batch.real_atom_types.argmax(dim=-1),
+            atom_types=batch.real_atom_types,
             block_id=torch.arange(batch.num_nodes, device=batch.batch.device),
             batch_id=batch.batch,
             dense_edge_index=batch.dense_edge_index,
         )
         return pos_gen, gen_atom_types, phi_gen, phi_real, gen_batch_vec
+
+    def _compute_loss(
+        self, phi_gen: torch.Tensor, phi_real: torch.Tensor
+    ) -> tuple[torch.Tensor, dict]:
+        if self.loss_variant == "original":
+            return original_compute_drift_loss(phi_gen, phi_real, self.temperatures)
+        elif self.loss_variant == "inverse_attn":
+            return compute_inverse_attn_drift_loss(phi_gen, phi_real, self.temperatures)
+        else:
+            return compute_norm_based_drift_loss(phi_gen, phi_real, self.temperatures)
+
+    def on_after_backward(self):
+        if self._norm_rescale_grad is not None:
+            self.log("geom/norm_rescale_grad", self._norm_rescale_grad, on_step=True, on_epoch=False)
 
     def training_step(self, batch, batch_idx):
         pos_gen, _, phi_gen, phi_real, gen_batch_vec = self._forward(batch)
@@ -182,9 +231,7 @@ class DriftingMoleculeGenerator(LightningModule):
             return torch.tensor(0.0, device=self.device, requires_grad=True)
 
         try:
-            loss, stats = compute_drift_loss(
-                phi_gen, phi_real, temperatures=self.temperatures
-            )
+            loss, stats = self._compute_loss(phi_gen, phi_real)
         except TrainingDivergedException as e:
             self.print(f"\n[Step {self.global_step}] {e}\nStopping training.")
             self.trainer.should_stop = True
@@ -204,7 +251,7 @@ class DriftingMoleculeGenerator(LightningModule):
             try:
                 self.logger.experiment.log(
                     {f"drift_train/{k}": v for k, v in hist_stats.items()},
-                    step=self.global_step,
+                    commit=False,
                 )
             except Exception:
                 pass
@@ -233,9 +280,7 @@ class DriftingMoleculeGenerator(LightningModule):
 
     def validation_step(self, batch, batch_idx):
         pos_gen, gen_atom_types, phi_gen, phi_real, gen_batch_vec = self._forward(batch)
-        val_loss, stats = compute_drift_loss(
-            phi_gen, phi_real, temperatures=self.temperatures
-        )
+        val_loss, stats = self._compute_loss(phi_gen, phi_real)
 
         bs = batch_size_for_logging(batch)
         self.log(
@@ -259,14 +304,8 @@ class DriftingMoleculeGenerator(LightningModule):
                 on_epoch=True,
                 sync_dist=True,
             )
-        if hist_stats and hasattr(self.logger, "experiment"):
-            try:
-                self.logger.experiment.log(
-                    {f"drift_val/{k}": v for k, v in hist_stats.items()},
-                    step=self.global_step,
-                )
-            except Exception:
-                pass
+        if hist_stats:
+            self._val_hist_stats = {f"drift_val/{k}": v for k, v in hist_stats.items()}
 
         with torch.no_grad():
             gen_cn = per_graph_center_norms(pos_gen, gen_batch_vec)
@@ -290,16 +329,25 @@ class DriftingMoleculeGenerator(LightningModule):
             "phi_gen": phi_gen.detach().cpu(),
             "phi_real": phi_real.detach().cpu(),
             "pos_gen": pos_gen.detach().cpu(),
-            "gen_atom_types": gen_atom_types.detach().cpu(),
+            "gen_atom_types": gen_atom_types.detach().cpu().argmax(dim=-1),
             "pos_real": batch.pos.detach().cpu(),
             "real_atom_types": batch.real_atom_types.detach().cpu(),
             "gen_batch_vec": gen_batch_vec.detach().cpu(),
             "batch_vec": batch.batch.detach().cpu(),
         }
 
+    def on_validation_epoch_end(self):
+        hist_stats = getattr(self, "_val_hist_stats", {})
+        if hist_stats and hasattr(self, "logger") and hasattr(self.logger, "experiment"):
+            try:
+                self.logger.experiment.log(hist_stats, commit=False)
+            except Exception:
+                pass
+        self._val_hist_stats = {}
+
     def test_step(self, batch, batch_idx):
         _, _, phi_gen, phi_real, _ = self._forward(batch)
-        test_loss, _ = compute_drift_loss(phi_gen, phi_real, self.temperatures)
+        test_loss, _ = self._compute_loss(phi_gen, phi_real)
 
         bs = batch_size_for_logging(batch)
         self.log(

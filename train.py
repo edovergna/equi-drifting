@@ -49,6 +49,10 @@ def main(args: argparse.Namespace):
             "num_bond_types": 5,
             "predict_bond_types": args.predict_bond_types,
             "pos_clamp": args.pos_clamp,
+            "pos_clamp_type": args.pos_clamp_type,
+            "c_pos_clamp": args.c_pos_clamp,
+            "p_pos_clamp": args.p_pos_clamp,
+            "norm_pos_clamp": args.norm_pos_clamp,
             "prior_pos_clamp": args.prior_pos_clamp,
         }
 
@@ -56,6 +60,8 @@ def main(args: argparse.Namespace):
             "lr": args.lr,
             "weight_decay": args.weight_decay,
             "temperatures": args.temperatures,
+            "loss_variant": args.loss_variant,
+            "atom_type_temp": args.atom_type_temp,
         }
 
         model = RiemannianDriftingMoleculeGenerator(generator_cfg, drift_cfg)
@@ -76,6 +82,7 @@ def main(args: argparse.Namespace):
             ),
             ChemicalValidityCallback(),
             # SizeDistributionCallback(),
+            # AtomTypeDistributionCallback(),
             gen_ckpt,
         ]
 
