@@ -28,38 +28,37 @@ def compute_molecule_based_drift_loss(
     # First we calculate the drift field. For this we calculate the kernel with positive and negative samples.
     # We take the gradient of the log of the expectation of the kernel and then subtract to obtain the drifting field.
 
-    with torch.no_grad():
-        kernel_pos = molecule_kernel(pos_gen, x_gen, pos_real, x_real, gen_index, real_index)  # shape: [Num_Gen_Mol, Num_Real_Mol]
-        kernel_neg = molecule_kernel(pos_gen, x_gen, pos_real=pos_gen, x_real=x_gen, gen_index=gen_index, real_index=real_index)  # shape: [Num_Gen_Mol, Num_Gen_Mol]
+    kernel_pos = molecule_kernel(pos_gen, x_gen, pos_real, x_real, gen_index, real_index)  # shape: [Num_Gen_Mol, Num_Real_Mol]
+    kernel_neg = molecule_kernel(pos_gen, x_gen, pos_real=pos_gen, x_real=x_gen, gen_index=gen_index, real_index=gen_index)  # shape: [Num_Gen_Mol, Num_Gen_Mol]
 
-        N_pos, N_neg = kernel_pos.shape[1], kernel_neg.shape[1]
-        exp_pos = torch.clamp(kernel_pos.sum(dim=1) / N_pos, min=1e-8)
-        exp_neg = torch.clamp(kernel_neg.sum(dim=1) / N_neg, min=1e-8)
+    N_pos, N_neg = kernel_pos.shape[1], kernel_neg.shape[1]
+    exp_pos = torch.clamp(kernel_pos.sum(dim=1) / N_pos, min=1e-8)
+    exp_neg = torch.clamp(kernel_neg.sum(dim=1) / N_neg, min=1e-8)
 
-        # TODO: check up whether it is allowed to use the log 
-        log_exp_pos = torch.log(exp_pos)
-        log_exp_neg = torch.log(exp_neg)
+    # TODO: check up whether it is allowed to use the log 
+    log_exp_pos = torch.log(exp_pos)
+    log_exp_neg = torch.log(exp_neg)
 
-        # Automatically obtain relevant gradients with regards to the inputs separately
-        grad_pos_pos = torch.autograd.grad(outputs=log_exp_pos.sum(), inputs=pos_gen)[0]
-        grad_pos_neg = torch.autograd.grad(outputs=log_exp_neg.sum(), inputs=pos_gen)[0]
+    # Automatically obtain relevant gradients with regards to the inputs separately
+    grad_pos_pos = torch.autograd.grad(outputs=log_exp_pos.sum(), inputs=pos_gen)[0]
+    grad_pos_neg = torch.autograd.grad(outputs=log_exp_neg.sum(), inputs=pos_gen)[0]
 
-        grad_types_pos = torch.autograd.grad(outputs=log_exp_pos.sum(), inputs=x_gen)[0]
-        grad_types_neg = torch.autograd.grad(outputs=log_exp_neg.sum(), inputs=x_gen)[0]
+    grad_types_pos = torch.autograd.grad(outputs=log_exp_pos.sum(), inputs=x_gen)[0]
+    grad_types_neg = torch.autograd.grad(outputs=log_exp_neg.sum(), inputs=x_gen)[0]
 
-        # Obtain drift field by subtracting
-        v_positions = grad_pos_pos - grad_pos_neg
-        v_types = grad_types_pos - grad_types_neg
+    # Obtain drift field by subtracting
+    v_positions = grad_pos_pos - grad_pos_neg
+    v_types = grad_types_pos - grad_types_neg
 
-        # TODO: add possibility of multiplying drifting field with some eta learning rate
+    # TODO: add possibility of multiplying drifting field with some eta learning rate
 
-        # Can now obtain the targets
-        target_positions = (pos_gen + v_positions)
+    # Can now obtain the targets
+    target_positions = (pos_gen + v_positions).detach()
 
-        # Target for atom types is through the exponential mapping of the spherical space:
-        # TODO: add step scaling of drifting field for atom types
-        # v_types_norm = product_tangent_norm(v_types, eps)
-        target_types = sphere_exp(x_gen, v_types, eps)
+    # Target for atom types is through the exponential mapping of the spherical space:
+    # TODO: add step scaling of drifting field for atom types
+    # v_types_norm = product_tangent_norm(v_types, eps)
+    target_types = sphere_exp(x_gen, v_types, eps).detach()
 
     # Next, calculate loss per riemannian manifold, then combine by the summing the squared distances:
     # Distance metric for the euclidean space
