@@ -99,6 +99,7 @@
 
 import torch
 
+
 # ============================================================
 # Fisher–Rao atom similarity
 # ============================================================
@@ -136,6 +137,24 @@ def atom_similarity(
     return torch.exp(-(d ** 2) / (sigma_a ** 2))
 
 
+def atom_similarity_cross(
+    a: torch.Tensor,
+    b: torch.Tensor,
+    sigma_a: float,
+    eps: float = 1e-8,
+):
+    """
+    a: [A, D], b: [B, D] → [A, B] pairwise Fisher-Rao similarities via matmul
+    """
+
+    a = a / (a.norm(dim=-1, keepdim=True) + eps)
+    b = b / (b.norm(dim=-1, keepdim=True) + eps)
+    inner = (a @ b.T).clamp(-1.0 + eps, 1.0 - eps)
+    d = torch.arccos(inner)
+
+    return torch.exp(-(d ** 2) / (sigma_a ** 2))
+
+
 # ============================================================
 # Geometry helpers
 # ============================================================
@@ -152,174 +171,82 @@ def pairwise_distances(pos: torch.Tensor):
     return torch.linalg.norm(diff, dim=-1)
 
 
-def triplet_angle(
-    pos: torch.Tensor,
-    i: int,
-    j: int,
-    k: int,
-    eps: float = 1e-8,
-):
-    """
-    angle at anchor i between j and k
-    """
-
-    v1 = pos[j] - pos[i]
-    v2 = pos[k] - pos[i]
-
-    v1 = v1 / (torch.linalg.norm(v1) + eps)
-    v2 = v2 / (torch.linalg.norm(v2) + eps)
-
-    cos_theta = torch.dot(v1, v2)
-    cos_theta = cos_theta.clamp(-1.0 + eps, 1.0 - eps)
-
-    return torch.arccos(cos_theta)
-
-
 # ============================================================
-# Enumerate anchored triplets
-# ============================================================
-
-def enumerate_triplets(atom_indices):
-    """
-    Returns all anchored triplets (i,j,k)
-    with j < k and j,k != i
-    """
-
-    triplets = []
-
-    atom_indices = atom_indices.tolist()
-
-    for i in atom_indices:
-
-        neigh = [a for a in atom_indices if a != i]
-
-        for a in range(len(neigh)):
-            for b in range(a + 1, len(neigh)):
-
-                j = neigh[a]
-                k = neigh[b]
-
-                triplets.append((i, j, k))
-
-    return triplets
-
-
-# ============================================================
-# Precompute triplet descriptors
+# Flat triplet descriptors (all molecules concatenated)
 # ============================================================
 
 def build_triplet_descriptors(
     pos: torch.Tensor,
     x: torch.Tensor,
     mol_index: torch.Tensor,
+    eps: float = 1e-8,
 ):
     """
-    Precompute descriptors for every molecule.
+    Enumerates all anchored triplets (anchor i, j, k) with j < k across all molecules,
+    returning flat tensors of shape [T_total] / [T_total, D] ready for batched kernel ops.
 
-    returns:
-        dict[mol_id] -> list of triplet dicts
+    mol_idx maps each triplet to a 0-indexed molecule position in sorted(unique(mol_index)).
+    Molecules with fewer than 3 atoms contribute no triplets; their K row/col stays 0.
     """
-
-    dists = pairwise_distances(pos)
 
     mol_ids = torch.unique(mol_index)
+    n_mols = mol_ids.shape[0]
+    D = x.shape[1]
 
-    out = {}
+    all_d_ij, all_d_ik, all_theta = [], [], []
+    all_s_j, all_s_k, all_mol_idx = [], [], []
 
-    for mol_id in mol_ids:
+    for local_idx, mol_id in enumerate(mol_ids):
+        atom_ids = (mol_index == mol_id).nonzero(as_tuple=True)[0]
+        M = atom_ids.shape[0]
 
-        atom_ids = torch.where(mol_index == mol_id)[0]
+        if M < 3:
+            continue
 
-        triplets = enumerate_triplets(atom_ids)
+        pos_m = pos[atom_ids]  # [M, 3]
+        x_m = x[atom_ids]     # [M, D]
 
-        mol_triplets = []
+        diff = pos_m[:, None] - pos_m[None, :]
+        dists_m = diff.norm(dim=-1)  # [M, M]
 
-        for (i, j, k) in triplets:
+        local = torch.arange(M, device=pos.device)
+        li, lj, lk = torch.meshgrid(local, local, local, indexing="ij")
+        mask = (lj < lk) & (li != lj) & (li != lk)
+        li, lj, lk = li[mask], lj[mask], lk[mask]  # each [T]
 
-            descriptor = {
-                "anchor": i,
-                "j": j,
-                "k": k,
+        v1 = pos_m[lj] - pos_m[li]  # [T, 3]
+        v2 = pos_m[lk] - pos_m[li]  # [T, 3]
+        v1 = v1 / (v1.norm(dim=-1, keepdim=True) + eps)
+        v2 = v2 / (v2.norm(dim=-1, keepdim=True) + eps)
 
-                # geometry
-                "d_ij": dists[i, j],
-                "d_ik": dists[i, k],
-                "theta": triplet_angle(pos, i, j, k),
+        T = li.shape[0]
+        all_d_ij.append(dists_m[li, lj])
+        all_d_ik.append(dists_m[li, lk])
+        all_theta.append(torch.arccos((v1 * v2).sum(dim=-1).clamp(-1 + eps, 1 - eps)))
+        all_s_j.append(x_m[lj])
+        all_s_k.append(x_m[lk])
+        all_mol_idx.append(torch.full((T,), local_idx, device=pos.device, dtype=torch.long))
 
-                # atom embeddings
-                "s_j": x[j],
-                "s_k": x[k],
-            }
+    if not all_d_ij:
+        return {
+            "d_ij": pos.new_zeros(0),
+            "d_ik": pos.new_zeros(0),
+            "theta": pos.new_zeros(0),
+            "s_j": x.new_zeros(0, D),
+            "s_k": x.new_zeros(0, D),
+            "mol_idx": mol_index.new_zeros(0),
+            "n_mols": n_mols,
+        }
 
-            mol_triplets.append(descriptor)
-
-        out[int(mol_id)] = mol_triplets
-
-    return out
-
-
-# ============================================================
-# Geometric kernel
-# ============================================================
-
-def geometric_kernel(
-    trip_a,
-    trip_b,
-    sigma_r: float,
-    sigma_theta: float,
-):
-    """
-    K_geom
-    """
-
-    k1 = torch.exp(
-        -((trip_a["d_ij"] - trip_b["d_ij"]) ** 2)
-        / (sigma_r ** 2)
-    )
-
-    k2 = torch.exp(
-        -((trip_a["d_ik"] - trip_b["d_ik"]) ** 2)
-        / (sigma_r ** 2)
-    )
-
-    k_angle = torch.exp(
-        -((trip_a["theta"] - trip_b["theta"]) ** 2)
-        / (sigma_theta ** 2)
-    )
-
-    return k1 * k2 * k_angle
-
-
-# ============================================================
-# Symmetrized chemical kernel
-# ============================================================
-
-def chemical_kernel(
-    trip_a,
-    trip_b,
-    sigma_a: float,
-):
-    """
-    Symmetrized over neighbor order.
-    """
-
-    s_j = trip_a["s_j"]
-    s_k = trip_a["s_k"]
-
-    t_r = trip_b["s_j"]
-    t_s = trip_b["s_k"]
-
-    term1 = (
-        atom_similarity(s_j, t_r, sigma_a)
-        * atom_similarity(s_k, t_s, sigma_a)
-    )
-
-    term2 = (
-        atom_similarity(s_j, t_s, sigma_a)
-        * atom_similarity(s_k, t_r, sigma_a)
-    )
-
-    return term1 + term2
+    return {
+        "d_ij": torch.cat(all_d_ij),       # [T_total]
+        "d_ik": torch.cat(all_d_ik),       # [T_total]
+        "theta": torch.cat(all_theta),     # [T_total]
+        "s_j": torch.cat(all_s_j),         # [T_total, D]
+        "s_k": torch.cat(all_s_k),         # [T_total, D]
+        "mol_idx": torch.cat(all_mol_idx), # [T_total] — 0-indexed into n_mols
+        "n_mols": n_mols,
+    }
 
 
 # ============================================================
@@ -336,18 +263,18 @@ def molecule_kernel(
     sigma_r: float = 1.0,
     sigma_theta: float = 1.0,
     sigma_a: float = 1.0,
+    eps: float = 1e-8,
 ):
     """
-    Computes anchored triplet kernel between all
-    generated and real molecules.
+    Anchored-triplet kernel between all gen × real molecule pairs.
 
     Inputs
     ------
     pos_gen:  [Ng, 3]
-    x_gen:    [Ng, 5]
+    x_gen:    [Ng, D]
 
     pos_real: [Nr, 3]
-    x_real:   [Nr, 5]
+    x_real:   [Nr, D]
 
     gen_index:  [Ng]
     real_index: [Nr]
@@ -359,64 +286,48 @@ def molecule_kernel(
 
     device = pos_gen.device
 
-    # --------------------------------------------
-    # precompute triplets
-    # --------------------------------------------
+    g = build_triplet_descriptors(pos_gen, x_gen, gen_index, eps)
+    r = build_triplet_descriptors(pos_real, x_real, real_index, eps)
 
-    gen_triplets = build_triplet_descriptors(
-        pos_gen,
-        x_gen,
-        gen_index,
+    n_gen, n_real = g["n_mols"], r["n_mols"]
+    Tg, Tr = g["d_ij"].shape[0], r["d_ij"].shape[0]
+
+    if Tg == 0 or Tr == 0:
+        return torch.zeros(n_gen, n_real, device=device)
+
+    # --- Geometric kernel [Tg, Tr] — one broadcast per term ---
+    k_geom = (
+        torch.exp(-((g["d_ij"][:, None] - r["d_ij"][None, :]) ** 2) / sigma_r ** 2)
+        * torch.exp(-((g["d_ik"][:, None] - r["d_ik"][None, :]) ** 2) / sigma_r ** 2)
+        * torch.exp(-((g["theta"][:, None] - r["theta"][None, :]) ** 2) / sigma_theta ** 2)
     )
 
-    real_triplets = build_triplet_descriptors(
-        pos_real,
-        x_real,
-        real_index,
-    )
+    # --- Chemical kernel [Tg, Tr] — fuse all 4 similarities into one matmul ---
+    # Stack [s_j; s_k] for both sides → one [2*Tg, 2*Tr] cross-similarity matrix
+    g_s = torch.cat([g["s_j"], g["s_k"]], dim=0)  # [2*Tg, D]
+    r_s = torch.cat([r["s_j"], r["s_k"]], dim=0)  # [2*Tr, D]
+    g_s = g_s / (g_s.norm(dim=-1, keepdim=True) + eps)
+    r_s = r_s / (r_s.norm(dim=-1, keepdim=True) + eps)
+    cross_sim = torch.exp(
+        -(torch.arccos((g_s @ r_s.T).clamp(-1 + eps, 1 - eps)) ** 2) / sigma_a ** 2
+    )  # [2*Tg, 2*Tr]
 
-    gen_mols = sorted(gen_triplets.keys())
-    real_mols = sorted(real_triplets.keys())
+    k_chem = (
+        cross_sim[:Tg, :Tr] * cross_sim[Tg:, Tr:]   # sim_jj * sim_kk
+        + cross_sim[:Tg, Tr:] * cross_sim[Tg:, :Tr] # sim_jk * sim_kj
+    )  # [Tg, Tr]
 
-    K = torch.zeros(
-        len(gen_mols),
-        len(real_mols),
-        device=device,
-    )
+    K_flat = k_geom * k_chem  # [Tg, Tr]
 
-    # --------------------------------------------
-    # molecule pair kernel
-    # --------------------------------------------
+    # --- Scatter-sum to [n_gen, n_real] via membership masks ---
+    # gen_mol_mask[i, a] = 1 iff gen triplet a belongs to gen molecule i
+    gen_mol_mask = (
+        g["mol_idx"][None, :] == torch.arange(n_gen, device=device)[:, None]
+    ).to(K_flat.dtype)  # [n_gen, Tg]
 
-    for gi, gmol in enumerate(gen_mols):
+    real_mol_mask = (
+        r["mol_idx"][None, :] == torch.arange(n_real, device=device)[:, None]
+    ).to(K_flat.dtype)  # [n_real, Tr]
 
-        g_triplets = gen_triplets[gmol]
-
-        for ri, rmol in enumerate(real_mols):
-
-            r_triplets = real_triplets[rmol]
-
-            total = 0.0
-
-            for tg in g_triplets:
-
-                for tr in r_triplets:
-
-                    k_geom = geometric_kernel(
-                        tg,
-                        tr,
-                        sigma_r=sigma_r,
-                        sigma_theta=sigma_theta,
-                    )
-
-                    k_chem = chemical_kernel(
-                        tg,
-                        tr,
-                        sigma_a=sigma_a,
-                    )
-
-                    total = total + k_geom * k_chem
-
-            K[gi, ri] = total
-
-    return K
+    # [n_gen, Tg] @ [Tg, Tr] @ [Tr, n_real] → [n_gen, n_real]
+    return gen_mol_mask @ K_flat @ real_mol_mask.T

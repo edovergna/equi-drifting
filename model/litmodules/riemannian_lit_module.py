@@ -49,7 +49,7 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
         )
 
         self.generator = self._init_generator(self.generator_cfg)
-        
+
         self.pos_clamp = self.generator_cfg["pos_clamp"]
         self.prior_pos_clamp = self.generator_cfg["prior_pos_clamp"]
 
@@ -67,7 +67,10 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
             num_bond_types=cfg["num_bond_types"],
             predict_bond_types=cfg["predict_bond_types"],
         )
-    
+
+    def _is_feature_extractor_trainable(self) -> bool:
+        return False
+
     def set_size_distribution(self, sizes: np.ndarray, probs: np.ndarray) -> None:
         self._size_values = sizes
         self._size_probs = probs
@@ -104,20 +107,22 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
 
     def _forward(self, batch):
         """Forward pass of generation for soft atom types: prior → EGNN → center → soft atoms."""
-
+        print("Started forward pass")  # Debug print
         n_molecules = batch_size_for_logging(batch)
+        print(f"Batch size for logging: {n_molecules}")  # Debug print
         x_prior, pos_prior, gen_batch_vec, gen_dense_edge_index = (
             self._sample_prior_batch(n_molecules)
         )
-
+        print("Sampled prior")
         x_logits, _, pos_gen = self.generator(x_prior, pos_prior, gen_dense_edge_index)
+        print("Generated molecules")
         pos_gen = center_positions_per_graph(pos_gen, gen_batch_vec)
         pos_gen = pos_gen.clamp(-self.pos_clamp, self.pos_clamp)
 
         # Turn x_gen into probabilities
         x_prob = F.softmax(x_logits, dim=-1)
 
-        # Project to spherical space 
+        # Project to spherical space
         x_sphere = probs_to_sphere(x_prob, self.eps)
 
         return pos_gen, x_sphere, gen_batch_vec
@@ -177,55 +182,56 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        print("Started validation step")  # Debug print
         pos_gen, x_gen, gen_batch_vec = self._forward(batch)
         pos_real, x_real = batch.pos, batch.real_atom_types
-
+        print("Computed forward pass in validation step")  # Debug print
         val_loss, stats = compute_molecule_based_drift_loss(
                 pos_gen, x_gen, pos_real, x_real, gen_index=gen_batch_vec, real_index=batch.batch, eps=self.eps
             )
-
+        print("Reached here")
         bs = batch_size_for_logging(batch)
-        self.log(
-            "val_loss",
-            val_loss,
-            batch_size=bs,
-            on_step=False,
-            on_epoch=True,
-            sync_dist=True,
-        )
-
-        hist_stats = {k: v for k, v in stats.items() if isinstance(v, wandb.Histogram)}
-        for key, val in stats.items():
-            if key in hist_stats:
-                continue
+        if self.trainer is not None and not self.trainer.sanity_checking:
             self.log(
-                f"drift_val/{key}",
-                val,
+                "val_loss",
+                val_loss,
                 batch_size=bs,
                 on_step=False,
                 on_epoch=True,
                 sync_dist=True,
             )
-        if hist_stats:
-            self._val_hist_stats = {f"drift_val/{k}": v for k, v in hist_stats.items()}
+            hist_stats = {k: v for k, v in stats.items() if isinstance(v, wandb.Histogram)}
+            for key, val in stats.items():
+                if key in hist_stats:
+                    continue
+                self.log(
+                    f"drift_val/{key}",
+                    val,
+                    batch_size=bs,
+                    on_step=False,
+                    on_epoch=True,
+                    sync_dist=True,
+                )
+            if hist_stats:
+                self._val_hist_stats = {f"drift_val/{k}": v for k, v in hist_stats.items()}
 
-        with torch.no_grad():
-            gen_cn = per_graph_center_norms(pos_gen, gen_batch_vec)
-            real_cn = per_graph_center_norms(batch.pos, batch.batch)
-        self.log(
-            "debug/val_gen_center_norm_mean",
-            gen_cn.mean(),
-            batch_size=bs,
-            on_epoch=True,
-            sync_dist=True,
-        )
-        self.log(
-            "debug/val_real_center_norm_mean",
-            real_cn.mean(),
-            batch_size=bs,
-            on_epoch=True,
-            sync_dist=True,
-        )
+            with torch.no_grad():
+                gen_cn = per_graph_center_norms(pos_gen, gen_batch_vec)
+                real_cn = per_graph_center_norms(batch.pos, batch.batch)
+            self.log(
+                "debug/val_gen_center_norm_mean",
+                gen_cn.mean(),
+                batch_size=bs,
+                on_epoch=True,
+                sync_dist=True,
+            )
+            self.log(
+                "debug/val_real_center_norm_mean",
+                real_cn.mean(),
+                batch_size=bs,
+                on_epoch=True,
+                sync_dist=True,
+            )
 
         # Project sphere embeddings back to probabilities
         with torch.no_grad():
@@ -240,14 +246,14 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
             "batch_vec": batch.batch.detach().cpu()
         }
     
-    def on_validation_epoch_end(self):
-        hist_stats = getattr(self, "_val_hist_stats", {})
-        if hist_stats and hasattr(self, "logger") and hasattr(self.logger, "experiment"):
-            try:
-                self.logger.experiment.log(hist_stats, commit=False)
-            except Exception:
-                pass
-        self._val_hist_stats = {}
+    # def on_validation_epoch_end(self):
+    #     hist_stats = getattr(self, "_val_hist_stats", {})
+    #     if hist_stats and hasattr(self, "logger") and hasattr(self.logger, "experiment"):
+    #         try:
+    #             self.logger.experiment.log(hist_stats, commit=False)
+    #         except Exception:
+    #             pass
+    #     self._val_hist_stats = {}
 
     def test_step(self, batch, batch_idx):
         pos_gen, x_gen, gen_batch_vec = self._forward(batch)
