@@ -17,10 +17,9 @@ from model import (AtomTypeDistributionCallback, ChemicalValidityCallback,
                    DriftingMoleculeGenerator, EmbeddingMonitorCallback,
                    GeneratorCheckpointCallback, GradientMonitorCallback,
                    MoleculeVisualizationCallback, QM9DataModule,
-                   SizeDistributionCallback, initialize_training_config)
+                   SizeDistributionCallback, initialize_training_config, RiemannianDriftingMoleculeGenerator)
 from model.wandb_utils import load_pretrained_generator
 from parse_args import parse_args
-
 
 def main(args: argparse.Namespace):
 
@@ -28,7 +27,7 @@ def main(args: argparse.Namespace):
 
     run = wandb.init(
         entity="equivariant-drifting",
-        project="fixed-gradient-flow",
+        project="riemannian",
         group=args.group_tag,
         mode="offline" if args.offline else "online",
         config=vars(args),
@@ -65,7 +64,7 @@ def main(args: argparse.Namespace):
             "atom_type_temp": args.atom_type_temp,
         }
 
-        model = DriftingMoleculeGenerator(generator_cfg, drift_cfg)
+        model = RiemannianDriftingMoleculeGenerator(generator_cfg, drift_cfg)
 
         if args.wandb_run_id:
             print(f"Loading pretrained generator from wandb run: {args.wandb_run_id}")
