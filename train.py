@@ -13,11 +13,18 @@ from lightning.pytorch.callbacks import EarlyStopping
 from lightning.pytorch.loggers import WandbLogger
 
 import wandb
-from model import (AtomTypeDistributionCallback, ChemicalValidityCallback,
-                   DriftingMoleculeGenerator, EmbeddingMonitorCallback,
-                   GeneratorCheckpointCallback, GradientMonitorCallback,
-                   MoleculeVisualizationCallback, QM9DataModule,
-                   SizeDistributionCallback, initialize_training_config)
+from model import (
+    AtomTypeDistributionCallback,
+    ChemicalValidityCallback,
+    DriftingMoleculeGenerator,
+    EmbeddingMonitorCallback,
+    GeneratorCheckpointCallback,
+    GradientMonitorCallback,
+    MoleculeVisualizationCallback,
+    QM9DataModule,
+    SizeDistributionCallback,
+    initialize_training_config,
+)
 from model.wandb_utils import load_pretrained_generator
 from parse_args import parse_args
 
@@ -28,7 +35,7 @@ def main(args: argparse.Namespace):
 
     run = wandb.init(
         entity="equivariant-drifting",
-        project="one-real-molecule",
+        project="kristian-positions-only",
         group=args.group_tag,
         mode="offline" if args.offline else "online",
         config=vars(args),
@@ -50,6 +57,7 @@ def main(args: argparse.Namespace):
             "num_atom_types": 5,
             "num_bond_types": 5,
             "predict_bond_types": args.predict_bond_types,
+            "predict_atom_types": args.predict_atom_types,
             "pos_clamp": args.pos_clamp,
             "pos_clamp_type": args.pos_clamp_type,
             "c_pos_clamp": args.c_pos_clamp,
@@ -82,7 +90,9 @@ def main(args: argparse.Namespace):
             GradientMonitorCallback(),
             EmbeddingMonitorCallback(),
             MoleculeVisualizationCallback(
-                n_molecules=min(4, args.n_real_molecules), bond_threshold=2.0, every_n_epochs=1
+                n_molecules=min(4, args.n_real_molecules),
+                bond_threshold=2.0,
+                every_n_epochs=1,
             ),
             ChemicalValidityCallback(),
             # SizeDistributionCallback(),
