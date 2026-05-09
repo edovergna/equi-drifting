@@ -35,6 +35,7 @@ class DriftingMoleculeGenerator(LightningModule):
             "num_bond_types": 5,
             "coordinate_clamp_range": 3.0,
             "predict_bond_types": False,
+            "predict_atom_types": True,
             "pos_clamp": 20.0,
             "pos_clamp_type": "geom",
             "c_pos_clamp": 5.0,
@@ -88,6 +89,9 @@ class DriftingMoleculeGenerator(LightningModule):
         self._size_probs: np.ndarray | None = None
         self._norm_rescale_grad: float | None = None
 
+        print(f"Predict atom types: {self.generator_cfg['predict_atom_types']}")
+        print(f"Use feature extractor: {self.use_feature_extractor}")
+
     def _init_generator(self, cfg) -> EGNN:
         return EGNN(
             hidden_nf=cfg["hidden_nf"],
@@ -95,6 +99,7 @@ class DriftingMoleculeGenerator(LightningModule):
             num_atom_types=cfg["num_atom_types"],
             num_bond_types=cfg["num_bond_types"],
             predict_bond_types=cfg["predict_bond_types"],
+            predict_atom_types=cfg["predict_atom_types"],
         )
 
     def _init_feature_extractor(self):
@@ -175,6 +180,8 @@ class DriftingMoleculeGenerator(LightningModule):
         if x_gen is not None:
             # gen_atom_types = x_gen.softmax(dim=-1).argmax(dim=-1)
             gen_atom_types = F.gumbel_softmax(x_gen, tau=self.atom_type_temp, hard=True)
+        else:
+            gen_atom_types = None
 
         if not self.use_feature_extractor:
             phi_gen = pos_gen
