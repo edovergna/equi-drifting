@@ -332,8 +332,8 @@ def molecule_kernel(
     x_real: torch.Tensor,
     gen_index: torch.Tensor,
     real_index: torch.Tensor,
-    sigma_r: float = 0.1,
-    sigma_a: float = 0.1,
+    sigma_r: float = 1.0,
+    sigma_a: float = 0.5,
     eps: float = 1e-8,
     same_samples: bool = False,
 ):
@@ -452,5 +452,11 @@ def molecule_kernel(
 
     # [n_gen, Pg] @ [Pg, Pr] @ [Pr, n_real]
     K = gen_mol_mask @ K_flat @ real_mol_mask.T
+
+    # Average over descriptor-pair counts so kernel magnitude reflects mean
+    # similarity, not the number of atom pairs in each molecule.
+    gen_pair_counts = gen_mol_mask.sum(dim=1).clamp_min(1.0)  # [n_gen]
+    real_pair_counts = real_mol_mask.sum(dim=1).clamp_min(1.0)  # [n_real]
+    K = K / (gen_pair_counts[:, None] * real_pair_counts[None, :])
 
     return K

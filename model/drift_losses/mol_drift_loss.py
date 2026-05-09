@@ -1,7 +1,6 @@
 import torch
-import torch.nn.functional as F
 from ..mol_kernel import molecule_kernel
-from ..spherical_utils import (product_tangent_norm, sphere_exp, geodesic_distance)
+from ..spherical_utils import sphere_exp, geodesic_distance
 
 
 class TrainingDivergedException(Exception):
@@ -15,7 +14,11 @@ def compute_molecule_based_drift_loss(
     x_real: torch.Tensor,
     gen_index: torch.Tensor,
     real_index: torch.Tensor,
-    eps: float = 1e-8
+    eps: float = 1e-8,
+    sigma_r: float = 1.0,
+    sigma_a: float = 0.5,
+    eta_pos: float = 1.0,
+    eta_type: float = 1.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """
     Drifting field loss directly on 3D molecules.
@@ -24,6 +27,7 @@ def compute_molecule_based_drift_loss(
     Returns (loss, stats) where stats is a flat dict of float diagnostics safe to
     pass directly to self.log(). Raises TrainingDivergedException on non-finite loss.
     """
+    stats: dict[str, float] = {}
 
     # Detach to create clean leaf variables for drift field computation.
     # torch.enable_grad() is required because validation_step runs under torch.no_grad().
@@ -33,14 +37,36 @@ def compute_molecule_based_drift_loss(
         pos_leaf = pos_gen.detach().requires_grad_(True)
         x_leaf = x_gen.detach().requires_grad_(True)
 
-        kernel_pos = molecule_kernel(pos_leaf, x_leaf, pos_real, x_real, gen_index, real_index)
-        kernel_neg = molecule_kernel(pos_leaf, x_leaf, pos_real=pos_leaf, x_real=x_leaf, gen_index=gen_index, real_index=gen_index, same_samples=True)
+        kernel_pos = molecule_kernel(
+            pos_leaf,
+            x_leaf,
+            pos_real,
+            x_real,
+            gen_index,
+            real_index,
+            sigma_r=sigma_r,
+            sigma_a=sigma_a,
+        )
+        kernel_neg = molecule_kernel(
+            pos_leaf,
+            x_leaf,
+            pos_real=pos_leaf,
+            x_real=x_leaf,
+            gen_index=gen_index,
+            real_index=gen_index,
+            sigma_r=sigma_r,
+            sigma_a=sigma_a,
+            same_samples=True,
+        )
 
         N_pos, N_neg = kernel_pos.shape[1], kernel_neg.shape[1]
-        exp_pos = torch.clamp(kernel_pos.sum(dim=1) / N_pos, min=1e-8)
-        exp_neg = torch.clamp(kernel_neg.sum(dim=1) / N_neg, min=1e-8)
+        raw_exp_pos = kernel_pos.sum(dim=1) / N_pos
+        raw_exp_neg = kernel_neg.sum(dim=1) / N_neg
+        exp_pos = torch.clamp(raw_exp_pos, min=1e-8)
+        exp_neg = torch.clamp(raw_exp_neg, min=1e-8)
 
-        # TODO: check up whether it is allowed to use the log
+        # Score-style drift: use gradients of log kernel expectations rather
+        # than raw expectations, with diagnostics tracking clamp saturation.
         log_exp_pos = torch.log(exp_pos)
         log_exp_neg = torch.log(exp_neg)
 
@@ -55,16 +81,12 @@ def compute_molecule_based_drift_loss(
     v_positions = grad_pos_pos - grad_pos_neg
     v_types = grad_types_pos - grad_types_neg
 
-    # TODO: add possibility of multiplying drifting field with some eta learning rate
-
     # Targets are derived from the leaf copies (detached) so the final loss gradient
     # flows only through pos_gen / x_gen back to the model parameters.
-    target_positions = (pos_leaf + v_positions).detach()
+    target_positions = (pos_leaf + eta_pos * v_positions).detach()
 
     # Target for atom types is through the exponential mapping of the spherical space:
-    # TODO: add step scaling of drifting field for atom types
-    # v_types_norm = product_tangent_norm(v_types, eps)
-    target_types = sphere_exp(x_leaf, v_types, eps).detach()
+    target_types = sphere_exp(x_leaf, eta_type * v_types, eps).detach()
 
     # Next, calculate loss per riemannian manifold, then combine by the summing the squared distances:
     # Distance metric for the euclidean space
@@ -86,13 +108,64 @@ def compute_molecule_based_drift_loss(
     if not torch.isfinite(loss):
         raise TrainingDivergedException(f"Non-finite loss ({loss.item()!r}). ")
 
-    stats: dict[str, float] = {}
-
     with torch.no_grad():
         # Size of euclidean and spherical distances
         stats["average_euclidean_distance"] = euclidean_distances.mean().item()
         stats["average_spherical_distance"] = spherical_distances.mean().item()
         stats["std_euclidean_distance"] = euclidean_distances.std().item()
         stats["std_spherical_distance"] = spherical_distances.std().item()
+        stats.update(_kernel_stats("kernel/pos", kernel_pos))
+        stats.update(_kernel_stats("kernel/neg", kernel_neg))
+        stats.update(_expectation_stats("kernel/exp_pos", raw_exp_pos))
+        stats.update(_expectation_stats("kernel/exp_neg", raw_exp_neg))
+        stats["kernel/exp_pos_clamped_frac"] = (
+            raw_exp_pos < 1e-8
+        ).float().mean().item()
+        stats["kernel/exp_neg_clamped_frac"] = (
+            raw_exp_neg < 1e-8
+        ).float().mean().item()
+        stats.update(_norm_stats("drift/pos_norm", v_positions.norm(dim=-1)))
+        stats.update(_norm_stats("drift/type_norm", v_types.norm(dim=-1)))
+        stats["kernel/sigma_r"] = float(sigma_r)
+        stats["kernel/sigma_a"] = float(sigma_a)
+        stats["drift/eta_pos"] = float(eta_pos)
+        stats["drift/eta_type"] = float(eta_type)
 
     return loss, stats
+
+
+def _kernel_stats(prefix: str, values: torch.Tensor) -> dict[str, float]:
+    flat = values.detach().flatten()
+    if flat.numel() == 0:
+        return {}
+
+    return {
+        f"{prefix}_mean": flat.mean().item(),
+        f"{prefix}_max": flat.max().item(),
+        f"{prefix}_std": flat.std(unbiased=False).item(),
+    }
+
+
+def _expectation_stats(prefix: str, values: torch.Tensor) -> dict[str, float]:
+    flat = values.detach().flatten()
+    if flat.numel() == 0:
+        return {}
+
+    return {
+        f"{prefix}_mean": flat.mean().item(),
+        f"{prefix}_min": flat.min().item(),
+        f"{prefix}_median": flat.quantile(0.50).item(),
+        f"{prefix}_p05": flat.quantile(0.05).item(),
+    }
+
+
+def _norm_stats(prefix: str, values: torch.Tensor) -> dict[str, float]:
+    flat = values.detach().flatten()
+    if flat.numel() == 0:
+        return {}
+
+    return {
+        f"{prefix}_mean": flat.mean().item(),
+        f"{prefix}_p95": flat.quantile(0.95).item(),
+        f"{prefix}_max": flat.max().item(),
+    }

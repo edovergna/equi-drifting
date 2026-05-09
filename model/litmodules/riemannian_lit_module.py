@@ -37,6 +37,10 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
             "lr": 1e-4,
             "weight_decay": 1e-4,
             "temperatures": [0.02, 0.05, 0.2],
+            "sigma_r": 1.0,
+            "sigma_a": 0.5,
+            "eta_pos": 1.0,
+            "eta_type": 1.0,
             "pct_start": 0.1,
             "div_factor": 25.0,
             "final_div_factor": 1e4,
@@ -133,7 +137,17 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
 
         try:
             loss, stats = compute_molecule_based_drift_loss(
-                pos_gen, x_gen, pos_real, x_real, gen_index=gen_batch_vec, real_index=batch.batch, eps=self.eps
+                pos_gen,
+                x_gen,
+                pos_real,
+                x_real,
+                gen_index=gen_batch_vec,
+                real_index=batch.batch,
+                eps=self.eps,
+                sigma_r=self.drift_cfg["sigma_r"],
+                sigma_a=self.drift_cfg["sigma_a"],
+                eta_pos=self.drift_cfg["eta_pos"],
+                eta_type=self.drift_cfg["eta_type"],
             )
         except TrainingDivergedException as e:
             self.print(f"\n[Step {self.global_step}] {e}\nStopping training.")
@@ -187,8 +201,18 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
         pos_real, x_real = batch.pos, batch.real_atom_types
         print("Computed forward pass in validation step")  # Debug print
         val_loss, stats = compute_molecule_based_drift_loss(
-                pos_gen, x_gen, pos_real, x_real, gen_index=gen_batch_vec, real_index=batch.batch, eps=self.eps
-            )
+            pos_gen,
+            x_gen,
+            pos_real,
+            x_real,
+            gen_index=gen_batch_vec,
+            real_index=batch.batch,
+            eps=self.eps,
+            sigma_r=self.drift_cfg["sigma_r"],
+            sigma_a=self.drift_cfg["sigma_a"],
+            eta_pos=self.drift_cfg["eta_pos"],
+            eta_type=self.drift_cfg["eta_type"],
+        )
         print("Reached here")
         bs = batch_size_for_logging(batch)
         if self.trainer is not None and not self.trainer.sanity_checking:
@@ -260,8 +284,18 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
         pos_real, x_real = batch.pos, batch.real_atom_types
         
         test_loss, _ = compute_molecule_based_drift_loss(
-                pos_gen, x_gen, pos_real, x_real, gen_index=gen_batch_vec, real_index=batch.batch, eps=self.eps
-            )
+            pos_gen,
+            x_gen,
+            pos_real,
+            x_real,
+            gen_index=gen_batch_vec,
+            real_index=batch.batch,
+            eps=self.eps,
+            sigma_r=self.drift_cfg["sigma_r"],
+            sigma_a=self.drift_cfg["sigma_a"],
+            eta_pos=self.drift_cfg["eta_pos"],
+            eta_type=self.drift_cfg["eta_type"],
+        )
 
         bs = batch_size_for_logging(batch)
         self.log(

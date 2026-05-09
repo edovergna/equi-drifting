@@ -86,6 +86,30 @@ def parse_args():
         help="Temperature (tau) for Gumbel-softmax atom type sampling during generation.",
     )
     parser.add_argument(
+        "--sigma_r",
+        type=float,
+        default=1.0,
+        help="Distance bandwidth for the molecule kernel.",
+    )
+    parser.add_argument(
+        "--sigma_a",
+        type=float,
+        default=0.5,
+        help="Atom-type bandwidth for the molecule kernel.",
+    )
+    parser.add_argument(
+        "--eta_pos",
+        type=float,
+        default=1.0,
+        help="Step scale for the Euclidean position drift target.",
+    )
+    parser.add_argument(
+        "--eta_type",
+        type=float,
+        default=1.0,
+        help="Step scale for the spherical atom-type drift target.",
+    )
+    parser.add_argument(
         "--pos_clamp",
         type=float,
         default=10.0,

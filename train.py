@@ -62,6 +62,10 @@ def main(args: argparse.Namespace):
             "temperatures": args.temperatures,
             "loss_variant": args.loss_variant,
             "atom_type_temp": args.atom_type_temp,
+            "sigma_r": args.sigma_r,
+            "sigma_a": args.sigma_a,
+            "eta_pos": args.eta_pos,
+            "eta_type": args.eta_type,
         }
 
         model = RiemannianDriftingMoleculeGenerator(generator_cfg, drift_cfg)
