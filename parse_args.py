@@ -110,6 +110,18 @@ def parse_args():
         help="Step scale for the spherical atom-type drift target.",
     )
     parser.add_argument(
+        "--weight_pos",
+        type=float,
+        default=1.0,
+        help="Loss weight for Euclidean position target distances.",
+    )
+    parser.add_argument(
+        "--weight_type",
+        type=float,
+        default=0.05,
+        help="Loss weight for spherical atom-type target distances.",
+    )
+    parser.add_argument(
         "--pos_clamp",
         type=float,
         default=10.0,

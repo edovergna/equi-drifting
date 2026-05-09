@@ -66,6 +66,8 @@ def main(args: argparse.Namespace):
             "sigma_a": args.sigma_a,
             "eta_pos": args.eta_pos,
             "eta_type": args.eta_type,
+            "weight_pos": args.weight_pos,
+            "weight_type": args.weight_type,
         }
 
         model = RiemannianDriftingMoleculeGenerator(generator_cfg, drift_cfg)

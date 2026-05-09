@@ -41,6 +41,8 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
             "sigma_a": 0.5,
             "eta_pos": 1.0,
             "eta_type": 1.0,
+            "weight_pos": 1.0,
+            "weight_type": 0.05,
             "pct_start": 0.1,
             "div_factor": 25.0,
             "final_div_factor": 1e4,
@@ -148,6 +150,8 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
                 sigma_a=self.drift_cfg["sigma_a"],
                 eta_pos=self.drift_cfg["eta_pos"],
                 eta_type=self.drift_cfg["eta_type"],
+                weight_pos=self.drift_cfg["weight_pos"],
+                weight_type=self.drift_cfg["weight_type"],
             )
         except TrainingDivergedException as e:
             self.print(f"\n[Step {self.global_step}] {e}\nStopping training.")
@@ -212,6 +216,8 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
             sigma_a=self.drift_cfg["sigma_a"],
             eta_pos=self.drift_cfg["eta_pos"],
             eta_type=self.drift_cfg["eta_type"],
+            weight_pos=self.drift_cfg["weight_pos"],
+            weight_type=self.drift_cfg["weight_type"],
         )
         print("Reached here")
         bs = batch_size_for_logging(batch)
@@ -295,6 +301,8 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
             sigma_a=self.drift_cfg["sigma_a"],
             eta_pos=self.drift_cfg["eta_pos"],
             eta_type=self.drift_cfg["eta_type"],
+            weight_pos=self.drift_cfg["weight_pos"],
+            weight_type=self.drift_cfg["weight_type"],
         )
 
         bs = batch_size_for_logging(batch)

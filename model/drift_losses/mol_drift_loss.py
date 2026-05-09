@@ -19,6 +19,8 @@ def compute_molecule_based_drift_loss(
     sigma_a: float = 0.5,
     eta_pos: float = 1.0,
     eta_type: float = 1.0,
+    weight_pos: float = 1.0,
+    weight_type: float = 0.05,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """
     Drifting field loss directly on 3D molecules.
@@ -88,22 +90,35 @@ def compute_molecule_based_drift_loss(
     # Target for atom types is through the exponential mapping of the spherical space:
     target_types = sphere_exp(x_leaf, eta_type * v_types, eps).detach()
 
-    # Next, calculate loss per riemannian manifold, then combine by the summing the squared distances:
+    # Next, calculate loss per Riemannian manifold, then combine weighted squared
+    # distances.
     # Distance metric for the euclidean space
     euclidean_distances = ((pos_gen - target_positions) ** 2).sum(-1)
 
     # Calculating distances for atom types on the sphere
     spherical_distances = geodesic_distance(x_gen, target_types, eps) ** 2
 
-    # Combine the distances
-    # TODO: add weighting depending on stats
-    combined_distances = euclidean_distances + spherical_distances
+    weighted_euclidean_distances = weight_pos * euclidean_distances
+    weighted_spherical_distances = weight_type * spherical_distances
+    combined_distances = weighted_euclidean_distances + weighted_spherical_distances
 
-    # Calculate final loss as the expectation over the distances per molecule
+    # Calculate final loss as the mean atom distance per molecule, then average
+    # molecules so each molecule contributes equally regardless of atom count.
     num_molecules = int(gen_index.max().item()) + 1
-    sum_per_molecule = torch.zeros(num_molecules, device=combined_distances.device, dtype=combined_distances.dtype)
+    sum_per_molecule = torch.zeros(
+        num_molecules,
+        device=combined_distances.device,
+        dtype=combined_distances.dtype,
+    )
     sum_per_molecule.scatter_add_(0, gen_index, combined_distances)
-    loss = sum_per_molecule.mean()
+    counts_per_molecule = torch.zeros(
+        num_molecules,
+        device=combined_distances.device,
+        dtype=combined_distances.dtype,
+    )
+    counts_per_molecule.scatter_add_(0, gen_index, torch.ones_like(combined_distances))
+    mean_per_molecule = sum_per_molecule / counts_per_molecule.clamp_min(1.0)
+    loss = mean_per_molecule.mean()
 
     if not torch.isfinite(loss):
         raise TrainingDivergedException(f"Non-finite loss ({loss.item()!r}). ")
@@ -112,6 +127,12 @@ def compute_molecule_based_drift_loss(
         # Size of euclidean and spherical distances
         stats["average_euclidean_distance"] = euclidean_distances.mean().item()
         stats["average_spherical_distance"] = spherical_distances.mean().item()
+        stats["average_weighted_euclidean_distance"] = (
+            weighted_euclidean_distances.mean().item()
+        )
+        stats["average_weighted_spherical_distance"] = (
+            weighted_spherical_distances.mean().item()
+        )
         stats["std_euclidean_distance"] = euclidean_distances.std().item()
         stats["std_spherical_distance"] = spherical_distances.std().item()
         stats.update(_kernel_stats("kernel/pos", kernel_pos))
@@ -130,6 +151,9 @@ def compute_molecule_based_drift_loss(
         stats["kernel/sigma_a"] = float(sigma_a)
         stats["drift/eta_pos"] = float(eta_pos)
         stats["drift/eta_type"] = float(eta_type)
+        stats["loss/weight_pos"] = float(weight_pos)
+        stats["loss/weight_type"] = float(weight_type)
+        stats.update(_norm_stats("loss/atoms_per_molecule", counts_per_molecule))
 
     return loss, stats
 
