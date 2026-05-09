@@ -1,4 +1,4 @@
-from .callbacks import (ChemicalValidityCallback, EmbeddingMonitorCallback,
+from .callbacks import (ChemicalMetricsCallback, EmbeddingMonitorCallback,
                         GeneratorCheckpointCallback, GradientMonitorCallback,
                         MoleculeVisualizationCallback,
                         SizeDistributionCallback)
