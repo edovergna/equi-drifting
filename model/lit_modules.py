@@ -89,9 +89,6 @@ class DriftingMoleculeGenerator(LightningModule):
         self._size_probs: np.ndarray | None = None
         self._norm_rescale_grad: float | None = None
 
-        print(f"Predict atom types: {self.generator_cfg['predict_atom_types']}")
-        print(f"Use feature extractor: {self.use_feature_extractor}")
-
     def _init_generator(self, cfg) -> EGNN:
         return EGNN(
             hidden_nf=cfg["hidden_nf"],
@@ -214,10 +211,20 @@ class DriftingMoleculeGenerator(LightningModule):
         )
 
     def _compute_loss(
-        self, phi_gen: torch.Tensor, phi_real: torch.Tensor
+        self,
+        phi_gen: torch.Tensor,
+        phi_real: torch.Tensor,
+        gen_batch_vec: torch.Tensor | None = None,
+        real_batch_vec: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, dict]:
         if not self.use_feature_extractor:
-            return compute_position_drift_loss(phi_gen, phi_real, self.temperatures)
+            return compute_position_drift_loss(
+                phi_gen,
+                phi_real,
+                gen_batch_vec,
+                real_batch_vec,
+                self.temperatures,
+            )
         if self.loss_variant == "original":
             return original_compute_drift_loss(phi_gen, phi_real, self.temperatures)
         elif self.loss_variant == "inverse_attn":
@@ -284,7 +291,9 @@ class DriftingMoleculeGenerator(LightningModule):
             return torch.tensor(0.0, device=self.device, requires_grad=True)
 
         try:
-            loss, stats = self._compute_loss(phi_gen, phi_real)
+            loss, stats = self._compute_loss(
+                phi_gen, phi_real, gen_batch_vec, batch.batch
+            )
         except TrainingDivergedException as e:
             self.print(f"\n[Step {self.global_step}] {e}\nStopping training.")
             self.trainer.should_stop = True
@@ -333,7 +342,9 @@ class DriftingMoleculeGenerator(LightningModule):
 
     def validation_step(self, batch, batch_idx):
         pos_gen, gen_atom_types, phi_gen, phi_real, gen_batch_vec = self._forward(batch)
-        val_loss, stats = self._compute_loss(phi_gen, phi_real)
+        val_loss, stats = self._compute_loss(
+            phi_gen, phi_real, gen_batch_vec, batch.batch
+        )
 
         bs = self.n_gen_molecules
         self.log(
@@ -407,8 +418,8 @@ class DriftingMoleculeGenerator(LightningModule):
         self._val_hist_stats = {}
 
     def test_step(self, batch, batch_idx):
-        _, _, phi_gen, phi_real, _ = self._forward(batch)
-        test_loss, _ = self._compute_loss(phi_gen, phi_real)
+        _, _, phi_gen, phi_real, gen_batch_vec = self._forward(batch)
+        test_loss, _ = self._compute_loss(phi_gen, phi_real, gen_batch_vec, batch.batch)
 
         bs = self.n_gen_molecules
         self.log(
