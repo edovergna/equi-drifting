@@ -382,7 +382,11 @@ class DriftingMoleculeGenerator(LightningModule):
             "phi_gen": phi_gen.detach().cpu(),
             "phi_real": phi_real.detach().cpu(),
             "pos_gen": pos_gen.detach().cpu(),
-            "gen_atom_types": gen_atom_types.detach().cpu().argmax(dim=-1),
+            "gen_atom_types": (
+                gen_atom_types.detach().cpu().argmax(dim=-1)
+                if gen_atom_types is not None
+                else None
+            ),
             "pos_real": batch.pos.detach().cpu(),
             "real_atom_types": batch.real_atom_types.detach().cpu(),
             "gen_batch_vec": gen_batch_vec.detach().cpu(),
