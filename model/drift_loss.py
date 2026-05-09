@@ -394,23 +394,36 @@ def compute_norm_based_drift_loss(
 def compute_position_drift_loss(
     pos_gen: torch.Tensor,
     pos_real: torch.Tensor,
+    gen_batch_vec: torch.Tensor,
+    real_batch_vec: torch.Tensor,
     temperatures: list[float],
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """
-    Drifting field loss directly in 3D position space.
+    Drifting field loss directly in 3D position space, treating each molecule as
+    one sample from the distribution.
 
-    pos_gen and pos_real are atom positions with shape [N, 3]. Generated atoms are
-    attracted toward real atom positions and repelled from other generated atoms.
+    Molecules are padded into flat position vectors. Every generated molecule is
+    attracted to all real molecules and repelled from all other generated molecules.
     """
     pos_gen = pos_gen.float()
     pos_real = pos_real.float()
+    max_nodes = max(
+        _max_nodes_per_graph(gen_batch_vec),
+        _max_nodes_per_graph(real_batch_vec),
+    )
+    gen_mol, gen_mask = _positions_to_padded_molecules(
+        pos_gen, gen_batch_vec, max_nodes=max_nodes
+    )
+    real_mol, _ = _positions_to_padded_molecules(
+        pos_real, real_batch_vec, max_nodes=max_nodes
+    )
 
-    N_gen, D = pos_gen.shape
-    N_real = pos_real.shape[0]
+    N_gen, D = gen_mol.shape
+    N_real = real_mol.shape[0]
     N_targets = N_gen + N_real
 
-    old_gen = pos_gen.detach()
-    dist_pos = torch.cdist(old_gen, pos_real)
+    old_gen = gen_mol.detach()
+    dist_pos = torch.cdist(old_gen, real_mol)
     dist_neg = torch.cdist(old_gen, old_gen)
     dist_neg.fill_diagonal_(1e6)
 
@@ -425,19 +438,21 @@ def compute_position_drift_loss(
 
     scale = (valid_dists.mean() / (D**0.5)).detach().clamp(min=1e-5, max=1e3)
     old_gen_scaled = old_gen / scale
-    pos_real_scaled = pos_real / scale
+    real_mol_scaled = real_mol / scale
     dist_pos_scaled = dist_pos / scale
     dist_neg_scaled = dist_neg / scale
 
     stats: dict[str, float] = {}
     with torch.no_grad():
-        pos_gen_norms = old_gen.norm(dim=-1)
+        pos_gen_norms = pos_gen.norm(dim=-1)
         pos_real_norms = pos_real.norm(dim=-1)
         stats["pos_scale_S"] = scale.item()
+        stats["pos_num_gen_molecules"] = float(N_gen)
+        stats["pos_num_real_molecules"] = float(N_real)
         stats["pos_gen_norm_mean"] = pos_gen_norms.mean().item()
         stats["pos_gen_norm_std"] = pos_gen_norms.std().item()
         stats["pos_real_norm_mean"] = pos_real_norms.mean().item()
-        stats["pos_nn_l2_distance"] = dist_pos.min(dim=1).values.mean().item()
+        stats["pos_mol_nn_l2_distance"] = dist_pos.min(dim=1).values.mean().item()
         stats["pos_invalid_dist_frac"] = (~valid_mask).float().mean().item()
 
     aggregated_v = torch.zeros_like(old_gen_scaled)
@@ -448,7 +463,7 @@ def compute_position_drift_loss(
 
         V_tau, A_row, A_pos, A_neg = _attention_weighted_field(
             old_gen_scaled,
-            pos_real_scaled,
+            real_mol_scaled,
             dist_pos_scaled,
             dist_neg_scaled,
             tau_eff,
@@ -481,7 +496,10 @@ def compute_position_drift_loss(
             )
 
     target = (old_gen_scaled + aggregated_v).detach()
-    loss = F.mse_loss(pos_gen / scale, target)
+    gen_scaled = gen_mol / scale
+    coord_mask = gen_mask.unsqueeze(-1).expand(-1, -1, pos_gen.shape[-1])
+    coord_mask = coord_mask.flatten(start_dim=1)
+    loss = F.mse_loss(gen_scaled[coord_mask], target[coord_mask])
 
     if not torch.isfinite(loss):
         raise TrainingDivergedException(
@@ -492,3 +510,33 @@ def compute_position_drift_loss(
         )
 
     return loss, stats
+
+
+def _positions_to_padded_molecules(
+    pos: torch.Tensor,
+    batch_vec: torch.Tensor,
+    max_nodes: int | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    graph_ids = torch.unique(batch_vec, sorted=True)
+    counts = torch.stack([(batch_vec == graph_id).sum() for graph_id in graph_ids])
+    if max_nodes is None:
+        max_nodes = int(counts.max().item())
+
+    padded = pos.new_zeros((graph_ids.numel(), max_nodes, pos.shape[-1]))
+    mask = torch.zeros(
+        (graph_ids.numel(), max_nodes), dtype=torch.bool, device=pos.device
+    )
+
+    for i, graph_id in enumerate(graph_ids):
+        graph_pos = pos[batch_vec == graph_id]
+        n = min(graph_pos.shape[0], max_nodes)
+        padded[i, :n] = graph_pos[:n]
+        mask[i, :n] = True
+
+    return padded.flatten(start_dim=1), mask
+
+
+def _max_nodes_per_graph(batch_vec: torch.Tensor) -> int:
+    graph_ids = torch.unique(batch_vec, sorted=True)
+    counts = torch.stack([(batch_vec == graph_id).sum() for graph_id in graph_ids])
+    return int(counts.max().item())
