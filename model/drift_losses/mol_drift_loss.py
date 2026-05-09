@@ -43,7 +43,7 @@ def compute_molecule_based_drift_loss(
         # TODO: check up whether it is allowed to use the log
         log_exp_pos = torch.log(exp_pos)
         log_exp_neg = torch.log(exp_neg)
-  
+
         # Both inputs requested in one call to avoid retain_graph issues
         grad_pos_pos, grad_types_pos = torch.autograd.grad(
             outputs=log_exp_pos.sum(), inputs=[pos_leaf, x_leaf]
