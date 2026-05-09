@@ -6,14 +6,14 @@ import torch.nn.functional as F
 import wandb
 from lightning.pytorch import LightningModule
 from torch.optim.lr_scheduler import OneCycleLR
-from torch_geometric.nn import global_mean_pool
 
 from ept.ept_loader import load_ept_feature_extractor
 
 from .drift_loss import (
     TrainingDivergedException,
-    compute_norm_based_drift_loss,
     compute_inverse_attn_drift_loss,
+    compute_norm_based_drift_loss,
+    compute_position_drift_loss,
     original_compute_drift_loss,
 )
 from .egnn import EGNN
@@ -209,6 +209,8 @@ class DriftingMoleculeGenerator(LightningModule):
     def _compute_loss(
         self, phi_gen: torch.Tensor, phi_real: torch.Tensor
     ) -> tuple[torch.Tensor, dict]:
+        if not self.use_feature_extractor:
+            return compute_position_drift_loss(phi_gen, phi_real, self.temperatures)
         if self.loss_variant == "original":
             return original_compute_drift_loss(phi_gen, phi_real, self.temperatures)
         elif self.loss_variant == "inverse_attn":

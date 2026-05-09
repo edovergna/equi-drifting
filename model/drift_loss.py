@@ -109,18 +109,20 @@ def original_compute_drift_loss(
     scale = valid.mean().detach().clamp(min=1e-3)
     scale_inputs = (scale / (D**0.5)).clamp(min=1e-3)
 
-    old_gen_scaled = old_gen / scale_inputs    # [N_gen, D]
+    old_gen_scaled = old_gen / scale_inputs  # [N_gen, D]
     phi_real_scaled = phi_real / scale_inputs  # [N_real, D]
 
     # Attention distances: normalise by scale (not scale_inputs)
-    dist_pos_normed = dist[:, N_gen:] / scale           # [N_gen, N_real]
-    dist_neg_normed = dist[:, :N_gen].clone() / scale   # [N_gen, N_gen]
-    dist_neg_normed.fill_diagonal_(1e8)                  # mask self-connections
+    dist_pos_normed = dist[:, N_gen:] / scale  # [N_gen, N_real]
+    dist_neg_normed = dist[:, :N_gen].clone() / scale  # [N_gen, N_gen]
+    dist_neg_normed.fill_diagonal_(1e8)  # mask self-connections
 
     stats: dict[str, float] = {}
     with torch.no_grad():
         stats["scale_S"] = scale_inputs.item()
-        stats.update(_shared_embedding_stats(old_gen_scaled, phi_real_scaled, dist[:, N_gen:]))
+        stats.update(
+            _shared_embedding_stats(old_gen_scaled, phi_real_scaled, dist[:, N_gen:])
+        )
         stats["invalid_dist_frac"] = (~valid_mask).float().mean().item()
 
     V_across_taus = torch.zeros_like(old_gen_scaled)
@@ -129,7 +131,12 @@ def original_compute_drift_loss(
         tau_key = str(tau).replace(".", "_")
 
         V_tau, A_row, A_pos, A_neg = _attention_weighted_field(
-            old_gen_scaled, phi_real_scaled, dist_pos_normed, dist_neg_normed, tau, "coupled"
+            old_gen_scaled,
+            phi_real_scaled,
+            dist_pos_normed,
+            dist_neg_normed,
+            tau,
+            "coupled",
         )
 
         f_norm_val = (V_tau**2).mean()
@@ -145,13 +152,15 @@ def original_compute_drift_loss(
             pos_mass = A_pos.sum(dim=1)
             neg_mass = A_neg.sum(dim=1)
             stats[f"attn_entropy_{tau_key}"] = row_entropy.item()
-            stats[f"attn_entropy_rel_{tau_key}"] = (row_entropy / row_entropy_uniform).item()
+            stats[f"attn_entropy_rel_{tau_key}"] = (
+                row_entropy / row_entropy_uniform
+            ).item()
             stats[f"force_scale_{tau_key}"] = force_scale.item()
             stats[f"v_norm_{tau_key}"] = V_tau_norm.norm(dim=-1).mean().item()
             stats[f"frac_zero_dists_{tau_key}"] = (A_row == 0).float().mean().item()
             stats[f"attn_pos_mass_frac_{tau_key}"] = (
-                pos_mass / (pos_mass + neg_mass).clamp_min(1e-8)
-            ).mean().item()
+                (pos_mass / (pos_mass + neg_mass).clamp_min(1e-8)).mean().item()
+            )
 
     goal_scaled = (old_gen_scaled + V_across_taus).detach()
     gen_scaled = phi_gen / scale_inputs
@@ -237,13 +246,15 @@ def compute_inverse_attn_drift_loss(
             pos_mass = A_pos.sum(dim=1)
             neg_mass = A_neg.sum(dim=1)
             stats[f"attn_entropy_{tau_key}"] = row_entropy.item()
-            stats[f"attn_entropy_rel_{tau_key}"] = (row_entropy / row_entropy_uniform).item()
+            stats[f"attn_entropy_rel_{tau_key}"] = (
+                row_entropy / row_entropy_uniform
+            ).item()
             stats[f"lambda_{tau_key}"] = lambda_tau.item()
             stats[f"v_norm_{tau_key}"] = V_tau_norm.norm(dim=-1).mean().item()
             stats[f"frac_zero_dists_{tau_key}"] = (A_row == 0).float().mean().item()
             stats[f"attn_pos_mass_frac_{tau_key}"] = (
-                pos_mass / (pos_mass + neg_mass).clamp_min(1e-8)
-            ).mean().item()
+                (pos_mass / (pos_mass + neg_mass).clamp_min(1e-8)).mean().item()
+            )
 
     target = (phi_gen_w + aggregated_v).detach()
     loss = F.mse_loss(phi_gen_w, target)
@@ -318,15 +329,21 @@ def compute_norm_based_drift_loss(
     stats = {}
     with torch.no_grad():
         stats["scale_S"] = scale_inputs.item()
-        stats.update(_shared_embedding_stats(old_gen_scaled, phi_real_scaled, dist[:, N_gen:]))
+        stats.update(
+            _shared_embedding_stats(old_gen_scaled, phi_real_scaled, dist[:, N_gen:])
+        )
         stats["invalid_dist_frac"] = (~valid_mask).float().mean().item()
 
         phi_gen_unit = F.normalize(old_gen, dim=-1)
         triu_idx = torch.triu_indices(N_gen, N_gen, offset=1, device=phi_gen.device)
         gen_cos_sim = (phi_gen_unit @ phi_gen_unit.T)[triu_idx[0], triu_idx[1]]
         gen_l2_dist = dist[:, :N_gen][triu_idx[0], triu_idx[1]]
-        stats["gen_pairwise_cos_sim_hist"] = wandb.Histogram(gen_cos_sim.float().cpu().numpy())
-        stats["gen_pairwise_l2_dist_hist"] = wandb.Histogram(gen_l2_dist.float().cpu().numpy())
+        stats["gen_pairwise_cos_sim_hist"] = wandb.Histogram(
+            gen_cos_sim.float().cpu().numpy()
+        )
+        stats["gen_pairwise_l2_dist_hist"] = wandb.Histogram(
+            gen_l2_dist.float().cpu().numpy()
+        )
 
     V_across_taus = torch.zeros_like(old_gen_scaled)
 
@@ -369,6 +386,109 @@ def compute_norm_based_drift_loss(
             f"phi_gen range: [{phi_gen.min().item():.3g}, {phi_gen.max().item():.3g}], "
             f"phi_real range: [{phi_real.min().item():.3g}, {phi_real.max().item():.3g}], "
             f"scale={scale_inputs.item():.3g}"
+        )
+
+    return loss, stats
+
+
+def compute_position_drift_loss(
+    pos_gen: torch.Tensor,
+    pos_real: torch.Tensor,
+    temperatures: list[float],
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """
+    Drifting field loss directly in 3D position space.
+
+    pos_gen and pos_real are atom positions with shape [N, 3]. Generated atoms are
+    attracted toward real atom positions and repelled from other generated atoms.
+    """
+    pos_gen = pos_gen.float()
+    pos_real = pos_real.float()
+
+    N_gen, D = pos_gen.shape
+    N_real = pos_real.shape[0]
+    N_targets = N_gen + N_real
+
+    old_gen = pos_gen.detach()
+    dist_pos = torch.cdist(old_gen, pos_real)
+    dist_neg = torch.cdist(old_gen, old_gen)
+    dist_neg.fill_diagonal_(1e6)
+
+    all_dists = torch.cat([dist_pos.flatten(), dist_neg.flatten()])
+    valid_mask = torch.isfinite(all_dists) & (all_dists < 1e5)
+    valid_dists = all_dists[valid_mask]
+
+    if valid_dists.numel() == 0:
+        raise TrainingDivergedException(
+            "No valid position distances found; loss is unstable."
+        )
+
+    scale = (valid_dists.mean() / (D**0.5)).detach().clamp(min=1e-5, max=1e3)
+    old_gen_scaled = old_gen / scale
+    pos_real_scaled = pos_real / scale
+    dist_pos_scaled = dist_pos / scale
+    dist_neg_scaled = dist_neg / scale
+
+    stats: dict[str, float] = {}
+    with torch.no_grad():
+        pos_gen_norms = old_gen.norm(dim=-1)
+        pos_real_norms = pos_real.norm(dim=-1)
+        stats["pos_scale_S"] = scale.item()
+        stats["pos_gen_norm_mean"] = pos_gen_norms.mean().item()
+        stats["pos_gen_norm_std"] = pos_gen_norms.std().item()
+        stats["pos_real_norm_mean"] = pos_real_norms.mean().item()
+        stats["pos_nn_l2_distance"] = dist_pos.min(dim=1).values.mean().item()
+        stats["pos_invalid_dist_frac"] = (~valid_mask).float().mean().item()
+
+    aggregated_v = torch.zeros_like(old_gen_scaled)
+
+    for tau in temperatures:
+        tau_key = str(tau).replace(".", "_")
+        tau_eff = tau * (D**0.5)
+
+        V_tau, A_row, A_pos, A_neg = _attention_weighted_field(
+            old_gen_scaled,
+            pos_real_scaled,
+            dist_pos_scaled,
+            dist_neg_scaled,
+            tau_eff,
+            "inverse_attn",
+        )
+
+        force_scale = (
+            torch.sqrt(((V_tau**2).sum(dim=-1).mean() / D).clamp(min=1e-10))
+            .detach()
+            .clamp(min=1e-5, max=1e3)
+        )
+        V_tau_norm = V_tau / force_scale
+        aggregated_v += V_tau_norm
+
+        with torch.no_grad():
+            row_entropy = -(A_row * (A_row + 1e-30).log()).sum(dim=-1).mean()
+            row_entropy_uniform = torch.log(
+                torch.tensor(N_targets, device=A_row.device, dtype=torch.float)
+            )
+            pos_mass = A_pos.sum(dim=1)
+            neg_mass = A_neg.sum(dim=1)
+            stats[f"pos_attn_entropy_{tau_key}"] = row_entropy.item()
+            stats[f"pos_attn_entropy_rel_{tau_key}"] = (
+                row_entropy / row_entropy_uniform
+            ).item()
+            stats[f"pos_force_scale_{tau_key}"] = force_scale.item()
+            stats[f"pos_v_norm_{tau_key}"] = V_tau_norm.norm(dim=-1).mean().item()
+            stats[f"pos_attn_real_mass_frac_{tau_key}"] = (
+                (pos_mass / (pos_mass + neg_mass).clamp_min(1e-8)).mean().item()
+            )
+
+    target = (old_gen_scaled + aggregated_v).detach()
+    loss = F.mse_loss(pos_gen / scale, target)
+
+    if not torch.isfinite(loss):
+        raise TrainingDivergedException(
+            f"Non-finite position loss ({loss.item()!r}). "
+            f"pos_gen range: [{pos_gen.min().item():.3g}, {pos_gen.max().item():.3g}], "
+            f"pos_real range: [{pos_real.min().item():.3g}, {pos_real.max().item():.3g}], "
+            f"scale={scale.item():.3g}"
         )
 
     return loss, stats
