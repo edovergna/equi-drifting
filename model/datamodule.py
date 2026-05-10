@@ -143,7 +143,7 @@ class QM9DataModule(pl.LightningDataModule):
         return DataLoader(
             self.val_set,
             batch_size=self.n_real_molecules,
-            shuffle=True,
+            shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,
             persistent_workers=self.num_workers > 0,
