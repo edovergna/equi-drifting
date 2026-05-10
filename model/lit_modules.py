@@ -53,6 +53,10 @@ class DriftingMoleculeGenerator(LightningModule):
             # KL divergence weight for atom-type distribution matching.
             # Prevents the generator from collapsing to a single atom type.
             "atom_type_loss_weight": 1.0,
+            # Geometry loss: penalise atom overlap and isolated atoms.
+            # Overlap term: pairs closer than 0.7 Å.
+            # Isolation term: atoms with no neighbour within 2.5 Å.
+            "geom_loss_weight": 1.0,
         }
 
         self.generator_cfg = {**default_generator_cfg, **(generator_cfg or {})}
@@ -70,6 +74,7 @@ class DriftingMoleculeGenerator(LightningModule):
         self.atom_type_temp = self.drift_cfg.get("atom_type_temp", 1.0)
         self.n_gen_molecules = self.drift_cfg.get("n_gen_molecules", 64)
         self.atom_type_loss_weight = self.drift_cfg.get("atom_type_loss_weight", 1.0)
+        self.geom_loss_weight = self.drift_cfg.get("geom_loss_weight", 1.0)
         self.pos_clamp = self.generator_cfg["pos_clamp"]
         self.pos_clamp_type = self.generator_cfg["pos_clamp_type"]
         self.c_pos_clamp = self.generator_cfg["c_pos_clamp"]
@@ -205,6 +210,44 @@ class DriftingMoleculeGenerator(LightningModule):
 
         return pos_gen, gen_atom_types, phi_gen, phi_real, gen_batch_vec
 
+    def _compute_geom_loss(
+        self,
+        pos: torch.Tensor,
+        batch_vec: torch.Tensor,
+        d_min: float = 0.7,
+        d_bond_max: float = 2.5,
+    ) -> torch.Tensor:
+        """Differentiable geometry loss on raw 3-D positions.
+
+        overlap_loss   — penalise atom pairs closer than d_min (Å)
+        isolation_loss — penalise atoms whose nearest neighbour is beyond d_bond_max (Å)
+
+        Both terms use a squared-hinge (ReLU²) penalty for smooth gradients.
+        """
+        n_graphs = int(batch_vec.max().item()) + 1
+        overlap_total = pos.new_zeros(())
+        isolation_total = pos.new_zeros(())
+
+        for g in range(n_graphs):
+            p = pos[batch_vec == g]  # [N_g, 3]
+            n = p.shape[0]
+            if n < 2:
+                continue
+            # Pairwise L2 distances [N_g, N_g]
+            dists = torch.cdist(p, p)  # [N_g, N_g]
+            eye = torch.eye(n, device=p.device, dtype=torch.bool)
+            pair_dists = dists[~eye]  # [N_g*(N_g-1)]
+
+            overlap_total = overlap_total + F.relu(d_min - pair_dists).pow(2).mean()
+
+            dists_no_self = dists.masked_fill(eye, float("inf"))
+            nn_dist = dists_no_self.min(dim=-1).values  # [N_g]
+            isolation_total = (
+                isolation_total + F.relu(nn_dist - d_bond_max).pow(2).mean()
+            )
+
+        return (overlap_total + isolation_total) / n_graphs
+
     def _compute_loss(
         self, phi_gen: torch.Tensor, phi_real: torch.Tensor
     ) -> tuple[torch.Tensor, dict]:
@@ -282,6 +325,17 @@ class DriftingMoleculeGenerator(LightningModule):
                 on_epoch=False,
             )
 
+        if self.geom_loss_weight > 0.0:
+            geom_loss = self._compute_geom_loss(pos_gen, gen_batch_vec)
+            loss = loss + self.geom_loss_weight * geom_loss
+            self.log(
+                "train/geom_loss",
+                geom_loss,
+                batch_size=bs,
+                on_step=True,
+                on_epoch=False,
+            )
+
         self.log("train_loss", loss, batch_size=bs, on_step=True, on_epoch=True)
 
         hist_stats = {k: v for k, v in stats.items() if isinstance(v, wandb.Histogram)}
@@ -334,6 +388,18 @@ class DriftingMoleculeGenerator(LightningModule):
             self.log(
                 "val/atom_type_loss",
                 atom_type_loss,
+                batch_size=self.n_gen_molecules,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+
+        if self.geom_loss_weight > 0.0:
+            geom_loss = self._compute_geom_loss(pos_gen, gen_batch_vec)
+            val_loss = val_loss + self.geom_loss_weight * geom_loss
+            self.log(
+                "val/geom_loss",
+                geom_loss,
                 batch_size=self.n_gen_molecules,
                 on_step=False,
                 on_epoch=True,

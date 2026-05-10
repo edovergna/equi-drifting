@@ -28,4 +28,5 @@ python train.py \
     --hidden_dim 256 \
     --num_layers 8 \
     --atom_type_loss_weight 1.0 \
+    --geom_loss_weight 1.0 \
     --gradient_clip_val 0.1

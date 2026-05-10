@@ -218,4 +218,10 @@ def parse_args():
         default=0.1,
         help="Maximum gradient norm for clipping. Lower values prevent exploding gradients.",
     )
+    parser.add_argument(
+        "--geom_loss_weight",
+        type=float,
+        default=1.0,
+        help="Weight for the geometry loss (overlap + isolation penalty on 3D positions). 0 to disable.",
+    )
     return parser.parse_args()
