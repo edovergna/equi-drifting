@@ -252,8 +252,10 @@ class DriftingMoleculeGenerator(LightningModule):
             n = p.shape[0]
             if n < 2:
                 continue
-            # Pairwise L2 distances [N_g, N_g]
-            dists = torch.cdist(p, p)  # [N_g, N_g]
+            # Safe pairwise distances: sqrt(||p_i - p_j||² + ε).
+            # torch.cdist has undefined gradient at d=0; this avoids NaN.
+            diff = p.unsqueeze(1) - p.unsqueeze(0)  # [N_g, N_g, 3]
+            dists = (diff.pow(2).sum(dim=-1) + 1e-8).sqrt()  # [N_g, N_g]
             eye = torch.eye(n, device=p.device, dtype=torch.bool)
             pair_dists = dists[~eye]  # [N_g*(N_g-1)]
 
@@ -312,7 +314,9 @@ class DriftingMoleculeGenerator(LightningModule):
             if n < 2:
                 continue
 
-            dists = torch.cdist(p, p)  # [N_g, N_g]
+            # Safe pairwise distances: avoids NaN gradient of torch.cdist at d=0.
+            diff = p.unsqueeze(1) - p.unsqueeze(0)  # [N_g, N_g, 3]
+            dists = (diff.pow(2).sum(dim=-1) + 1e-8).sqrt()  # [N_g, N_g]
             # Bond threshold matrix: d < bond_factor * (r_i + r_j)
             bond_thresh = bond_factor * (r.unsqueeze(1) + r.unsqueeze(0))  # [N_g, N_g]
             # Soft bond count per atom: sigmoid so gradient flows through distances
