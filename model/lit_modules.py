@@ -293,9 +293,12 @@ class DriftingMoleculeGenerator(LightningModule):
         cov_r = self._COV_RADII.to(pos.device)  # [5]
         stable_v = self._STABLE_VALENCE.to(pos.device)  # [5]
 
-        # Per-atom radius and target valence via soft lookup (one-hot so exact)
-        atom_radii = (atom_types * cov_r).sum(dim=-1)  # [N]
-        atom_valence = (atom_types * stable_v).sum(dim=-1)  # [N]
+        # Per-atom radius and target valence via soft lookup (one-hot so exact).
+        # Detach atom_types so the valence loss only trains positions, not atom types.
+        # Atom types are trained separately by atom_type_loss to avoid collapse.
+        at = atom_types.detach()
+        atom_radii = (at * cov_r).sum(dim=-1)  # [N]
+        atom_valence = (at * stable_v).sum(dim=-1)  # [N]
 
         n_graphs = int(batch_vec.max().item()) + 1
         valence_loss = pos.new_zeros(())
