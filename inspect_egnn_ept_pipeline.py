@@ -133,18 +133,24 @@ def run_ept(feature_extractor, pos, x, batch_vec, dense_edge_index, device):
 def check_invariance(label, phi_orig, phi_transformed, atol):
     """
     Check that phi is unchanged under a transformation.
+    For near-zero vectors (high-symmetry molecules) falls back to absolute tolerance.
     Returns True if all molecules pass.
     """
     passed = True
     for g_idx in range(phi_orig.shape[0]):
         diff = (phi_orig[g_idx] - phi_transformed[g_idx]).norm().item()
         denom = phi_orig[g_idx].norm().item()
-        rel = diff / (denom + 1e-12)
-        ok = rel < atol
+        if denom < NEAR_ZERO_THRESH:
+            ok = diff < ABS_ATOL_EQUIV
+            note = f" [near-zero (||v||={denom:.4f}) — abs tol {ABS_ATOL_EQUIV:.0e}]"
+        else:
+            rel = diff / denom
+            ok = rel < atol
+            note = f"  rel={rel:.2e}"
         status = "PASS" if ok else "FAIL"
         print(
             f"    [{status}] mol[{MOLECULE_INDICES[g_idx]}]  "
-            f"|Δphi|={diff:.2e}  |phi|={denom:.4f}  rel={rel:.2e}"
+            f"|Δphi|={diff:.2e}  |phi|={denom:.4f}{note}"
         )
         if not ok:
             passed = False
@@ -290,7 +296,25 @@ def main():
         "reflection", phi_equiv_orig, phi_equiv_refl, R_refl, ATOL
     )
 
-    # ── 8. Summary ───────────────────────────────────────────────────────────
+    # ── 8. Combined sanity check: fresh random rotation ──────────────────────
+    # Repeats both properties under an independent rotation to confirm the
+    # full representation (phi_scalar, phi_equiv) is correctly SE(3)-equivariant.
+    print("\n── Test 5 (combined sanity check): fresh random rotation ──")
+    torch.manual_seed(42)
+    R2 = random_rotation(device, pos.dtype)
+    print(f"  rotation matrix:\n{R2.cpu().numpy()}")
+    pos_rot2 = pos @ R2.T
+    phi_rot2, phi_equiv_rot2 = run_ept(
+        ept, pos_rot2, x, batch_vec, dense_edge_index, device
+    )
+    print("  5a: phi_scalar — invariance")
+    all_passed &= check_invariance("sanity rotation", phi_orig, phi_rot2, ATOL)
+    print("  5b: phi_equiv  — equivariance  [phi_equiv(R·pos) = R·phi_equiv(pos)]")
+    all_passed &= check_equivariance(
+        "sanity rotation", phi_equiv_orig, phi_equiv_rot2, R2, ATOL
+    )
+
+    # ── 9. Summary ───────────────────────────────────────────────────────────
     print("\n" + "=" * 60)
     if all_passed:
         print("ALL TESTS PASSED")
