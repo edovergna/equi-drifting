@@ -15,6 +15,7 @@ from .drift_loss import (
     compute_norm_based_drift_loss,
     compute_position_drift_loss,
     original_compute_drift_loss,
+    positions_to_flat_molecules,
 )
 from .egnn import EGNN
 from .geometry import center_positions_per_graph, per_graph_center_norms
@@ -218,11 +219,9 @@ class DriftingMoleculeGenerator(LightningModule):
         real_batch_vec: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, dict]:
         if not self.use_feature_extractor:
-            return compute_position_drift_loss(
-                phi_gen,
-                phi_real,
-                gen_batch_vec,
-                real_batch_vec,
+            return original_compute_drift_loss(
+                positions_to_flat_molecules(phi_gen, gen_batch_vec),
+                positions_to_flat_molecules(phi_real, real_batch_vec),
                 self.temperatures,
             )
         if self.loss_variant == "original":
