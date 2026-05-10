@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch_geometric.nn import global_add_pool
 
 # EPT atom-vocab indices for the 5 QM9 atom types (H, C, N, O, F).
 # VOCAB.idx2atom = [pad, mask, global] + periodic_table_uppercase, so:
@@ -107,18 +108,23 @@ class EPTFeatureExtractor(nn.Module):
     ):
         """
         pos: [N, 3] 3D coordinates
-        atom_types: [N] Integer atom type indices (0=H, 1=C, 2=N, 3=O, 4=F)
+        atom_types: [N, 5] one-hot atom types
         block_id: [N] atom i -> block i (arange, each atom is its own block)
         batch_id: [N] block/atom i -> graph index
         dense_edge_index: [2, E] Fully connected edges (globally indexed)
+
+        Returns:
+            graph_repr  [G, D]  invariant per-molecule scalar embedding
+            phi_equiv   [G, 3]  equivariant per-molecule 3-D vector
+                                transforms as phi_equiv(R·pos) = R·phi_equiv(pos)
         """
         qm9_weights = self.embed_weights[self.qm9_ept_indices]  # [5, D]
-        h_continuous = atom_types @ qm9_weights 
+        h_continuous = atom_types @ qm9_weights
 
         # Distance-based edge type embedding, matching EPT's RadialEdge training scheme.
         edge_attr = self._compute_edge_attr(pos, dense_edge_index)
 
-        _, _, graph_repr, _ = self.ept_model.encoder(
+        H_atoms, _, graph_repr, V_out = self.ept_model.encoder(
             H=h_continuous,
             Z=pos,
             block_id=block_id,
@@ -126,5 +132,16 @@ class EPTFeatureExtractor(nn.Module):
             edges=dense_edge_index,
             edge_attr=edge_attr,
         )
+        # V_out: [N, 3] equivariant per-atom updated positions (final_v output + pos)
+        # H_atoms: [N, D] invariant per-atom scalar features from the last transformer layer
 
-        return graph_repr
+        # Molecule-level equivariant vector.
+        # w_i = ||H_atoms_i|| is a positive invariant scalar per atom.
+        # A normalised weighted sum of equivariant vectors is itself equivariant:
+        #   phi_equiv(R·pos) = R · phi_equiv(pos)
+        w = H_atoms.norm(dim=-1, keepdim=True)  # [N, 1], invariant
+        w_sum = global_add_pool(w, batch_id)  # [G, 1]
+        w_norm = w / (w_sum[batch_id] + 1e-8)  # [N, 1], per-graph normalised
+        phi_equiv = global_add_pool(w_norm * V_out, batch_id)  # [G, 3], equivariant
+
+        return graph_repr, phi_equiv

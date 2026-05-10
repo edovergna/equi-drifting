@@ -112,21 +112,21 @@ def random_rotation(device, dtype=torch.float32):
 
 
 def run_ept(feature_extractor, pos, x, batch_vec, dense_edge_index, device):
-    """Single EPT forward pass; returns graph embeddings [G, D]."""
+    """Single EPT forward pass; returns (graph_repr [G, D], phi_equiv [G, 3])."""
     with torch.no_grad():
-        phi = feature_extractor(
+        phi_scalar, phi_equiv = feature_extractor(
             pos=pos,
             atom_types=x,
             block_id=torch.arange(pos.shape[0], device=device),
             batch_id=batch_vec,
             dense_edge_index=dense_edge_index,
         )
-    return phi
+    return phi_scalar, phi_equiv
 
 
 def check_invariance(label, phi_orig, phi_transformed, atol):
     """
-    Print per-molecule relative error and whether it is below `atol`.
+    Check that phi is unchanged under a transformation.
     Returns True if all molecules pass.
     """
     passed = True
@@ -139,6 +139,30 @@ def check_invariance(label, phi_orig, phi_transformed, atol):
         print(
             f"    [{status}] mol[{MOLECULE_INDICES[g_idx]}]  "
             f"|Δphi|={diff:.2e}  |phi|={denom:.4f}  rel={rel:.2e}"
+        )
+        if not ok:
+            passed = False
+    return passed
+
+
+def check_equivariance(label, phi_equiv_orig, phi_equiv_transformed, R, atol):
+    """
+    Check that phi_equiv transforms as phi_equiv(R·pos) = R·phi_equiv(pos).
+    R: [3, 3] rotation matrix applied to positions.
+    Returns True if all molecules pass.
+    """
+    passed = True
+    for g_idx in range(phi_equiv_orig.shape[0]):
+        expected = phi_equiv_orig[g_idx] @ R.T  # R · v  (row-vec convention: v @ R^T)
+        diff = (phi_equiv_transformed[g_idx] - expected).norm().item()
+        denom = phi_equiv_orig[g_idx].norm().item()
+        rel = diff / (denom + 1e-12)
+        ok = rel < atol
+        status = "PASS" if ok else "FAIL"
+        print(
+            f"    [{status}] mol[{MOLECULE_INDICES[g_idx]}]  "
+            f"|phi_equiv(R·pos) - R·phi_equiv(pos)|={diff:.2e}  "
+            f"|phi_equiv|={denom:.4f}  rel={rel:.2e}"
         )
         if not ok:
             passed = False
@@ -176,55 +200,92 @@ def main():
     ept = load_ept_feature_extractor().to(device)
     ept.eval()
 
-    # ── 3. Baseline embedding ────────────────────────────────────────────────
+    # ── 3. Baseline embeddings ───────────────────────────────────────────────
     print("\n── Baseline EPT embeddings ──")
-    phi_orig = run_ept(ept, pos, x, batch_vec, dense_edge_index, device)
-    print(f"  phi shape: {tuple(phi_orig.shape)}  (one row per molecule)")
+    phi_orig, phi_equiv_orig = run_ept(ept, pos, x, batch_vec, dense_edge_index, device)
+    print(
+        f"  phi_scalar shape: {tuple(phi_orig.shape)}  (invariant, one row per molecule)"
+    )
+    print(
+        f"  phi_equiv  shape: {tuple(phi_equiv_orig.shape)}  (equivariant, one 3-D vector per molecule)"
+    )
     for g_idx, mol_idx in enumerate(MOLECULE_INDICES):
-        e = phi_orig[g_idx]
+        e, ev = phi_orig[g_idx], phi_equiv_orig[g_idx]
         print(
-            f"  mol[{mol_idx}]  mean={e.mean():.4f}  std={e.std():.4f}  norm={e.norm():.4f}"
+            f"  mol[{mol_idx}]  scalar: mean={e.mean():.4f}  norm={e.norm():.4f}  |  "
+            f"equiv: {ev.tolist()}  norm={ev.norm():.4f}"
         )
 
     all_passed = True
+    R = random_rotation(device, pos.dtype)
+    t = torch.randn(3, device=device, dtype=pos.dtype) * 10.0
 
-    # ── 4. Translation invariance ────────────────────────────────────────────
-    print("\n── Test 1: Translation invariance ──")
-    t = torch.randn(3, device=device, dtype=pos.dtype) * 10.0  # large shift
+    # ── 4a. Translation: phi_scalar invariant ───────────────────────────────
+    print("\n── Test 1a: phi_scalar — translation invariance ──")
     print(f"  shift vector: {t.tolist()}")
-    pos_trans = pos + t.unsqueeze(0)  # broadcast over atoms
-    phi_trans = run_ept(ept, pos_trans, x, batch_vec, dense_edge_index, device)
+    pos_trans = pos + t.unsqueeze(0)
+    phi_trans, phi_equiv_trans = run_ept(
+        ept, pos_trans, x, batch_vec, dense_edge_index, device
+    )
     all_passed &= check_invariance("translation", phi_orig, phi_trans, ATOL)
 
-    # ── 5. Rotation invariance ───────────────────────────────────────────────
-    print("\n── Test 2: Rotation invariance ──")
-    R = random_rotation(device, pos.dtype)
+    # ── 4b. Translation: phi_equiv invariant (distances unchanged → same V_out) ──
+    print("\n── Test 1b: phi_equiv — translation invariance ──")
+    all_passed &= check_invariance(
+        "translation (equiv)", phi_equiv_orig, phi_equiv_trans, ATOL
+    )
+
+    # ── 5a. Rotation: phi_scalar invariant ──────────────────────────────────
+    print(f"\n── Test 2a: phi_scalar — rotation invariance ──")
     print(f"  rotation matrix:\n{R.cpu().numpy()}")
-    # Apply the *same* rotation matrix to every atom (pos is already center-zeroed
-    # by the Center() transform, but it doesn't matter for invariance).
     pos_rot = pos @ R.T  # [N, 3] @ [3, 3]
-    phi_rot = run_ept(ept, pos_rot, x, batch_vec, dense_edge_index, device)
+    phi_rot, phi_equiv_rot = run_ept(
+        ept, pos_rot, x, batch_vec, dense_edge_index, device
+    )
     all_passed &= check_invariance("rotation", phi_orig, phi_rot, ATOL)
 
-    # ── 6. Roto-translation invariance ──────────────────────────────────────
-    print("\n── Test 3: Roto-translation invariance ──")
+    # ── 5b. Rotation: phi_equiv equivariant (the key new test) ──────────────
+    print(
+        "\n── Test 2b: phi_equiv — rotation equivariance  [phi_equiv(R·pos) = R·phi_equiv(pos)] ──"
+    )
+    all_passed &= check_equivariance("rotation", phi_equiv_orig, phi_equiv_rot, R, ATOL)
+
+    # ── 6. Roto-translation ──────────────────────────────────────────────────
+    print("\n── Test 3a: phi_scalar — roto-translation invariance ──")
     pos_rt = pos_rot + t.unsqueeze(0)
-    phi_rt = run_ept(ept, pos_rt, x, batch_vec, dense_edge_index, device)
+    phi_rt, phi_equiv_rt = run_ept(ept, pos_rt, x, batch_vec, dense_edge_index, device)
     all_passed &= check_invariance("roto-translation", phi_orig, phi_rt, ATOL)
 
-    # ── 7. Reflection (improper rotation, det=-1) ────────────────────────────
-    print("\n── Test 4: Reflection invariance (x → -x flip) ──")
+    print("\n── Test 3b: phi_equiv — roto-translation equivariance ──")
+    all_passed &= check_equivariance(
+        "roto-translation", phi_equiv_orig, phi_equiv_rt, R, ATOL
+    )
+
+    # ── 7. Reflection ────────────────────────────────────────────────────────
+    print("\n── Test 4a: phi_scalar — reflection invariance (x → -x) ──")
     pos_refl = pos.clone()
-    pos_refl[:, 0] = -pos_refl[:, 0]  # flip x-axis
-    phi_refl = run_ept(ept, pos_refl, x, batch_vec, dense_edge_index, device)
+    pos_refl[:, 0] = -pos_refl[:, 0]
+    R_refl = torch.diag(torch.tensor([-1.0, 1.0, 1.0], device=device, dtype=pos.dtype))
+    phi_refl, phi_equiv_refl = run_ept(
+        ept, pos_refl, x, batch_vec, dense_edge_index, device
+    )
     all_passed &= check_invariance("reflection", phi_orig, phi_refl, ATOL)
+
+    print("\n── Test 4b: phi_equiv — reflection equivariance ──")
+    all_passed &= check_equivariance(
+        "reflection", phi_equiv_orig, phi_equiv_refl, R_refl, ATOL
+    )
 
     # ── 8. Summary ───────────────────────────────────────────────────────────
     print("\n" + "=" * 60)
     if all_passed:
-        print("ALL INVARIANCE TESTS PASSED")
+        print("ALL TESTS PASSED")
+        print("  phi_scalar:  SE(3)-invariant  ✓")
+        print(
+            "  phi_equiv:   SE(3)-equivariant ✓  (translation-invariant, rotation-equivariant)"
+        )
     else:
-        print("ONE OR MORE INVARIANCE TESTS FAILED  ← encoder is NOT invariant")
+        print("ONE OR MORE TESTS FAILED")
     print("=" * 60)
 
 

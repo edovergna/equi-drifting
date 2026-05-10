@@ -16,7 +16,7 @@ from .drift_loss import (
     original_compute_drift_loss,
 )
 from .egnn import EGNN
-from .geometry import (center_positions_per_graph, per_graph_center_norms)
+from .geometry import center_positions_per_graph, per_graph_center_norms
 from .sample_prior import compute_size_distribution, sample_prior_batch
 
 
@@ -126,7 +126,9 @@ class DriftingMoleculeGenerator(LightningModule):
             self.device,
         )
         self._last_sampled_counts = atom_counts  # read by SizeDistributionCallback
-        self._last_sampled_atom_probs = x.detach().cpu().numpy()  # read by AtomTypeDistributionCallback
+        self._last_sampled_atom_probs = (
+            x.detach().cpu().numpy()
+        )  # read by AtomTypeDistributionCallback
         return x, pos, batch_vec, dense_edge_index
 
     def _forward(self, batch):
@@ -143,36 +145,51 @@ class DriftingMoleculeGenerator(LightningModule):
             pos_gen = pos_gen.clamp(-self.pos_clamp, self.pos_clamp)
         elif self.pos_clamp_type == "tanh":
             norm = pos_gen.norm(dim=-1, keepdim=True)
-            rescale = torch.tanh(norm / self.norm_pos_clamp) / (norm / self.norm_pos_clamp + 1e-8)
+            rescale = torch.tanh(norm / self.norm_pos_clamp) / (
+                norm / self.norm_pos_clamp + 1e-8
+            )
             if not self.trainer.sanity_checking and self.trainer.validating is False:
-                rescale.register_hook(lambda g: setattr(self, "_norm_rescale_grad", g.abs().mean().item()))
+                rescale.register_hook(
+                    lambda g: setattr(self, "_norm_rescale_grad", g.abs().mean().item())
+                )
             pos_gen = pos_gen * rescale
         else:  # geom
             norm = pos_gen.norm(dim=-1)
             rescale = 1 / (1 + (norm / self.c_pos_clamp) ** self.p_pos_clamp)
             if not self.trainer.sanity_checking and self.trainer.validating is False:
-                rescale.register_hook(lambda g: setattr(self, "_norm_rescale_grad", g.abs().mean().item()))
+                rescale.register_hook(
+                    lambda g: setattr(self, "_norm_rescale_grad", g.abs().mean().item())
+                )
             pos_gen = pos_gen * rescale.unsqueeze(-1)
         # gen_atom_types = x_gen.softmax(dim=-1).argmax(dim=-1)
         gen_atom_types = F.gumbel_softmax(x_gen, tau=self.atom_type_temp, hard=True)
 
         # EPT expects block_id[i] = block index for atom i (each atom is its own block,
         # so block index = atom index), and batch_id[j] = graph index for block j.
-        phi_gen = self.feature_extractor(
+        # feature_extractor returns (graph_repr [G, D], phi_equiv [G, 3])
+        phi_gen, phi_gen_equiv = self.feature_extractor(
             pos=pos_gen,
             atom_types=gen_atom_types,
             block_id=torch.arange(pos_gen.shape[0], device=self.device),
             batch_id=gen_batch_vec,
             dense_edge_index=gen_dense_edge_index,
         )
-        phi_real = self.feature_extractor(
+        phi_real, phi_real_equiv = self.feature_extractor(
             pos=batch.pos,
             atom_types=batch.real_atom_types,
             block_id=torch.arange(batch.num_nodes, device=batch.batch.device),
             batch_id=batch.batch,
             dense_edge_index=batch.dense_edge_index,
         )
-        return pos_gen, gen_atom_types, phi_gen, phi_real, gen_batch_vec
+        return (
+            pos_gen,
+            gen_atom_types,
+            phi_gen,
+            phi_real,
+            gen_batch_vec,
+            phi_gen_equiv,
+            phi_real_equiv,
+        )
 
     def _compute_loss(
         self, phi_gen: torch.Tensor, phi_real: torch.Tensor
@@ -186,10 +203,17 @@ class DriftingMoleculeGenerator(LightningModule):
 
     def on_after_backward(self):
         if self._norm_rescale_grad is not None:
-            self.log("geom/norm_rescale_grad", self._norm_rescale_grad, on_step=True, on_epoch=False)
+            self.log(
+                "geom/norm_rescale_grad",
+                self._norm_rescale_grad,
+                on_step=True,
+                on_epoch=False,
+            )
 
     def training_step(self, batch, batch_idx):
-        pos_gen, _, phi_gen, phi_real, gen_batch_vec = self._forward(batch)
+        pos_gen, _, phi_gen, phi_real, gen_batch_vec, phi_gen_equiv, phi_real_equiv = (
+            self._forward(batch)
+        )
 
         if not (torch.isfinite(phi_gen).all() and torch.isfinite(phi_real).all()):
             with torch.no_grad():
@@ -278,7 +302,15 @@ class DriftingMoleculeGenerator(LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        pos_gen, gen_atom_types, phi_gen, phi_real, gen_batch_vec = self._forward(batch)
+        (
+            pos_gen,
+            gen_atom_types,
+            phi_gen,
+            phi_real,
+            gen_batch_vec,
+            phi_gen_equiv,
+            phi_real_equiv,
+        ) = self._forward(batch)
         val_loss, stats = self._compute_loss(phi_gen, phi_real)
 
         bs = self.n_gen_molecules
@@ -337,7 +369,11 @@ class DriftingMoleculeGenerator(LightningModule):
 
     def on_validation_epoch_end(self):
         hist_stats = getattr(self, "_val_hist_stats", {})
-        if hist_stats and hasattr(self, "logger") and hasattr(self.logger, "experiment"):
+        if (
+            hist_stats
+            and hasattr(self, "logger")
+            and hasattr(self.logger, "experiment")
+        ):
             try:
                 self.logger.experiment.log(hist_stats, commit=False)
             except Exception:
