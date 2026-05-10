@@ -74,6 +74,7 @@ def main(args: argparse.Namespace):
             "n_gen_molecules": args.n_gen_molecules,
             "atom_type_loss_weight": args.atom_type_loss_weight,
             "geom_loss_weight": args.geom_loss_weight,
+            "valence_loss_weight": args.valence_loss_weight,
             "equiv_phi_mode": args.equiv_phi_mode,
         }
 

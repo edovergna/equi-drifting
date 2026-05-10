@@ -57,6 +57,9 @@ class DriftingMoleculeGenerator(LightningModule):
             # Overlap term: pairs closer than 0.7 Å.
             # Isolation term: atoms with no neighbour within 2.5 Å.
             "geom_loss_weight": 1.0,
+            # Soft valence loss: penalise wrong bond counts per atom type.
+            # Directly targets validity. Anneals naturally alongside geom_loss.
+            "valence_loss_weight": 1.0,
             # How to append the equivariant output to the fingerprint:
             #   'norm'   — append ||phi_equiv|| (1 scalar, SE(3)-invariant) [default]
             #   'vector' — append phi_equiv as 3 raw components (equivariant, orientation-dependent)
@@ -80,6 +83,7 @@ class DriftingMoleculeGenerator(LightningModule):
         self.n_gen_molecules = self.drift_cfg.get("n_gen_molecules", 64)
         self.atom_type_loss_weight = self.drift_cfg.get("atom_type_loss_weight", 1.0)
         self.geom_loss_weight = self.drift_cfg.get("geom_loss_weight", 1.0)
+        self.valence_loss_weight = self.drift_cfg.get("valence_loss_weight", 1.0)
         self.equiv_phi_mode = self.drift_cfg.get("equiv_phi_mode", "norm")
         self.pos_clamp = self.generator_cfg["pos_clamp"]
         self.pos_clamp_type = self.generator_cfg["pos_clamp_type"]
@@ -263,6 +267,61 @@ class DriftingMoleculeGenerator(LightningModule):
 
         return (overlap_total + isolation_total) / n_graphs
 
+    # Covalent radii (Å) per QM9 atom type index: H=0, C=1, N=2, O=3, F=4
+    _COV_RADII = torch.tensor([0.31, 0.76, 0.71, 0.66, 0.57])
+    # Stable (target) valence per atom type
+    _STABLE_VALENCE = torch.tensor([1.0, 4.0, 3.0, 2.0, 1.0])
+
+    def _compute_valence_loss(
+        self,
+        pos: torch.Tensor,
+        atom_types: torch.Tensor,
+        batch_vec: torch.Tensor,
+        bond_factor: float = 1.3,
+        temperature: float = 0.1,
+    ) -> torch.Tensor:
+        """Differentiable soft-valence loss.
+
+        For each atom, counts expected bonds via a sigmoid over pairwise distances
+        using atom-type-aware covalent radii, then penalises deviation from the
+        stable valence ({H:1, C:4, N:3, O:2, F:1}).
+
+        pos:        [N, 3]
+        atom_types: [N, 5] one-hot (Gumbel straight-through)
+        batch_vec:  [N]
+        """
+        cov_r = self._COV_RADII.to(pos.device)  # [5]
+        stable_v = self._STABLE_VALENCE.to(pos.device)  # [5]
+
+        # Per-atom radius and target valence via soft lookup (one-hot so exact)
+        atom_radii = (atom_types * cov_r).sum(dim=-1)  # [N]
+        atom_valence = (atom_types * stable_v).sum(dim=-1)  # [N]
+
+        n_graphs = int(batch_vec.max().item()) + 1
+        valence_loss = pos.new_zeros(())
+
+        for g in range(n_graphs):
+            mask = batch_vec == g
+            p = pos[mask]  # [N_g, 3]
+            r = atom_radii[mask]  # [N_g]
+            v = atom_valence[mask]  # [N_g]
+            n = p.shape[0]
+            if n < 2:
+                continue
+
+            dists = torch.cdist(p, p)  # [N_g, N_g]
+            # Bond threshold matrix: d < bond_factor * (r_i + r_j)
+            bond_thresh = bond_factor * (r.unsqueeze(1) + r.unsqueeze(0))  # [N_g, N_g]
+            # Soft bond count per atom: sigmoid so gradient flows through distances
+            eye = torch.eye(n, device=p.device, dtype=torch.bool)
+            soft_bonds = torch.sigmoid((bond_thresh - dists) / temperature)
+            soft_bonds = soft_bonds.masked_fill(eye, 0.0)  # exclude self
+            soft_valence = soft_bonds.sum(dim=-1)  # [N_g]
+
+            valence_loss = valence_loss + F.mse_loss(soft_valence, v)
+
+        return valence_loss / n_graphs
+
     def _compute_loss(
         self, phi_gen: torch.Tensor, phi_real: torch.Tensor
     ) -> tuple[torch.Tensor, dict]:
@@ -351,6 +410,19 @@ class DriftingMoleculeGenerator(LightningModule):
                 on_epoch=False,
             )
 
+        if self.valence_loss_weight > 0.0:
+            valence_loss = self._compute_valence_loss(
+                pos_gen, gen_atom_types, gen_batch_vec
+            )
+            loss = loss + self.valence_loss_weight * valence_loss
+            self.log(
+                "train/valence_loss",
+                valence_loss,
+                batch_size=bs,
+                on_step=True,
+                on_epoch=False,
+            )
+
         self.log("train_loss", loss, batch_size=bs, on_step=True, on_epoch=True)
 
         hist_stats = {k: v for k, v in stats.items() if isinstance(v, wandb.Histogram)}
@@ -415,6 +487,20 @@ class DriftingMoleculeGenerator(LightningModule):
             self.log(
                 "val/geom_loss",
                 geom_loss,
+                batch_size=self.n_gen_molecules,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+
+        if self.valence_loss_weight > 0.0:
+            valence_loss = self._compute_valence_loss(
+                pos_gen, gen_atom_types, gen_batch_vec
+            )
+            val_loss = val_loss + self.valence_loss_weight * valence_loss
+            self.log(
+                "val/valence_loss",
+                valence_loss,
                 batch_size=self.n_gen_molecules,
                 on_step=False,
                 on_epoch=True,

@@ -236,4 +236,10 @@ def parse_args():
             "'off' (ablation: no equivariant information)."
         ),
     )
+    parser.add_argument(
+        "--valence_loss_weight",
+        type=float,
+        default=1.0,
+        help="Weight for the soft valence loss. Penalises wrong bond counts per atom type. 0 to disable.",
+    )
     return parser.parse_args()
