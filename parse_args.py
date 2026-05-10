@@ -37,7 +37,10 @@ def parse_args():
         "--seed", type=int, default=42, help="Random seed for reproducibility."
     )
     parser.add_argument(
-        "--n_real_molecules", type=int, default=128, help="Number of real molecules per batch."
+        "--n_real_molecules",
+        type=int,
+        default=128,
+        help="Number of real molecules per batch.",
     )
     parser.add_argument(
         "--num_workers", type=int, default=2, help="Number of workers for data loading."
@@ -202,5 +205,11 @@ def parse_args():
         default="auto",
         choices=["auto", "32-true", "16-mixed", "bf16-mixed"],
         help="Trainer precision mode. Use auto to pick fast safe defaults.",
+    )
+    parser.add_argument(
+        "--atom_type_loss_weight",
+        type=float,
+        default=1.0,
+        help="Weight for the KL divergence atom-type distribution matching loss. 0 to disable.",
     )
     return parser.parse_args()

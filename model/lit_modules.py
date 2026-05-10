@@ -50,6 +50,9 @@ class DriftingMoleculeGenerator(LightningModule):
             "pct_start": 0.1,
             "div_factor": 25.0,
             "final_div_factor": 1e4,
+            # KL divergence weight for atom-type distribution matching.
+            # Prevents the generator from collapsing to a single atom type.
+            "atom_type_loss_weight": 1.0,
         }
 
         self.generator_cfg = {**default_generator_cfg, **(generator_cfg or {})}
@@ -66,6 +69,7 @@ class DriftingMoleculeGenerator(LightningModule):
         self.loss_variant = self.drift_cfg["loss_variant"]
         self.atom_type_temp = self.drift_cfg.get("atom_type_temp", 1.0)
         self.n_gen_molecules = self.drift_cfg.get("n_gen_molecules", 64)
+        self.atom_type_loss_weight = self.drift_cfg.get("atom_type_loss_weight", 1.0)
         self.pos_clamp = self.generator_cfg["pos_clamp"]
         self.pos_clamp_type = self.generator_cfg["pos_clamp_type"]
         self.c_pos_clamp = self.generator_cfg["c_pos_clamp"]
@@ -216,7 +220,7 @@ class DriftingMoleculeGenerator(LightningModule):
             )
 
     def training_step(self, batch, batch_idx):
-        pos_gen, _, phi_gen, phi_real, gen_batch_vec = self._forward(batch)
+        pos_gen, gen_atom_types, phi_gen, phi_real, gen_batch_vec = self._forward(batch)
 
         if not (torch.isfinite(phi_gen).all() and torch.isfinite(phi_real).all()):
             with torch.no_grad():
@@ -266,6 +270,21 @@ class DriftingMoleculeGenerator(LightningModule):
         bs = self.n_gen_molecules
         self.log("train_loss", loss, batch_size=bs, on_step=True, on_epoch=True)
 
+        if self.atom_type_loss_weight > 0.0:
+            gen_type_dist = gen_atom_types.float().mean(dim=0)  # [5], STE grad
+            real_type_dist = batch.real_atom_types.float().mean(dim=0).detach()  # [5]
+            atom_type_loss = F.kl_div(
+                (gen_type_dist + 1e-8).log(), real_type_dist, reduction="sum"
+            )
+            loss = loss + self.atom_type_loss_weight * atom_type_loss
+            self.log(
+                "train/atom_type_loss",
+                atom_type_loss,
+                batch_size=bs,
+                on_step=True,
+                on_epoch=False,
+            )
+
         hist_stats = {k: v for k, v in stats.items() if isinstance(v, wandb.Histogram)}
         for key, val in stats.items():
             if key in hist_stats:
@@ -307,6 +326,22 @@ class DriftingMoleculeGenerator(LightningModule):
     def validation_step(self, batch, batch_idx):
         pos_gen, gen_atom_types, phi_gen, phi_real, gen_batch_vec = self._forward(batch)
         val_loss, stats = self._compute_loss(phi_gen, phi_real)
+
+        if self.atom_type_loss_weight > 0.0:
+            gen_type_dist = gen_atom_types.float().mean(dim=0)
+            real_type_dist = batch.real_atom_types.float().mean(dim=0).detach()
+            atom_type_loss = F.kl_div(
+                (gen_type_dist + 1e-8).log(), real_type_dist, reduction="sum"
+            )
+            val_loss = val_loss + self.atom_type_loss_weight * atom_type_loss
+            self.log(
+                "val/atom_type_loss",
+                atom_type_loss,
+                batch_size=self.n_gen_molecules,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
 
         bs = self.n_gen_molecules
         self.log(

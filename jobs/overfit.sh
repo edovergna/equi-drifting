@@ -26,4 +26,5 @@ python train.py \
     --n_real_molecules 64 \
     --n_gen_molecules 64 \
     --hidden_dim 256 \
-    --num_layers 8
+    --num_layers 8 \
+    --atom_type_loss_weight 1.0
