@@ -212,4 +212,10 @@ def parse_args():
         default=1.0,
         help="Weight for the KL divergence atom-type distribution matching loss. 0 to disable.",
     )
+    parser.add_argument(
+        "--gradient_clip_val",
+        type=float,
+        default=0.1,
+        help="Maximum gradient norm for clipping. Lower values prevent exploding gradients.",
+    )
     return parser.parse_args()

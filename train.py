@@ -106,7 +106,7 @@ def main(args: argparse.Namespace):
             deterministic=deterministic,
             benchmark=benchmark,
             precision=precision,
-            gradient_clip_val=1.0,
+            gradient_clip_val=args.gradient_clip_val,
             gradient_clip_algorithm="norm",
             check_val_every_n_epoch=args.check_val_every_n_epoch,
             callbacks=callbacks,

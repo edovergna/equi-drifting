@@ -198,6 +198,11 @@ class DriftingMoleculeGenerator(LightningModule):
         phi_gen = torch.cat([phi_gen, norm_feat_gen], dim=-1)  # [G_gen,  513]
         phi_real = torch.cat([phi_real, norm_feat_real], dim=-1)  # [G_real, 513]
 
+        # Normalise to unit sphere so pairwise distances in the drift loss are
+        # always O(1) regardless of EPT embedding scale.
+        phi_gen = F.normalize(phi_gen, dim=-1)
+        phi_real = F.normalize(phi_real, dim=-1)
+
         return pos_gen, gen_atom_types, phi_gen, phi_real, gen_batch_vec
 
     def _compute_loss(
