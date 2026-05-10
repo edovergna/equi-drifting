@@ -152,7 +152,7 @@ class DriftingMoleculeGenerator(LightningModule):
             rescale = torch.tanh(norm / self.norm_pos_clamp) / (
                 norm / self.norm_pos_clamp + 1e-8
             )
-            if not self.trainer.sanity_checking and self.trainer.validating is False:
+            if not self.trainer.sanity_checking and self.trainer.training:
                 rescale.register_hook(
                     lambda g: setattr(self, "_norm_rescale_grad", g.abs().mean().item())
                 )
@@ -160,7 +160,7 @@ class DriftingMoleculeGenerator(LightningModule):
         else:  # geom
             norm = pos_gen.norm(dim=-1)
             rescale = 1 / (1 + (norm / self.c_pos_clamp) ** self.p_pos_clamp)
-            if not self.trainer.sanity_checking and self.trainer.validating is False:
+            if not self.trainer.sanity_checking and self.trainer.training:
                 rescale.register_hook(
                     lambda g: setattr(self, "_norm_rescale_grad", g.abs().mean().item())
                 )
@@ -273,9 +273,7 @@ class DriftingMoleculeGenerator(LightningModule):
         if self.atom_type_loss_weight > 0.0:
             gen_type_dist = gen_atom_types.float().mean(dim=0)  # [5], STE grad
             real_type_dist = batch.real_atom_types.float().mean(dim=0).detach()  # [5]
-            atom_type_loss = F.kl_div(
-                (gen_type_dist + 1e-8).log(), real_type_dist, reduction="sum"
-            )
+            atom_type_loss = F.mse_loss(gen_type_dist, real_type_dist)
             loss = loss + self.atom_type_loss_weight * atom_type_loss
             self.log(
                 "train/atom_type_loss",
@@ -330,9 +328,7 @@ class DriftingMoleculeGenerator(LightningModule):
         if self.atom_type_loss_weight > 0.0:
             gen_type_dist = gen_atom_types.float().mean(dim=0)
             real_type_dist = batch.real_atom_types.float().mean(dim=0).detach()
-            atom_type_loss = F.kl_div(
-                (gen_type_dist + 1e-8).log(), real_type_dist, reduction="sum"
-            )
+            atom_type_loss = F.mse_loss(gen_type_dist, real_type_dist)
             val_loss = val_loss + self.atom_type_loss_weight * atom_type_loss
             self.log(
                 "val/atom_type_loss",
