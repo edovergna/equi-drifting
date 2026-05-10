@@ -95,7 +95,9 @@ class QM9DataModule(pl.LightningDataModule):
             sys.modules.update(_rdkit_saved)
 
         if self.max_num_atoms is not None:
-            keep = [i for i, d in enumerate(dataset) if d.num_nodes <= self.max_num_atoms]
+            keep = [
+                i for i, d in enumerate(dataset) if d.num_nodes <= self.max_num_atoms
+            ]
             dataset = dataset.index_select(keep)
 
         n = len(dataset)
@@ -141,7 +143,7 @@ class QM9DataModule(pl.LightningDataModule):
         return DataLoader(
             self.val_set,
             batch_size=self.n_real_molecules,
-            shuffle=False,
+            shuffle=True,
             num_workers=self.num_workers,
             pin_memory=True,
             persistent_workers=self.num_workers > 0,
