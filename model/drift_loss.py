@@ -540,3 +540,15 @@ def _max_nodes_per_graph(batch_vec: torch.Tensor) -> int:
     graph_ids = torch.unique(batch_vec, sorted=True)
     counts = torch.stack([(batch_vec == graph_id).sum() for graph_id in graph_ids])
     return int(counts.max().item())
+
+
+def positions_to_flat_molecules(pos, batch_vec, max_nodes=19):
+    graph_ids = torch.unique(batch_vec, sorted=True)
+    out = pos.new_zeros((graph_ids.numel(), max_nodes, 3))
+
+    for i, graph_id in enumerate(graph_ids):
+        p = pos[batch_vec == graph_id]
+        n = min(p.shape[0], max_nodes)
+        out[i, :n] = p[:n]
+
+    return out.flatten(start_dim=1)
