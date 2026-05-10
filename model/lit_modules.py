@@ -152,7 +152,7 @@ class DriftingMoleculeGenerator(LightningModule):
             rescale = torch.tanh(norm / self.norm_pos_clamp) / (
                 norm / self.norm_pos_clamp + 1e-8
             )
-            if not self.trainer.sanity_checking and self.trainer.training:
+            if not self.trainer.sanity_checking and self.trainer.validating is False:
                 rescale.register_hook(
                     lambda g: setattr(self, "_norm_rescale_grad", g.abs().mean().item())
                 )
@@ -160,7 +160,7 @@ class DriftingMoleculeGenerator(LightningModule):
         else:  # geom
             norm = pos_gen.norm(dim=-1)
             rescale = 1 / (1 + (norm / self.c_pos_clamp) ** self.p_pos_clamp)
-            if not self.trainer.sanity_checking and self.trainer.training:
+            if not self.trainer.sanity_checking and self.trainer.validating is False:
                 rescale.register_hook(
                     lambda g: setattr(self, "_norm_rescale_grad", g.abs().mean().item())
                 )
@@ -224,17 +224,13 @@ class DriftingMoleculeGenerator(LightningModule):
 
         if not (torch.isfinite(phi_gen).all() and torch.isfinite(phi_real).all()):
             with torch.no_grad():
-                bad_gen_mask = ~torch.isfinite(phi_gen).all(dim=-1)  # [num_graphs]
-                bad_real_mask = ~torch.isfinite(phi_real).all(dim=-1)
-                bad_mol_mask = bad_gen_mask | bad_real_mask
+                bad_gen_mask = ~torch.isfinite(phi_gen).all(dim=-1)  # [n_gen]
+                bad_real_mask = ~torch.isfinite(phi_real).all(dim=-1)  # [n_real]
 
                 n_bad_gen = bad_gen_mask.sum().item()
                 n_bad_real = bad_real_mask.sum().item()
-                n_total = bad_mol_mask.shape[0]
 
-                atom_mask = bad_mol_mask[gen_batch_vec]
-                pos_bad = pos_gen[atom_mask]
-
+                pos_bad = pos_gen[bad_gen_mask[gen_batch_vec]]
                 pos_norms_bad = pos_bad.norm(dim=-1)
                 max_dist_bad = (
                     torch.cdist(pos_bad, pos_bad).max()
@@ -244,16 +240,15 @@ class DriftingMoleculeGenerator(LightningModule):
 
                 gen_center_norms = per_graph_center_norms(pos_gen, gen_batch_vec)
                 real_center_norms = per_graph_center_norms(batch.pos, batch.batch)
-                bad_gen_cn = gen_center_norms[bad_mol_mask]
-                bad_real_cn = real_center_norms[bad_mol_mask]
 
                 self.print(
                     f"\n[Step {self.global_step}] Non-finite embeddings — "
-                    f"{n_bad_gen} gen mol(s), {n_bad_real} real mol(s) out of {n_total}.\n"
-                    f"  [bad mols] pos_gen norm   mean={pos_norms_bad.mean():.3f}  std={pos_norms_bad.std():.3f}\n"
-                    f"  [bad mols] max pairwise dist={max_dist_bad:.3f}\n"
-                    f"  [bad mols] gen center norm  mean={bad_gen_cn.mean():.3f}  std={bad_gen_cn.std():.3f}\n"
-                    f"  [bad mols] real center norm mean={bad_real_cn.mean():.3f}  std={bad_real_cn.std():.3f}\n"
+                    f"{n_bad_gen}/{bad_gen_mask.shape[0]} gen mol(s), "
+                    f"{n_bad_real}/{bad_real_mask.shape[0]} real mol(s).\n"
+                    f"  [bad gen mols] pos norm mean={pos_norms_bad.mean():.3f}  std={pos_norms_bad.std():.3f}\n"
+                    f"  [bad gen mols] max pairwise dist={max_dist_bad:.3f}\n"
+                    f"  gen center norm  mean={gen_center_norms.mean():.3f}  std={gen_center_norms.std():.3f}\n"
+                    f"  real center norm mean={real_center_norms.mean():.3f}  std={real_center_norms.std():.3f}\n"
                     f"  Stopping."
                 )
 
@@ -273,7 +268,9 @@ class DriftingMoleculeGenerator(LightningModule):
         if self.atom_type_loss_weight > 0.0:
             gen_type_dist = gen_atom_types.float().mean(dim=0)  # [5], STE grad
             real_type_dist = batch.real_atom_types.float().mean(dim=0).detach()  # [5]
-            atom_type_loss = F.mse_loss(gen_type_dist, real_type_dist)
+            atom_type_loss = F.kl_div(
+                (gen_type_dist + 1e-8).log(), real_type_dist, reduction="sum"
+            )
             loss = loss + self.atom_type_loss_weight * atom_type_loss
             self.log(
                 "train/atom_type_loss",
@@ -328,7 +325,9 @@ class DriftingMoleculeGenerator(LightningModule):
         if self.atom_type_loss_weight > 0.0:
             gen_type_dist = gen_atom_types.float().mean(dim=0)
             real_type_dist = batch.real_atom_types.float().mean(dim=0).detach()
-            atom_type_loss = F.mse_loss(gen_type_dist, real_type_dist)
+            atom_type_loss = F.kl_div(
+                (gen_type_dist + 1e-8).log(), real_type_dist, reduction="sum"
+            )
             val_loss = val_loss + self.atom_type_loss_weight * atom_type_loss
             self.log(
                 "val/atom_type_loss",
