@@ -149,20 +149,29 @@ def check_equivariance(label, phi_equiv_orig, phi_equiv_transformed, R, atol):
     """
     Check that phi_equiv transforms as phi_equiv(R·pos) = R·phi_equiv(pos).
     R: [3, 3] rotation matrix applied to positions.
-    Returns True if all molecules pass.
+
+    For molecules with near-zero phi_equiv (high symmetry, e.g. CH4) the
+    relative error is meaningless — use absolute tolerance instead.
     """
     passed = True
     for g_idx in range(phi_equiv_orig.shape[0]):
         expected = phi_equiv_orig[g_idx] @ R.T  # R · v  (row-vec convention: v @ R^T)
         diff = (phi_equiv_transformed[g_idx] - expected).norm().item()
         denom = phi_equiv_orig[g_idx].norm().item()
-        rel = diff / (denom + 1e-12)
-        ok = rel < atol
+        # If the equivariant vector is near-zero (symmetric molecule), the
+        # absolute error is the only meaningful measure.
+        if denom < atol:
+            ok = diff < atol
+            note = " [near-zero vector — using abs tol]"
+        else:
+            rel = diff / denom
+            ok = rel < atol
+            note = f"  rel={rel:.2e}"
         status = "PASS" if ok else "FAIL"
         print(
             f"    [{status}] mol[{MOLECULE_INDICES[g_idx]}]  "
             f"|phi_equiv(R·pos) - R·phi_equiv(pos)|={diff:.2e}  "
-            f"|phi_equiv|={denom:.4f}  rel={rel:.2e}"
+            f"|phi_equiv|={denom:.4f}{note}"
         )
         if not ok:
             passed = False

@@ -132,16 +132,18 @@ class EPTFeatureExtractor(nn.Module):
             edges=dense_edge_index,
             edge_attr=edge_attr,
         )
-        # V_out: [N, 3] equivariant per-atom updated positions (final_v output + pos)
-        # H_atoms: [N, D] invariant per-atom scalar features from the last transformer layer
+        # V_out: [N, 3] = V (equivariant displacement) + pos  (the encoder adds pos as a residual).
+        # V itself is built from pairwise differences (Z[i] - Z[j]) so it is
+        # translation-invariant and rotation-equivariant.  We subtract pos to recover V.
+        V = V_out - pos  # [N, 3], equivariant displacement, translation-invariant
 
         # Molecule-level equivariant vector.
         # w_i = ||H_atoms_i|| is a positive invariant scalar per atom.
-        # A normalised weighted sum of equivariant vectors is itself equivariant:
+        # Normalised weighted sum of equivariant vectors is itself equivariant:
         #   phi_equiv(R·pos) = R · phi_equiv(pos)
         w = H_atoms.norm(dim=-1, keepdim=True)  # [N, 1], invariant
         w_sum = global_add_pool(w, batch_id)  # [G, 1]
         w_norm = w / (w_sum[batch_id] + 1e-8)  # [N, 1], per-graph normalised
-        phi_equiv = global_add_pool(w_norm * V_out, batch_id)  # [G, 3], equivariant
+        phi_equiv = global_add_pool(w_norm * V, batch_id)  # [G, 3], equivariant
 
         return graph_repr, phi_equiv
