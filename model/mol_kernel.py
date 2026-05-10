@@ -359,7 +359,10 @@ def molecule_kernel(
     Pr = r["d"].shape[0]
 
     if Pg == 0 or Pr == 0:
-        return torch.zeros(n_gen, n_real, device=device)
+        # Keep the tensor connected to the inputs so downstream autograd.grad()
+        # calls receive a valid graph even when a batch has no triplet
+        # descriptors (e.g. molecules with fewer than 3 atoms).
+        return pos_gen.new_zeros(n_gen, n_real) + 0.0 * (pos_gen.sum() + x_gen.sum())
 
     # ============================================================
     # Geometric kernel

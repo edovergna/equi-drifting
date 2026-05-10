@@ -286,24 +286,30 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
         self._val_hist_stats = {}
 
     def test_step(self, batch, batch_idx):
-        pos_gen, x_gen, gen_batch_vec = self._forward(batch)
-        pos_real, x_real = batch.pos, batch.real_atom_types
-        
-        test_loss, _ = compute_molecule_based_drift_loss(
-            pos_gen,
-            x_gen,
-            pos_real,
-            x_real,
-            gen_index=gen_batch_vec,
-            real_index=batch.batch,
-            eps=self.eps,
-            sigma_r=self.drift_cfg["sigma_r"],
-            sigma_a=self.drift_cfg["sigma_a"],
-            eta_pos=self.drift_cfg["eta_pos"],
-            eta_type=self.drift_cfg["eta_type"],
-            weight_pos=self.drift_cfg["weight_pos"],
-            weight_type=self.drift_cfg["weight_type"],
-        )
+        # Lightning's test loop may run under inference_mode, which prevents
+        # autograd graph construction even if the loss uses torch.enable_grad().
+        # Explicitly disable inference mode here so the drift-loss gradients are
+        # available for autograd.grad() inside the molecule-based test objective.
+        with torch.inference_mode(False):
+            with torch.enable_grad():
+                pos_gen, x_gen, gen_batch_vec = self._forward(batch)
+                pos_real, x_real = batch.pos, batch.real_atom_types
+
+                test_loss, _ = compute_molecule_based_drift_loss(
+                    pos_gen,
+                    x_gen,
+                    pos_real,
+                    x_real,
+                    gen_index=gen_batch_vec,
+                    real_index=batch.batch,
+                    eps=self.eps,
+                    sigma_r=self.drift_cfg["sigma_r"],
+                    sigma_a=self.drift_cfg["sigma_a"],
+                    eta_pos=self.drift_cfg["eta_pos"],
+                    eta_type=self.drift_cfg["eta_type"],
+                    weight_pos=self.drift_cfg["weight_pos"],
+                    weight_type=self.drift_cfg["weight_type"],
+                )
 
         bs = batch_size_for_logging(batch)
         self.log(

@@ -1,22 +1,22 @@
 #!/bin/bash
 
-#SBATCH --partition=gpu_mig
+#SBATCH --partition=gpu_a100
 #SBATCH --gpus=1
 #SBATCH --job-name=drift_diag
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
-#SBATCH --time=02:00:00
+#SBATCH --time=01:00:00
 #SBATCH --output=slurm_drift_diag_%A.out
 
 module purge
 module load 2025
 module load Anaconda3/2025.06-1
-conda activate equiv
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate equi
 
 cd "$HOME/drifting-experiments"
 
 python train.py \
-  --offline \
   --group_tag drift-diagnostic \
   --sample_frac 0.05 \
   --batch_size 32 \
