@@ -237,6 +237,18 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--phi_mode",
+        type=str,
+        default="graph_repr",
+        choices=["graph_repr", "moments"],
+        help=(
+            "How to build the per-molecule fingerprint for the drift loss: "
+            "'graph_repr' (EPT variance-preserving sum, 512-dim, legacy), "
+            "'moments' (mean+std of per-atom H_atoms, 1024-dim; implicitly encodes "
+            "valence/geometry via EPT pretraining)."
+        ),
+    )
+    parser.add_argument(
         "--valence_loss_weight",
         type=float,
         default=1.0,

@@ -75,6 +75,7 @@ def main(args: argparse.Namespace):
             "atom_type_loss_weight": args.atom_type_loss_weight,
             "geom_loss_weight": args.geom_loss_weight,
             "valence_loss_weight": args.valence_loss_weight,
+            "phi_mode": args.phi_mode,
             "equiv_phi_mode": args.equiv_phi_mode,
         }
 

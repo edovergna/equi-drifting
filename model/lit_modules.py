@@ -8,6 +8,7 @@ from lightning.pytorch import LightningModule
 from torch.optim.lr_scheduler import OneCycleLR
 
 from ept.ept_loader import load_ept_feature_extractor
+from torch_geometric.nn import global_mean_pool
 
 from .drift_loss import (
     TrainingDivergedException,
@@ -60,6 +61,12 @@ class DriftingMoleculeGenerator(LightningModule):
             # Soft valence loss: penalise wrong bond counts per atom type.
             # Directly targets validity. Anneals naturally alongside geom_loss.
             "valence_loss_weight": 1.0,
+            # How to build the per-molecule fingerprint fed to the drift loss:
+            #   'graph_repr' — EPT's variance-preserving sum of atom features [G, 512] (default/legacy)
+            #   'moments'    — cat(mean(H_atoms), std(H_atoms)) per graph [G, 1024];
+            #                  captures atom-type distribution + chemical diversity;
+            #                  implicitly encodes valence/geometry without auxiliary losses
+            "phi_mode": "graph_repr",
             # How to append the equivariant output to the fingerprint:
             #   'norm'   — append ||phi_equiv|| (1 scalar, SE(3)-invariant) [default]
             #   'vector' — append phi_equiv as 3 raw components (equivariant, orientation-dependent)
@@ -84,6 +91,7 @@ class DriftingMoleculeGenerator(LightningModule):
         self.atom_type_loss_weight = self.drift_cfg.get("atom_type_loss_weight", 1.0)
         self.geom_loss_weight = self.drift_cfg.get("geom_loss_weight", 1.0)
         self.valence_loss_weight = self.drift_cfg.get("valence_loss_weight", 1.0)
+        self.phi_mode = self.drift_cfg.get("phi_mode", "graph_repr")
         self.equiv_phi_mode = self.drift_cfg.get("equiv_phi_mode", "norm")
         self.pos_clamp = self.generator_cfg["pos_clamp"]
         self.pos_clamp_type = self.generator_cfg["pos_clamp_type"]
@@ -185,31 +193,48 @@ class DriftingMoleculeGenerator(LightningModule):
 
         # EPT expects block_id[i] = block index for atom i (each atom is its own block,
         # so block index = atom index), and batch_id[j] = graph index for block j.
-        # feature_extractor returns (graph_repr [G, D], phi_equiv [G, 3])
-        phi_gen, phi_gen_equiv = self.feature_extractor(
+        # feature_extractor returns (graph_repr [G, D], phi_equiv [G, 3], H_atoms [N, D])
+        phi_gen_base, phi_gen_equiv, H_gen = self.feature_extractor(
             pos=pos_gen,
             atom_types=gen_atom_types,
             block_id=torch.arange(pos_gen.shape[0], device=self.device),
             batch_id=gen_batch_vec,
             dense_edge_index=gen_dense_edge_index,
         )
-        phi_real, phi_real_equiv = self.feature_extractor(
+        phi_real_base, phi_real_equiv, H_real = self.feature_extractor(
             pos=batch.pos,
             atom_types=batch.real_atom_types,
             block_id=torch.arange(batch.num_nodes, device=batch.batch.device),
             batch_id=batch.batch,
             dense_edge_index=batch.dense_edge_index,
         )
+
+        # Build per-molecule fingerprint according to phi_mode.
+        if self.phi_mode == "moments":
+            # mean(H) + std(H) per graph: [G, 2D=1024].
+            # Captures atom-type distribution (mean) and chemical diversity (std).
+            # EPT already encoded valence & geometry into H_atoms during pretraining,
+            # so this implicitly enforces chemistry without auxiliary losses.
+            mean_gen = global_mean_pool(H_gen, gen_batch_vec)  # [G_gen,  D]
+            mean_sq_gen = global_mean_pool(H_gen.pow(2), gen_batch_vec)
+            std_gen = (mean_sq_gen - mean_gen.pow(2)).clamp(min=0).sqrt()
+            phi_gen = torch.cat([mean_gen, std_gen], dim=-1)  # [G_gen,  2D]
+
+            mean_real = global_mean_pool(H_real, batch.batch)  # [G_real, D]
+            mean_sq_real = global_mean_pool(H_real.pow(2), batch.batch)
+            std_real = (mean_sq_real - mean_real.pow(2)).clamp(min=0).sqrt()
+            phi_real = torch.cat([mean_real, std_real], dim=-1)  # [G_real, 2D]
+        else:
+            # 'graph_repr': legacy variance-preserving sum [G, D=512]
+            phi_gen = phi_gen_base
+            phi_real = phi_real_base
+
         # Append equivariant information to the fingerprint according to equiv_phi_mode.
         norm_scale = phi_real_equiv.norm(dim=-1).mean().clamp(min=1e-3).detach()
         if self.equiv_phi_mode == "vector":
             # Raw 3D equivariant vector — orientation-dependent but carries directional signal.
-            phi_gen = torch.cat(
-                [phi_gen, phi_gen_equiv / norm_scale], dim=-1
-            )  # [G_gen,  515]
-            phi_real = torch.cat(
-                [phi_real, phi_real_equiv / norm_scale], dim=-1
-            )  # [G_real, 515]
+            phi_gen = torch.cat([phi_gen, phi_gen_equiv / norm_scale], dim=-1)
+            phi_real = torch.cat([phi_real, phi_real_equiv / norm_scale], dim=-1)
         elif self.equiv_phi_mode == "norm":
             # SE(3)-invariant scalar: norm of the equivariant vector.
             norm_feat_gen = (
@@ -218,8 +243,8 @@ class DriftingMoleculeGenerator(LightningModule):
             norm_feat_real = (
                 phi_real_equiv.norm(dim=-1, keepdim=True) / norm_scale
             )  # [G_real, 1]
-            phi_gen = torch.cat([phi_gen, norm_feat_gen], dim=-1)  # [G_gen,  513]
-            phi_real = torch.cat([phi_real, norm_feat_real], dim=-1)  # [G_real, 513]
+            phi_gen = torch.cat([phi_gen, norm_feat_gen], dim=-1)
+            phi_real = torch.cat([phi_real, norm_feat_real], dim=-1)
         # else 'off': leave phi unchanged (ablation)
 
         # Normalise to unit sphere so pairwise distances in the drift loss are
@@ -252,10 +277,10 @@ class DriftingMoleculeGenerator(LightningModule):
             n = p.shape[0]
             if n < 2:
                 continue
-            # Safe pairwise distances: sqrt(||p_i - p_j||² + ε).
-            # torch.cdist has undefined gradient at d=0; this avoids NaN.
+            # Safe pairwise distances: avoids NaN gradient of torch.cdist at d=0.
+            # eps=1e-2 bounds the position gradient to ≤1/sqrt(eps)=10 even when atoms coincide.
             diff = p.unsqueeze(1) - p.unsqueeze(0)  # [N_g, N_g, 3]
-            dists = (diff.pow(2).sum(dim=-1) + 1e-8).sqrt()  # [N_g, N_g]
+            dists = (diff.pow(2).sum(dim=-1) + 1e-2).sqrt()  # [N_g, N_g]
             eye = torch.eye(n, device=p.device, dtype=torch.bool)
             pair_dists = dists[~eye]  # [N_g*(N_g-1)]
 
@@ -280,7 +305,7 @@ class DriftingMoleculeGenerator(LightningModule):
         atom_types: torch.Tensor,
         batch_vec: torch.Tensor,
         bond_factor: float = 1.3,
-        temperature: float = 0.1,
+        temperature: float = 0.3,
     ) -> torch.Tensor:
         """Differentiable soft-valence loss.
 
@@ -315,8 +340,9 @@ class DriftingMoleculeGenerator(LightningModule):
                 continue
 
             # Safe pairwise distances: avoids NaN gradient of torch.cdist at d=0.
+            # eps=1e-2 bounds the position gradient to ≤1/sqrt(eps)=10 even when atoms coincide.
             diff = p.unsqueeze(1) - p.unsqueeze(0)  # [N_g, N_g, 3]
-            dists = (diff.pow(2).sum(dim=-1) + 1e-8).sqrt()  # [N_g, N_g]
+            dists = (diff.pow(2).sum(dim=-1) + 1e-2).sqrt()  # [N_g, N_g]
             # Bond threshold matrix: d < bond_factor * (r_i + r_j)
             bond_thresh = bond_factor * (r.unsqueeze(1) + r.unsqueeze(0))  # [N_g, N_g]
             # Soft bond count per atom: sigmoid so gradient flows through distances
@@ -353,36 +379,16 @@ class DriftingMoleculeGenerator(LightningModule):
 
         if not (torch.isfinite(phi_gen).all() and torch.isfinite(phi_real).all()):
             with torch.no_grad():
-                bad_gen_mask = ~torch.isfinite(phi_gen).all(dim=-1)  # [n_gen]
-                bad_real_mask = ~torch.isfinite(phi_real).all(dim=-1)  # [n_real]
-
+                bad_gen_mask = ~torch.isfinite(phi_gen).all(dim=-1)
                 n_bad_gen = bad_gen_mask.sum().item()
-                n_bad_real = bad_real_mask.sum().item()
-
-                pos_bad = pos_gen[bad_gen_mask[gen_batch_vec]]
-                pos_norms_bad = pos_bad.norm(dim=-1)
-                max_dist_bad = (
-                    torch.cdist(pos_bad, pos_bad).max()
-                    if pos_bad.shape[0] > 1
-                    else pos_bad.new_tensor(0.0)
-                )
-
-                gen_center_norms = per_graph_center_norms(pos_gen, gen_batch_vec)
-                real_center_norms = per_graph_center_norms(batch.pos, batch.batch)
-
+                n_bad_real = (~torch.isfinite(phi_real).all(dim=-1)).sum().item()
                 self.print(
                     f"\n[Step {self.global_step}] Non-finite embeddings — "
-                    f"{n_bad_gen}/{bad_gen_mask.shape[0]} gen mol(s), "
-                    f"{n_bad_real}/{bad_real_mask.shape[0]} real mol(s).\n"
-                    f"  [bad gen mols] pos norm mean={pos_norms_bad.mean():.3f}  std={pos_norms_bad.std():.3f}\n"
-                    f"  [bad gen mols] max pairwise dist={max_dist_bad:.3f}\n"
-                    f"  gen center norm  mean={gen_center_norms.mean():.3f}  std={gen_center_norms.std():.3f}\n"
-                    f"  real center norm mean={real_center_norms.mean():.3f}  std={real_center_norms.std():.3f}\n"
-                    f"  Stopping."
+                    f"{n_bad_gen}/{bad_gen_mask.shape[0]} gen, "
+                    f"{n_bad_real}/{phi_real.shape[0]} real. Skipping step."
                 )
-
-            self.trainer.should_stop = True
-            return torch.tensor(0.0, device=self.device, requires_grad=True)
+                self.log("train/nan_skip", 1.0, on_step=True, on_epoch=False)
+            return None
 
         try:
             loss, stats = self._compute_loss(phi_gen, phi_real)

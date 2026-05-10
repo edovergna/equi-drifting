@@ -146,4 +146,4 @@ class EPTFeatureExtractor(nn.Module):
         w_norm = w / (w_sum[batch_id] + 1e-8)  # [N, 1], per-graph normalised
         phi_equiv = global_add_pool(w_norm * V, batch_id)  # [G, 3], equivariant
 
-        return graph_repr, phi_equiv
+        return graph_repr, phi_equiv, H_atoms
