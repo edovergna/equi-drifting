@@ -57,6 +57,11 @@ class DriftingMoleculeGenerator(LightningModule):
             # Overlap term: pairs closer than 0.7 Å.
             # Isolation term: atoms with no neighbour within 2.5 Å.
             "geom_loss_weight": 1.0,
+            # How to append the equivariant output to the fingerprint:
+            #   'norm'   — append ||phi_equiv|| (1 scalar, SE(3)-invariant) [default]
+            #   'vector' — append phi_equiv as 3 raw components (equivariant, orientation-dependent)
+            #   'off'    — do not append anything (ablation)
+            "equiv_phi_mode": "norm",
         }
 
         self.generator_cfg = {**default_generator_cfg, **(generator_cfg or {})}
@@ -75,6 +80,7 @@ class DriftingMoleculeGenerator(LightningModule):
         self.n_gen_molecules = self.drift_cfg.get("n_gen_molecules", 64)
         self.atom_type_loss_weight = self.drift_cfg.get("atom_type_loss_weight", 1.0)
         self.geom_loss_weight = self.drift_cfg.get("geom_loss_weight", 1.0)
+        self.equiv_phi_mode = self.drift_cfg.get("equiv_phi_mode", "norm")
         self.pos_clamp = self.generator_cfg["pos_clamp"]
         self.pos_clamp_type = self.generator_cfg["pos_clamp_type"]
         self.c_pos_clamp = self.generator_cfg["c_pos_clamp"]
@@ -190,18 +196,27 @@ class DriftingMoleculeGenerator(LightningModule):
             batch_id=batch.batch,
             dense_edge_index=batch.dense_edge_index,
         )
-        # Approach B: append the normalised phi_equiv norm as a 513th feature.
-        # norm_scale is derived from the real molecules (detached — just a constant).
-        # phi_gen_equiv.norm() remains differentiable so gradients flow to pos_gen.
+        # Append equivariant information to the fingerprint according to equiv_phi_mode.
         norm_scale = phi_real_equiv.norm(dim=-1).mean().clamp(min=1e-3).detach()
-        norm_feat_gen = (
-            phi_gen_equiv.norm(dim=-1, keepdim=True) / norm_scale
-        )  # [G_gen,  1]
-        norm_feat_real = (
-            phi_real_equiv.norm(dim=-1, keepdim=True) / norm_scale
-        )  # [G_real, 1]
-        phi_gen = torch.cat([phi_gen, norm_feat_gen], dim=-1)  # [G_gen,  513]
-        phi_real = torch.cat([phi_real, norm_feat_real], dim=-1)  # [G_real, 513]
+        if self.equiv_phi_mode == "vector":
+            # Raw 3D equivariant vector — orientation-dependent but carries directional signal.
+            phi_gen = torch.cat(
+                [phi_gen, phi_gen_equiv / norm_scale], dim=-1
+            )  # [G_gen,  515]
+            phi_real = torch.cat(
+                [phi_real, phi_real_equiv / norm_scale], dim=-1
+            )  # [G_real, 515]
+        elif self.equiv_phi_mode == "norm":
+            # SE(3)-invariant scalar: norm of the equivariant vector.
+            norm_feat_gen = (
+                phi_gen_equiv.norm(dim=-1, keepdim=True) / norm_scale
+            )  # [G_gen,  1]
+            norm_feat_real = (
+                phi_real_equiv.norm(dim=-1, keepdim=True) / norm_scale
+            )  # [G_real, 1]
+            phi_gen = torch.cat([phi_gen, norm_feat_gen], dim=-1)  # [G_gen,  513]
+            phi_real = torch.cat([phi_real, norm_feat_real], dim=-1)  # [G_real, 513]
+        # else 'off': leave phi unchanged (ablation)
 
         # Normalise to unit sphere so pairwise distances in the drift loss are
         # always O(1) regardless of EPT embedding scale.

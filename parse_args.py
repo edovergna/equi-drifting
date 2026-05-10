@@ -224,4 +224,16 @@ def parse_args():
         default=1.0,
         help="Weight for the geometry loss (overlap + isolation penalty on 3D positions). 0 to disable.",
     )
+    parser.add_argument(
+        "--equiv_phi_mode",
+        type=str,
+        default="norm",
+        choices=["norm", "vector", "off"],
+        help=(
+            "How to append the equivariant EPT output to the fingerprint: "
+            "'norm' (SE(3)-invariant scalar norm), "
+            "'vector' (raw 3D equivariant components, orientation-dependent), "
+            "'off' (ablation: no equivariant information)."
+        ),
+    )
     return parser.parse_args()
