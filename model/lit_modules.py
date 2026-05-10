@@ -16,8 +16,7 @@ from .drift_loss import (
     original_compute_drift_loss,
 )
 from .egnn import EGNN
-from .geometry import (batch_size_for_logging, center_positions_per_graph,
-                       per_graph_center_norms)
+from .geometry import (center_positions_per_graph, per_graph_center_norms)
 from .sample_prior import compute_size_distribution, sample_prior_batch
 
 
@@ -66,6 +65,7 @@ class DriftingMoleculeGenerator(LightningModule):
         self.temperatures = self.drift_cfg["temperatures"]
         self.loss_variant = self.drift_cfg["loss_variant"]
         self.atom_type_temp = self.drift_cfg.get("atom_type_temp", 1.0)
+        self.n_gen_molecules = self.drift_cfg.get("n_gen_molecules", 64)
         self.pos_clamp = self.generator_cfg["pos_clamp"]
         self.pos_clamp_type = self.generator_cfg["pos_clamp_type"]
         self.c_pos_clamp = self.generator_cfg["c_pos_clamp"]
@@ -131,9 +131,8 @@ class DriftingMoleculeGenerator(LightningModule):
 
     def _forward(self, batch):
         """Shared forward pass: prior → EGNN → center → hard atoms → EPT embeddings."""
-        n_molecules = batch_size_for_logging(batch)
         x_prior, pos_prior, gen_batch_vec, gen_dense_edge_index = (
-            self._sample_prior_batch(n_molecules)
+            self._sample_prior_batch(self.n_gen_molecules)
         )
 
         x_gen, _, pos_gen = self.generator(x_prior, pos_prior, gen_dense_edge_index)
@@ -145,13 +144,13 @@ class DriftingMoleculeGenerator(LightningModule):
         elif self.pos_clamp_type == "tanh":
             norm = pos_gen.norm(dim=-1, keepdim=True)
             rescale = torch.tanh(norm / self.norm_pos_clamp) / (norm / self.norm_pos_clamp + 1e-8)
-            if not self.trainer.sanity_checking:
+            if not self.trainer.sanity_checking and self.trainer.validating is False:
                 rescale.register_hook(lambda g: setattr(self, "_norm_rescale_grad", g.abs().mean().item()))
             pos_gen = pos_gen * rescale
         else:  # geom
             norm = pos_gen.norm(dim=-1)
             rescale = 1 / (1 + (norm / self.c_pos_clamp) ** self.p_pos_clamp)
-            if not self.trainer.sanity_checking:
+            if not self.trainer.sanity_checking and self.trainer.validating is False:
                 rescale.register_hook(lambda g: setattr(self, "_norm_rescale_grad", g.abs().mean().item()))
             pos_gen = pos_gen * rescale.unsqueeze(-1)
         # gen_atom_types = x_gen.softmax(dim=-1).argmax(dim=-1)
@@ -237,7 +236,7 @@ class DriftingMoleculeGenerator(LightningModule):
             self.trainer.should_stop = True
             return torch.tensor(0.0, device=self.device, requires_grad=True)
 
-        bs = batch_size_for_logging(batch)
+        bs = self.n_gen_molecules
         self.log("train_loss", loss, batch_size=bs, on_step=True, on_epoch=True)
 
         hist_stats = {k: v for k, v in stats.items() if isinstance(v, wandb.Histogram)}
@@ -282,7 +281,7 @@ class DriftingMoleculeGenerator(LightningModule):
         pos_gen, gen_atom_types, phi_gen, phi_real, gen_batch_vec = self._forward(batch)
         val_loss, stats = self._compute_loss(phi_gen, phi_real)
 
-        bs = batch_size_for_logging(batch)
+        bs = self.n_gen_molecules
         self.log(
             "val_loss",
             val_loss,
@@ -349,7 +348,7 @@ class DriftingMoleculeGenerator(LightningModule):
         _, _, phi_gen, phi_real, _ = self._forward(batch)
         test_loss, _ = self._compute_loss(phi_gen, phi_real)
 
-        bs = batch_size_for_logging(batch)
+        bs = self.n_gen_molecules
         self.log(
             "test_loss",
             test_loss,

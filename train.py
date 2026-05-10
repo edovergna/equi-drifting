@@ -44,10 +44,11 @@ def main(args: argparse.Namespace):
     try:
         datamodule = QM9DataModule(
             root=args.root,
-            batch_size=args.batch_size,
-            num_workers=args.num_workers,
+            n_real_molecules=args.n_real_molecules,
+            num_workers=min(args.num_workers, args.n_real_molecules),
             force_reload=args.force_reload,
             sample_frac=args.sample_frac,
+            max_num_atoms=args.max_num_atoms,
         )
 
         generator_cfg = {
@@ -70,6 +71,7 @@ def main(args: argparse.Namespace):
             "temperatures": args.temperatures,
             "loss_variant": args.loss_variant,
             "atom_type_temp": args.atom_type_temp,
+            "n_gen_molecules": args.n_gen_molecules,
         }
 
         model = DriftingMoleculeGenerator(generator_cfg, drift_cfg)
@@ -86,7 +88,9 @@ def main(args: argparse.Namespace):
             GradientMonitorCallback(),
             EmbeddingMonitorCallback(),
             MoleculeVisualizationCallback(
-                n_molecules=4, bond_threshold=2.0, every_n_epochs=1
+                n_molecules=min(4, args.n_real_molecules),
+                bond_threshold=2.0,
+                every_n_epochs=1,
             ),
             ChemicalValidityCallback(),
             # SizeDistributionCallback(),
