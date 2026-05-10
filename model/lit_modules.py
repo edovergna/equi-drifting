@@ -181,15 +181,20 @@ class DriftingMoleculeGenerator(LightningModule):
             batch_id=batch.batch,
             dense_edge_index=batch.dense_edge_index,
         )
-        return (
-            pos_gen,
-            gen_atom_types,
-            phi_gen,
-            phi_real,
-            gen_batch_vec,
-            phi_gen_equiv,
-            phi_real_equiv,
-        )
+        # Approach B: append the normalised phi_equiv norm as a 513th feature.
+        # norm_scale is derived from the real molecules (detached — just a constant).
+        # phi_gen_equiv.norm() remains differentiable so gradients flow to pos_gen.
+        norm_scale = phi_real_equiv.norm(dim=-1).mean().clamp(min=1e-3).detach()
+        norm_feat_gen = (
+            phi_gen_equiv.norm(dim=-1, keepdim=True) / norm_scale
+        )  # [G_gen,  1]
+        norm_feat_real = (
+            phi_real_equiv.norm(dim=-1, keepdim=True) / norm_scale
+        )  # [G_real, 1]
+        phi_gen = torch.cat([phi_gen, norm_feat_gen], dim=-1)  # [G_gen,  513]
+        phi_real = torch.cat([phi_real, norm_feat_real], dim=-1)  # [G_real, 513]
+
+        return pos_gen, gen_atom_types, phi_gen, phi_real, gen_batch_vec
 
     def _compute_loss(
         self, phi_gen: torch.Tensor, phi_real: torch.Tensor
@@ -211,9 +216,7 @@ class DriftingMoleculeGenerator(LightningModule):
             )
 
     def training_step(self, batch, batch_idx):
-        pos_gen, _, phi_gen, phi_real, gen_batch_vec, phi_gen_equiv, phi_real_equiv = (
-            self._forward(batch)
-        )
+        pos_gen, _, phi_gen, phi_real, gen_batch_vec = self._forward(batch)
 
         if not (torch.isfinite(phi_gen).all() and torch.isfinite(phi_real).all()):
             with torch.no_grad():
@@ -302,15 +305,7 @@ class DriftingMoleculeGenerator(LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        (
-            pos_gen,
-            gen_atom_types,
-            phi_gen,
-            phi_real,
-            gen_batch_vec,
-            phi_gen_equiv,
-            phi_real_equiv,
-        ) = self._forward(batch)
+        pos_gen, gen_atom_types, phi_gen, phi_real, gen_batch_vec = self._forward(batch)
         val_loss, stats = self._compute_loss(phi_gen, phi_real)
 
         bs = self.n_gen_molecules
