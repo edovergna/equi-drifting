@@ -152,6 +152,15 @@ def parse_args():
         default=3.0,
         help="Clamp prior position samples to [-prior_pos_clamp, prior_pos_clamp] standard deviations.",
     )
+    parser.add_argument(
+        "--prior_atom_dirichlet_strength",
+        type=float,
+        default=None,
+        help=(
+            "If set, sample soft Dirichlet atom features centered on empirical "
+            "composition atom types. None uses exact one-hot prior atom features."
+        ),
+    )
     # Wandb args
     parser.add_argument(
         "--wandb_run_id",

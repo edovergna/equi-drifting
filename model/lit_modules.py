@@ -18,7 +18,13 @@ from .drift_loss import (
 )
 from .egnn import EGNN
 from .geometry import center_positions_per_graph, per_graph_center_norms
-from .sample_prior import compute_size_distribution, sample_prior_batch
+from .sample_prior import (
+    compute_composition_distribution,
+    compute_rg_by_composition,
+    compute_rg_by_size,
+    compute_size_distribution,
+    sample_composition_prior_batch,
+)
 
 
 class DriftingMoleculeGenerator(LightningModule):
@@ -42,6 +48,7 @@ class DriftingMoleculeGenerator(LightningModule):
             "p_pos_clamp": 4.0,
             "norm_pos_clamp": 10.0,
             "prior_pos_clamp": 3.0,
+            "prior_atom_dirichlet_strength": None,
             "use_feature_extractor": True,
         }
         default_drift_cfg = {
@@ -84,9 +91,16 @@ class DriftingMoleculeGenerator(LightningModule):
         self.p_pos_clamp = self.generator_cfg["p_pos_clamp"]
         self.norm_pos_clamp = self.generator_cfg["norm_pos_clamp"]
         self.prior_pos_clamp = self.generator_cfg["prior_pos_clamp"]
+        self.prior_atom_dirichlet_strength = self.generator_cfg.get(
+            "prior_atom_dirichlet_strength"
+        )
 
         self._size_values: np.ndarray | None = None
         self._size_probs: np.ndarray | None = None
+        self._compositions: list[tuple[int, ...]] | None = None
+        self._composition_probs: np.ndarray | None = None
+        self._rg_by_composition: dict[tuple[int, ...], np.ndarray] | None = None
+        self._rg_by_size: dict[int, np.ndarray] | None = None
         self._norm_rescale_grad: float | None = None
 
     def _init_generator(self, cfg) -> EGNN:
@@ -111,34 +125,59 @@ class DriftingMoleculeGenerator(LightningModule):
         self._size_values = sizes
         self._size_probs = probs
 
-    def _init_size_distribution(self) -> None:
+    def _init_prior_distributions(self) -> None:
         if self.trainer is not None and self.trainer.datamodule is not None:
             dm = self.trainer.datamodule
             if hasattr(dm, "train_set") and dm.train_set is not None:
-                sizes, probs = compute_size_distribution(dm.train_set)
-                self._size_values = sizes
-                self._size_probs = probs
+                train_set = dm.train_set
+                self._size_values, self._size_probs = compute_size_distribution(
+                    train_set
+                )
+                self._compositions, self._composition_probs = (
+                    compute_composition_distribution(
+                        train_set,
+                        num_atom_types=self.generator_cfg["num_atom_types"],
+                    )
+                )
+                self._rg_by_composition = compute_rg_by_composition(
+                    train_set,
+                    num_atom_types=self.generator_cfg["num_atom_types"],
+                )
+                self._rg_by_size = compute_rg_by_size(train_set)
                 return
         raise RuntimeError(
-            "Atom size distribution not set. Call set_size_distribution() before sampling, "
-            "or ensure the model is bound to a trainer with a QM9DataModule."
+            "Prior distributions not set. Ensure the model is bound to a trainer "
+            "with a QM9DataModule before sampling."
         )
 
     def _sample_prior_batch(
         self, n_molecules: int
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        if self._size_values is None or self._size_probs is None:
-            self._init_size_distribution()
+        if self._compositions is None or self._composition_probs is None:
+            self._init_prior_distributions()
 
-        x, pos, batch_vec, dense_edge_index, atom_counts = sample_prior_batch(
+        (
+            x,
+            pos,
+            batch_vec,
+            dense_edge_index,
+            atom_counts,
+            sampled_compositions,
+            atom_types,
+        ) = sample_composition_prior_batch(
             n_molecules,
-            self._size_values,
-            self._size_probs,
-            self.generator_cfg["num_atom_types"],
-            self.prior_pos_clamp,
-            self.device,
+            compositions=self._compositions,
+            composition_probs=self._composition_probs,
+            num_atom_types=self.generator_cfg["num_atom_types"],
+            device=self.device,
+            prior_pos_clamp=self.prior_pos_clamp,
+            rg_by_composition=self._rg_by_composition,
+            rg_by_size=self._rg_by_size,
+            dirichlet_strength=self.prior_atom_dirichlet_strength,
         )
         self._last_sampled_counts = atom_counts  # read by SizeDistributionCallback
+        self._last_sampled_compositions = sampled_compositions
+        self._last_sampled_atom_types = atom_types.detach().cpu().numpy()
         self._last_sampled_atom_probs = (
             x.detach().cpu().numpy()
         )  # read by AtomTypeDistributionCallback

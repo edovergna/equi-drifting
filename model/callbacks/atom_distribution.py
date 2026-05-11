@@ -12,11 +12,11 @@ ATOM_TYPE_NAMES = ["H", "C", "N", "O", "F"]
 
 class AtomTypeDistributionCallback(Callback):
     """
-    Visualizes the Dirichlet prior atom-type sampling distribution each epoch.
+    Visualizes the prior atom-type sampling distribution each epoch.
 
     Reads `pl_module._last_sampled_atom_probs` (set by _sample_prior_batch) every
-    training step — a [total_nodes, num_atom_types] array of Dirichlet samples —
-    and logs a bar chart of the mean probability per atom type to WandB at epoch end.
+    training step and logs a bar chart of the mean probability per atom type to
+    WandB at epoch end.
     """
 
     def __init__(self, log_every_n_epochs: int = 1):
@@ -65,7 +65,7 @@ class AtomTypeDistributionCallback(Callback):
             ax.set_xlabel("Atom type")
             ax.set_ylabel("Mean sampled probability")
             ax.set_title(
-                f"Dirichlet prior atom-type distribution — epoch {trainer.current_epoch}"
+                f"Prior atom-type distribution — epoch {trainer.current_epoch}"
             )
             ax.axhline(
                 1.0 / len(ATOM_TYPE_NAMES),
