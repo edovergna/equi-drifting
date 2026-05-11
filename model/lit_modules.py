@@ -146,15 +146,20 @@ class DriftingMoleculeGenerator(LightningModule):
 
     def _forward(self, batch):
         """Shared forward pass: prior → EGNN → center → hard atoms → EPT embeddings."""
+        # Sample from the prior distribution
         x_prior, pos_prior, gen_batch_vec, gen_dense_edge_index = (
             self._sample_prior_batch(self.n_gen_molecules)
         )
 
+        # Generate molecule with EGNN
         x_gen, _, pos_gen = self.generator(x_prior, pos_prior, gen_dense_edge_index)
+
+        # Center positions
         pos_gen = center_positions_per_graph(pos_gen, gen_batch_vec)
 
+        # Clamp generated positions
         self._norm_rescale_grad = None
-        """ if self.pos_clamp_type == "hard":
+        if self.pos_clamp_type == "hard":
             pos_gen = pos_gen.clamp(-self.pos_clamp, self.pos_clamp)
         elif self.pos_clamp_type == "tanh":
             norm = pos_gen.norm(dim=-1, keepdim=True)
@@ -173,9 +178,10 @@ class DriftingMoleculeGenerator(LightningModule):
                 rescale.register_hook(
                     lambda g: setattr(self, "_norm_rescale_grad", g.abs().mean().item())
                 )
-            pos_gen = pos_gen * rescale.unsqueeze(-1) """
+            pos_gen = pos_gen * rescale.unsqueeze(-1)
+
+        # Get hard atom types
         if x_gen is not None:
-            # gen_atom_types = x_gen.softmax(dim=-1).argmax(dim=-1)
             gen_atom_types = F.gumbel_softmax(x_gen, tau=self.atom_type_temp, hard=True)
         else:
             gen_atom_types = None
