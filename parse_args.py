@@ -114,13 +114,13 @@ def parse_args():
     parser.add_argument(
         "--pos_clamp",
         type=float,
-        default=10.0,
+        default=100.0,
         help="Clamp generated atom positions to [-pos_clamp, pos_clamp] after centering (Angstroms).",
     )
     parser.add_argument(
         "--pos_clamp_type",
         type=str,
-        default="geom",
+        default="hard",
         choices=["hard", "tanh", "geom"],
         help=(
             "Position clamping strategy: 'hard' (hard clamp to ±pos_clamp), "
