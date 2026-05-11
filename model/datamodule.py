@@ -52,17 +52,19 @@ class QM9DataModule(pl.LightningDataModule):
     def __init__(
         self,
         root: str = "data/QM9",
-        batch_size: int = 128,
+        n_real_molecules: int = 128,
         num_workers: int = 4,
         force_reload: bool = False,
         sample_frac: float = 1.0,
+        max_num_atoms: int | None = None,
     ):
         super().__init__()
         self.root = root
-        self.batch_size = batch_size
+        self.n_real_molecules = n_real_molecules
         self.num_workers = num_workers
         self.force_reload = force_reload
         self.sample_frac = sample_frac
+        self.max_num_atoms = max_num_atoms
         self.pin_memory = torch.cuda.is_available()
 
     def setup(self, stage=None):
@@ -91,6 +93,10 @@ class QM9DataModule(pl.LightningDataModule):
                 if sys.modules[k] is None and (k == "rdkit" or k.startswith("rdkit.")):
                     del sys.modules[k]
             sys.modules.update(_rdkit_saved)
+
+        if self.max_num_atoms is not None:
+            keep = [i for i, d in enumerate(dataset) if d.num_nodes <= self.max_num_atoms]
+            dataset = dataset.index_select(keep)
 
         n = len(dataset)
         n_train = min(_N_TRAIN, n)
@@ -124,7 +130,7 @@ class QM9DataModule(pl.LightningDataModule):
     def train_dataloader(self) -> DataLoader:
         return DataLoader(
             self.train_set,
-            batch_size=self.batch_size,
+            batch_size=self.n_real_molecules,
             shuffle=True,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
@@ -134,7 +140,7 @@ class QM9DataModule(pl.LightningDataModule):
     def val_dataloader(self) -> DataLoader:
         return DataLoader(
             self.val_set,
-            batch_size=self.batch_size,
+            batch_size=self.n_real_molecules,
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,
@@ -144,7 +150,7 @@ class QM9DataModule(pl.LightningDataModule):
     def test_dataloader(self) -> DataLoader:
         return DataLoader(
             self.test_set,
-            batch_size=self.batch_size,
+            batch_size=self.n_real_molecules,
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,

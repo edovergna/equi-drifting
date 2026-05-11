@@ -80,12 +80,15 @@ class EquivariantUpdate(MessagePassing):
 
         input_edge = hidden_nf * 2 + edges_in_d
 
+        layer = nn.Linear(hidden_nf, 1, bias=False)
+        torch.nn.init.xavier_uniform_(layer.weight, gain=0.001)
+
         self.coord_mlp = nn.Sequential(
             nn.Linear(input_edge, hidden_nf),
             act_fn,
             nn.Linear(hidden_nf, hidden_nf),
             act_fn,
-            nn.Linear(hidden_nf, 1, bias=False),
+            layer,
         )
 
     def message(

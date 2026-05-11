@@ -1,3 +1,4 @@
+from .atom_distribution import AtomTypeDistributionCallback
 from .checkpoint import GeneratorCheckpointCallback
 from .chemical_validity import ChemicalValidityCallback
 from .embedding_monitor import EmbeddingMonitorCallback

@@ -69,7 +69,7 @@ class EmbeddingMonitorCallback(Callback):
                     "embed/phi_gen_norm_hist": wandb.Histogram(gen_norms),
                     "embed/phi_real_norm_hist": wandb.Histogram(real_norms),
                 },
-                step=trainer.global_step,
+                commit=False,
             )
         except Exception:
             pass
