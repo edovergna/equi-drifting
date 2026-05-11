@@ -18,6 +18,7 @@ from .drift_loss import (
 )
 from .egnn import EGNN
 from .geometry import center_positions_per_graph, per_graph_center_norms
+from .mol_utils import infer_types_from_pos_batch
 from .sample_prior import compute_size_distribution, sample_prior_batch
 
 
@@ -43,6 +44,7 @@ class DriftingMoleculeGenerator(LightningModule):
             "norm_pos_clamp": 10.0,
             "prior_pos_clamp": 3.0,
             "use_feature_extractor": True,
+            "infer_types_from_pos": False,
         }
         default_drift_cfg = {
             "lr": 1e-4,
@@ -84,6 +86,7 @@ class DriftingMoleculeGenerator(LightningModule):
         self.p_pos_clamp = self.generator_cfg["p_pos_clamp"]
         self.norm_pos_clamp = self.generator_cfg["norm_pos_clamp"]
         self.prior_pos_clamp = self.generator_cfg["prior_pos_clamp"]
+        self.infer_types_from_pos = self.generator_cfg.get("infer_types_from_pos", False)
 
         self._size_values: np.ndarray | None = None
         self._size_probs: np.ndarray | None = None
@@ -180,11 +183,17 @@ class DriftingMoleculeGenerator(LightningModule):
                 )
             pos_gen = pos_gen * rescale.unsqueeze(-1)
 
-        # Get hard atom types
-        if x_gen is not None:
-            gen_atom_types = F.gumbel_softmax(x_gen, tau=self.atom_type_temp, hard=True)
+        # Get atom types for feature extraction
+        if self.infer_types_from_pos:
+            with torch.no_grad():
+                gen_atom_types = infer_types_from_pos_batch(
+                    pos_gen, gen_batch_vec, self.device, self.generator_cfg["num_atom_types"]
+                )
         else:
-            gen_atom_types = None
+            if x_gen is not None:
+                gen_atom_types = F.gumbel_softmax(x_gen, tau=self.atom_type_temp, hard=True)
+            else:
+                gen_atom_types = None
 
         if not self.use_feature_extractor:
             phi_gen = pos_gen

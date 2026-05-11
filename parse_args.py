@@ -76,6 +76,14 @@ def parse_args():
         help="Use EPT feature extraction before computing drift loss.",
     )
     parser.add_argument(
+        "--infer_types_from_pos",
+        action="store_true",
+        help=(
+            "Infer atom types and bonds from generated positions via RDKit heuristics, "
+            "replacing EGNN-predicted atom types in the EPT feature extractor call."
+        ),
+    )
+    parser.add_argument(
         "--temperatures",
         type=float,
         nargs="+",
@@ -149,7 +157,7 @@ def parse_args():
     parser.add_argument(
         "--prior_pos_clamp",
         type=float,
-        default=3.0,
+        default=4.0,
         help="Clamp prior position samples to [-prior_pos_clamp, prior_pos_clamp] standard deviations.",
     )
     # Wandb args

@@ -65,6 +65,7 @@ def main(args: argparse.Namespace):
             "norm_pos_clamp": args.norm_pos_clamp,
             "prior_pos_clamp": args.prior_pos_clamp,
             "use_feature_extractor": args.use_feature_extractor,
+            "infer_types_from_pos": args.infer_types_from_pos,
         }
 
         drift_cfg = {
