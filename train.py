@@ -66,6 +66,7 @@ def main(args: argparse.Namespace):
             "prior_pos_clamp": args.prior_pos_clamp,
             "use_feature_extractor": args.use_feature_extractor,
             "infer_types_from_pos": args.infer_types_from_pos,
+            "infer_method": args.infer_method,
         }
 
         drift_cfg = {
@@ -94,6 +95,7 @@ def main(args: argparse.Namespace):
                 n_molecules=min(4, args.n_real_molecules),
                 bond_threshold=2.0,
                 every_n_epochs=1,
+                infer_method=args.infer_method,
             ),
             ChemicalValidityCallback(),
             # SizeDistributionCallback(),

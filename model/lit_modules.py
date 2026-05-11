@@ -45,6 +45,7 @@ class DriftingMoleculeGenerator(LightningModule):
             "prior_pos_clamp": 3.0,
             "use_feature_extractor": True,
             "infer_types_from_pos": False,
+            "infer_method": "heuristic",
         }
         default_drift_cfg = {
             "lr": 1e-4,
@@ -87,6 +88,7 @@ class DriftingMoleculeGenerator(LightningModule):
         self.norm_pos_clamp = self.generator_cfg["norm_pos_clamp"]
         self.prior_pos_clamp = self.generator_cfg["prior_pos_clamp"]
         self.infer_types_from_pos = self.generator_cfg.get("infer_types_from_pos", False)
+        self.infer_method = self.generator_cfg.get("infer_method", "heuristic")
 
         self._size_values: np.ndarray | None = None
         self._size_probs: np.ndarray | None = None
@@ -187,7 +189,8 @@ class DriftingMoleculeGenerator(LightningModule):
         if self.infer_types_from_pos:
             with torch.no_grad():
                 gen_atom_types = infer_types_from_pos_batch(
-                    pos_gen, gen_batch_vec, self.device, self.generator_cfg["num_atom_types"]
+                    pos_gen, gen_batch_vec, self.device,
+                    self.generator_cfg["num_atom_types"], self.infer_method,
                 )
         else:
             if x_gen is not None:

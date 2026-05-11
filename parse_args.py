@@ -79,8 +79,20 @@ def parse_args():
         "--infer_types_from_pos",
         action="store_true",
         help=(
-            "Infer atom types and bonds from generated positions via RDKit heuristics, "
-            "replacing EGNN-predicted atom types in the EPT feature extractor call."
+            "Infer atom types from generated positions, replacing EGNN-predicted atom "
+            "types in the EPT feature extractor call. Method is set by --infer_method."
+        ),
+    )
+    parser.add_argument(
+        "--infer_method",
+        type=str,
+        default="heuristic",
+        choices=["degree", "heuristic"],
+        help=(
+            "Atom-type inference method used when --infer_types_from_pos is set "
+            "(and for molecule visualisation when atom types are unavailable). "
+            "'degree': simple connectivity-degree mapping. "
+            "'heuristic': QM9-specific rules using bond lengths + neighbourhood chemistry."
         ),
     )
     parser.add_argument(
