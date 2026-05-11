@@ -154,7 +154,7 @@ class DriftingMoleculeGenerator(LightningModule):
         pos_gen = center_positions_per_graph(pos_gen, gen_batch_vec)
 
         self._norm_rescale_grad = None
-        if self.pos_clamp_type == "hard":
+        """ if self.pos_clamp_type == "hard":
             pos_gen = pos_gen.clamp(-self.pos_clamp, self.pos_clamp)
         elif self.pos_clamp_type == "tanh":
             norm = pos_gen.norm(dim=-1, keepdim=True)
@@ -173,7 +173,7 @@ class DriftingMoleculeGenerator(LightningModule):
                 rescale.register_hook(
                     lambda g: setattr(self, "_norm_rescale_grad", g.abs().mean().item())
                 )
-            pos_gen = pos_gen * rescale.unsqueeze(-1)
+            pos_gen = pos_gen * rescale.unsqueeze(-1) """
         if x_gen is not None:
             # gen_atom_types = x_gen.softmax(dim=-1).argmax(dim=-1)
             gen_atom_types = F.gumbel_softmax(x_gen, tau=self.atom_type_temp, hard=True)
