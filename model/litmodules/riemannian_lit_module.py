@@ -246,19 +246,19 @@ class RiemannianDriftingMoleculeGenerator(LightningModule):
             "batch_vec": batch.batch.detach().cpu()
         }
     
-    # def on_validation_epoch_end(self):
-    #     hist_stats = getattr(self, "_val_hist_stats", {})
-    #     if hist_stats and hasattr(self, "logger") and hasattr(self.logger, "experiment"):
-    #         try:
-    #             self.logger.experiment.log(hist_stats, commit=False)
-    #         except Exception:
-    #             pass
-    #     self._val_hist_stats = {}
+    def on_validation_epoch_end(self):
+        hist_stats = getattr(self, "_val_hist_stats", {})
+        if hist_stats and hasattr(self, "logger") and hasattr(self.logger, "experiment"):
+            try:
+                self.logger.experiment.log(hist_stats, commit=False)
+            except Exception:
+                pass
+        self._val_hist_stats = {}
 
     def test_step(self, batch, batch_idx):
         pos_gen, x_gen, gen_batch_vec = self._forward(batch)
         pos_real, x_real = batch.pos, batch.real_atom_types
-
+        
         test_loss, _ = compute_molecule_based_drift_loss(
                 pos_gen, x_gen, pos_real, x_real, gen_index=gen_batch_vec, real_index=batch.batch, eps=self.eps
             )
