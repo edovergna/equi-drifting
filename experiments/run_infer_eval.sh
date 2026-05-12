@@ -20,7 +20,7 @@ if [[ "${OFFLINE:-0}" == "1" ]]; then
     OFFLINE_FLAG="--offline"
 fi
 
-METHODS=("degree" "heuristic")
+METHODS=("degree" "heuristic" "stability")
 
 for METHOD in "${METHODS[@]}"; do
     echo ""

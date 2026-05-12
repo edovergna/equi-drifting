@@ -1,7 +1,11 @@
 import numpy as np
 import torch
 
+from .bonds import get_bond_order
 from .constants import (
+    _ATOM_NAMES,
+    _ATOMIC_NUMS,
+    _STABLE_VALENCE,
     _GENERIC_BOND_THRESHOLD,
     _H_BOND_MAX,
     _CARBONYL_O_MAX,
@@ -25,6 +29,7 @@ def infer_types_from_pos_batch(
     method:
       "degree"    — simple connectivity-degree mapping (fast, less accurate)
       "heuristic" — QM9-specific rules: bond lengths + neighborhood chemistry
+      "stability" — heuristic seed refined by greedy bond-order stability maximisation
 
     Returns:
         atom_types: [N, num_atom_types] one-hot float tensor on `device`
@@ -64,12 +69,7 @@ def _infer_types_from_degree(positions: np.ndarray) -> np.ndarray:
     adj = (dists < _GENERIC_BOND_THRESHOLD) & (dists > 0)
     degrees = adj.sum(axis=1)
 
-    type_indices = np.where(
-        degrees >= 4, 1,
-        np.where(degrees == 3, 2,
-        np.where(degrees == 2, 3,
-        0)),
-    )
+    type_indices = np.where(degrees >= 2, 1, 0)
 
     terminal_mask = degrees == 1
     if terminal_mask.any():
@@ -119,8 +119,10 @@ def _infer_types_heuristic(positions: np.ndarray) -> np.ndarray:
 
     for i in np.where((degrees == 2) & (types == -1))[0]:
         avg = dists[i, adj[i]].mean()
+        min_bond = dists[i, adj[i]].min()
         if avg < _O_AVG_BOND_MAX:
-            types[i] = 3
+            # min_bond < 1.25 Å → C=O double bond (~1.20); otherwise imine C=N (~1.29)
+            types[i] = 3 if min_bond < 1.25 else 2
         elif avg < _N_AVG_BOND_MAX:
             types[i] = 2
         else:
@@ -134,7 +136,62 @@ def _infer_types_heuristic(positions: np.ndarray) -> np.ndarray:
     return types
 
 
+def _infer_types_stability_guided(positions: np.ndarray) -> np.ndarray:
+    """Heuristic seed refined by greedy bond-order stability maximisation.
+
+    Uses the EDM bond-length tables (via get_bond_order) to compute per-atom
+    bond totals, then iteratively flips each unstable atom to the candidate
+    type that gains the most stable atoms, until fully stable or no improvement.
+    """
+    types = _infer_types_heuristic(positions).copy()
+    n = len(types)
+    if n == 0:
+        return types
+
+    dists = np.linalg.norm(positions[:, None] - positions[None, :], axis=-1)
+
+    def _bond_counts(t):
+        counts = np.zeros(n, dtype=int)
+        for i in range(n):
+            for j in range(i + 1, n):
+                o = get_bond_order(_ATOM_NAMES[t[i]], _ATOM_NAMES[t[j]], dists[i, j])
+                counts[i] += o
+                counts[j] += o
+        return counts
+
+    def _n_stable(t, counts):
+        return sum(counts[i] == _STABLE_VALENCE[_ATOMIC_NUMS[t[i]]] for i in range(n))
+
+    for _ in range(n):
+        counts = _bond_counts(types)
+        n_stable = _n_stable(types, counts)
+        if n_stable == n:
+            break
+
+        stable_mask = np.array([
+            counts[i] == _STABLE_VALENCE[_ATOMIC_NUMS[types[i]]] for i in range(n)
+        ])
+        best_gain, best_i, best_c = 0, -1, -1
+
+        for i in np.where(~stable_mask)[0]:
+            for c in range(5):
+                if c == types[i]:
+                    continue
+                trial = types.copy()
+                trial[i] = c
+                gain = _n_stable(trial, _bond_counts(trial)) - n_stable
+                if gain > best_gain:
+                    best_gain, best_i, best_c = gain, i, c
+
+        if best_i == -1:
+            break
+        types[best_i] = best_c
+
+    return types
+
+
 _INFER_FNS = {
     "degree": _infer_types_from_degree,
     "heuristic": _infer_types_heuristic,
+    "stability": _infer_types_stability_guided,
 }
