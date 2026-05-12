@@ -99,9 +99,25 @@ class QM9DataModule(pl.LightningDataModule):
             dataset = dataset.index_select(keep)
 
         n = len(dataset)
-        n_train = min(_N_TRAIN, n)
-        n_val = min(_N_VAL, n - n_train)
-        n_test = n - n_train - n_val
+        if n == 0:
+            raise ValueError(
+                "No QM9 molecules remain after filtering. "
+                "Relax --max_num_atoms or remove the filter."
+            )
+
+        if n >= _N_TRAIN + _N_VAL:
+            n_train = min(_N_TRAIN, n)
+            n_val = min(_N_VAL, n - n_train)
+            n_test = n - n_train - n_val
+        else:
+            # When filters such as --max_num_atoms shrink the dataset below the
+            # canonical QM9 split sizes, keep the same rough split proportions.
+            n_val = max(1, int(round(n * _N_VAL / (_N_TRAIN + _N_VAL))))
+            n_test = max(1, int(round(n * 0.1))) if n >= 3 else 0
+            n_train = n - n_val - n_test
+            if n_train < 1:
+                n_train = 1
+                n_val = max(0, n - n_train - n_test)
 
         # Reproducible permutation matching the EPT standard split (seed=0)
         rng = np.random.default_rng(0)
@@ -113,19 +129,21 @@ class QM9DataModule(pl.LightningDataModule):
         if self.sample_frac < 1.0:
             # Subsample each split proportionally, with a fixed secondary seed
             srng = np.random.default_rng(42)
-            train_idx = srng.choice(
-                train_idx, size=max(1, int(self.sample_frac * n_train)), replace=False
-            )
-            val_idx = srng.choice(
-                val_idx, size=max(1, int(self.sample_frac * n_val)), replace=False
-            )
-            test_idx = srng.choice(
-                test_idx, size=max(1, int(self.sample_frac * n_test)), replace=False
-            )
+            train_idx = self._subsample_split(srng, train_idx)
+            val_idx = self._subsample_split(srng, val_idx)
+            test_idx = self._subsample_split(srng, test_idx)
 
         self.train_set = Subset(dataset, train_idx)
         self.val_set = Subset(dataset, val_idx)
         self.test_set = Subset(dataset, test_idx)
+
+    def _subsample_split(
+        self, rng: np.random.Generator, indices: np.ndarray
+    ) -> np.ndarray:
+        if len(indices) == 0:
+            return indices
+        size = max(1, int(self.sample_frac * len(indices)))
+        return rng.choice(indices, size=size, replace=False)
 
     def train_dataloader(self) -> DataLoader:
         return DataLoader(
