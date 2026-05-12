@@ -16,7 +16,7 @@ import wandb
 from model import (
     AtomTypeDistributionCallback,
     ChemicalValidityCallback,
-    DriftingMoleculeGenerator,
+    EuclideanGenerator,
     EmbeddingMonitorCallback,
     GeneratorCheckpointCallback,
     GradientMonitorCallback,
@@ -78,7 +78,7 @@ def main(args: argparse.Namespace):
             "n_gen_molecules": args.n_gen_molecules,
         }
 
-        model = DriftingMoleculeGenerator(generator_cfg, drift_cfg)
+        model = EuclideanGenerator(generator_cfg, drift_cfg)
 
         if args.wandb_run_id:
             print(f"Loading pretrained generator from wandb run: {args.wandb_run_id}")

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import wandb
 
-from .lit_modules import DriftingMoleculeGenerator
+from .litmodules.euclidean import EuclideanGenerator
 
 WANDB_ENTITY = "equivariant-drifting"
 WANDB_PROJECT = "col-daniel-tests"
@@ -18,7 +18,7 @@ def load_config(wandb_run_id: str):
 
 
 def save_and_log_model(
-    lit_module: DriftingMoleculeGenerator,
+    lit_module: EuclideanGenerator,
     log_model: bool = True,
     save_model: bool = True,
 ) -> None:
@@ -52,7 +52,7 @@ def _download_component(run, remote_name: str, local_path: Path) -> bool:
 
 def load_pretrained_generator(
     wandb_run_id: str,
-    lit_module: DriftingMoleculeGenerator,
+    lit_module: EuclideanGenerator,
     variant: str = "best",
 ) -> None:
     """Loads generator weights from a given wandb run id into lit_module.
