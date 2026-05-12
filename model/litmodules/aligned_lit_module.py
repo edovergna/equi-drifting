@@ -79,7 +79,7 @@ class AlignedDriftingMoleculeGenerator(LightningModule):
         self.infer_types_from_pos = self.generator_cfg.get("infer_types_from_pos", False)
         self.infer_method = self.generator_cfg.get("infer_method", "heuristic")
 
-        # Hard coded epsilon!!
+        # Hard coded epsilon!! TODO: make it in cfg
         self.eps = 1e-8
 
         self._size_values: np.ndarray | None = None
@@ -171,16 +171,15 @@ class AlignedDriftingMoleculeGenerator(LightningModule):
         #         )
         #     pos_gen = pos_gen * rescale.unsqueeze(-1)
 
-        if x_logits is not None:
-            gen_atom_types = F.softmax(x_logits, dim=-1)
-        else:
-            gen_atom_types = None
+        # Turn x_logits into probabilites
+        x_prob = F.softmax(x_logits, dim=-1)
 
-        gen_atom_on_sphere = probs_to_sphere(gen_atom_types, self.eps)
+        # And project to the sphere
+        x_gen_sphere = probs_to_sphere(x_prob, self.eps)
 
         return (
             pos_gen,
-            gen_atom_on_sphere,
+            x_gen_sphere,
             gen_batch_vec,
         )
 
@@ -220,60 +219,14 @@ class AlignedDriftingMoleculeGenerator(LightningModule):
             )
 
     def training_step(self, batch, batch_idx):
-        pos_gen, gen_atom_on_sphere, gen_batch_vec = self._forward(batch)
+        pos_gen, x_gen_sphere, gen_batch_vec = self._forward(batch)
 
-        # if not (torch.isfinite(phi_gen).all() and torch.isfinite(phi_real).all()):
-        #     if self.feature_extractor is None:
-        #         self.print(
-        #             f"\n[Step {self.global_step}] Non-finite positions found. "
-        #             "Stopping training."
-        #         )
-        #         self.trainer.should_stop = True
-        #         return torch.tensor(0.0, device=self.device, requires_grad=True)
-
-        #     with torch.no_grad():
-        #         bad_gen_mask = ~torch.isfinite(phi_gen).all(dim=-1)  # [num_graphs]
-        #         bad_real_mask = ~torch.isfinite(phi_real).all(dim=-1)
-        #         bad_mol_mask = bad_gen_mask | bad_real_mask
-
-        #         n_bad_gen = bad_gen_mask.sum().item()
-        #         n_bad_real = bad_real_mask.sum().item()
-        #         n_total = bad_mol_mask.shape[0]
-
-        #         atom_mask = bad_mol_mask[gen_batch_vec]
-        #         pos_bad = pos_gen[atom_mask]
-
-        #         pos_norms_bad = pos_bad.norm(dim=-1)
-        #         max_dist_bad = (
-        #             torch.cdist(pos_bad, pos_bad).max()
-        #             if pos_bad.shape[0] > 1
-        #             else pos_bad.new_tensor(0.0)
-        #         )
-
-        #         gen_center_norms = per_graph_center_norms(pos_gen, gen_batch_vec)
-        #         real_center_norms = per_graph_center_norms(batch.pos, batch.batch)
-        #         bad_gen_cn = gen_center_norms[bad_mol_mask]
-        #         bad_real_cn = real_center_norms[bad_mol_mask]
-
-        #         self.print(
-        #             f"\n[Step {self.global_step}] Non-finite embeddings — "
-        #             f"{n_bad_gen} gen mol(s), {n_bad_real} real mol(s) out of {n_total}.\n"
-        #             f"  [bad mols] pos_gen norm   mean={pos_norms_bad.mean():.3f}  std={pos_norms_bad.std():.3f}\n"
-        #             f"  [bad mols] max pairwise dist={max_dist_bad:.3f}\n"
-        #             f"  [bad mols] gen center norm  mean={bad_gen_cn.mean():.3f}  std={bad_gen_cn.std():.3f}\n"
-        #             f"  [bad mols] real center norm mean={bad_real_cn.mean():.3f}  std={bad_real_cn.std():.3f}\n"
-        #             f"  Stopping."
-        #         )
-
-        #     self.trainer.should_stop = True
-        #     return torch.tensor(0.0, device=self.device, requires_grad=True)
-
-        pos_real = batch.pos
-        atom_real = batch.real_atom_types
+        pos_real, x_real = batch.pos, batch.real_atom_types
 
         try:
+            #TODO: change to the aligned drift loss
             loss, stats = self._compute_loss(
-                pos_gen, pos_real, gen_atom_on_sphere, atom_real, gen_batch_vec, batch.batch
+                pos_gen, pos_real, x_gen_sphere, x_real, gen_batch_vec, batch.batch
             )
         except TrainingDivergedException as e:
             self.print(f"\n[Step {self.global_step}] {e}\nStopping training.")
@@ -322,13 +275,13 @@ class AlignedDriftingMoleculeGenerator(LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        pos_gen, gen_atom_on_sphere, gen_batch_vec = self._forward(batch)
+        pos_gen, x_gen_sphere, gen_batch_vec = self._forward(batch)
 
-        pos_real = batch.pos
-        atom_real = batch.real_atom_types
+        pos_real, x_real = batch.pos, batch.real_atom_types
 
+        #TODO: change to the aligned drift loss
         val_loss, stats = self._compute_loss(
-                pos_gen, pos_real, gen_atom_on_sphere, atom_real, gen_batch_vec, batch.batch
+                pos_gen, pos_real, x_gen_sphere, x_real, gen_batch_vec, batch.batch
             )
 
         bs = self.n_gen_molecules
@@ -374,15 +327,13 @@ class AlignedDriftingMoleculeGenerator(LightningModule):
             sync_dist=True,
         )
 
+        # Project sphere embeddings back to probabilities
+        with torch.no_grad():
+            x_prob = sphere_to_probs(x_gen_sphere, self.eps)
+
         return {
-            "phi_gen": phi_gen.detach().cpu(),
-            "phi_real": phi_real.detach().cpu(),
             "pos_gen": pos_gen.detach().cpu(),
-            "gen_atom_types": (
-                gen_atom_types.detach().cpu().argmax(dim=-1)
-                if gen_atom_types is not None
-                else None
-            ),
+            "gen_atom_types": x_prob.detach().cpu().argmax(dim=-1),
             "pos_real": batch.pos.detach().cpu(),
             "real_atom_types": batch.real_atom_types.detach().cpu(),
             "gen_batch_vec": gen_batch_vec.detach().cpu(),
@@ -403,8 +354,13 @@ class AlignedDriftingMoleculeGenerator(LightningModule):
         self._val_hist_stats = {}
 
     def test_step(self, batch, batch_idx):
-        _, _, phi_gen, phi_real, gen_batch_vec = self._forward(batch)
-        test_loss, _ = self._compute_loss(phi_gen, phi_real, gen_batch_vec, batch.batch)
+        pos_gen, x_gen_sphere, gen_batch_vec = self._forward(batch)
+        pos_real, x_real = batch.pos, batch.real_atom_types
+
+        #TODO: change to the aligned drift loss
+        test_loss, _ = self._compute_loss(
+                pos_gen, pos_real, x_gen_sphere, x_real, gen_batch_vec, batch.batch
+            )
 
         bs = self.n_gen_molecules
         self.log(
@@ -417,32 +373,14 @@ class AlignedDriftingMoleculeGenerator(LightningModule):
         )
         return test_loss
 
-    def _is_feature_extractor_trainable(self) -> bool:
-        if self.feature_extractor is None:
-            return False
-        return any(p.requires_grad for p in self.feature_extractor.parameters())
-
     def save_individual_components(self, save_path: str) -> None:
         torch.save(self.generator.state_dict(), f"{save_path}/generator.pth")
-        if self._is_feature_extractor_trainable():
-            torch.save(
-                self.feature_extractor.ept_model.state_dict(),
-                f"{save_path}/feature_extractor.pth",
-            )
 
     def load_individual_components(self, folder_path) -> None:
         folder_path = Path(folder_path)
         self.generator.load_state_dict(
             torch.load(folder_path / "generator.pth", map_location=self.device)
         )
-        if self.feature_extractor is None:
-            return
-        fe_path = folder_path / "feature_extractor.pth"
-        if fe_path.exists():
-            self.feature_extractor.ept_model.load_state_dict(
-                torch.load(fe_path, map_location=self.device)
-            )
-            print("Loaded fine-tuned feature extractor weights.")
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(
