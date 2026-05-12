@@ -14,7 +14,8 @@ def compute_aligning_drift_loss(
     x_gen_sphere: torch.Tensor,
     x_real: torch.Tensor,
     gen_batch_vec: torch.Tensor,
-    real_batch_vec: torch.Tensor
+    real_batch_vec: torch.Tensor,
+    temperatures: tuple[float, ...] = (0.02, 0.05, 0.02),
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """
     Drifting field loss directly on 3D molecules by aligning the generated molecules with the real ones.
@@ -23,151 +24,102 @@ def compute_aligning_drift_loss(
     Returns (loss, stats) where stats is a flat dict of float diagnostics safe to
     pass directly to self.log(). Raises TrainingDivergedException on non-finite loss.
     """
-    return None
 
-def compute_position_drift_loss(
-    pos_gen: torch.Tensor,
-    pos_real: torch.Tensor,
-    gen_batch_vec: torch.Tensor,
-    real_batch_vec: torch.Tensor,
-    temperatures: list[float],
-) -> tuple[torch.Tensor, dict[str, float]]:
-    """
-    Drifting field loss directly in 3D position space, treating each molecule as
-    one sample from the distribution.
-
-    Molecules are padded into flat position vectors. Every generated molecule is
-    attracted to all real molecules and repelled from all other generated molecules.
-    """
-    pos_gen = pos_gen.float()
-    pos_real = pos_real.float()
     max_nodes = max(
         _max_nodes_per_graph(gen_batch_vec),
         _max_nodes_per_graph(real_batch_vec),
     )
-    gen_mol, gen_mask = _positions_to_padded_molecules(
-        pos_gen, gen_batch_vec, max_nodes=max_nodes
-    )
-    real_mol, real_mask = _positions_to_padded_molecules(
-        pos_real, real_batch_vec, max_nodes=max_nodes
-    )
 
-    N_gen = gen_mol.shape[0]
-    N_real = real_mol.shape[0]
-    N_targets = N_gen + N_real
+    mol_pos_gen, mol_x_gen_sphere, gen_mask = _molecules_to_padded(pos_gen, x_gen_sphere, gen_batch_vec, max_nodes)
+    mol_pos_real, mol_x_real, real_mask = _molecules_to_padded(pos_real, x_real, real_batch_vec, max_nodes)
 
-    old_gen = gen_mol.detach()
-    dist_pos = torch.cdist(old_gen.flatten(start_dim=1), real_mol.flatten(start_dim=1))
-    dist_neg = torch.cdist(old_gen.flatten(start_dim=1), old_gen.flatten(start_dim=1))
-    dist_neg.fill_diagonal_(1e6)
+    # TODO: add aligning here
 
-    all_dists = torch.cat([dist_pos.flatten(), dist_neg.flatten()])
-    valid_mask = torch.isfinite(all_dists) & (all_dists < 1e5)
-    valid_dists = all_dists[valid_mask]
+    # Assume for now that the molecules are aligned, so that the atoms are ordered in a way that they correspond
+    # and the 3D positions are rotated/reflected accordingly.
 
-    if valid_dists.numel() == 0:
-        raise TrainingDivergedException(
-            "No valid position distances found; loss is unstable."
-        )
+    N_gen = mol_pos_gen.shape[0]           # number of generated molecules
+    N_real = mol_pos_real.shape[0]         # number of real molecules
 
-    scale = (valid_dists.mean() / (D**0.5)).detach().clamp(min=1e-5, max=1e3)
-    old_gen_scaled = old_gen / scale
-    real_mol_scaled = real_mol / scale
-    dist_pos_scaled = dist_pos / scale
-    dist_neg_scaled = dist_neg / scale
+    old_pos_gen = mol_pos_gen.detach()
+    old_x_gen_sphere = mol_x_gen_sphere.detach()
 
-    stats: dict[str, float] = {}
-    with torch.no_grad():
-        pos_gen_norms = pos_gen.norm(dim=-1)
-        pos_real_norms = pos_real.norm(dim=-1)
-        stats["pos_scale_S"] = scale.item()
-        stats["pos_num_gen_molecules"] = float(N_gen)
-        stats["pos_num_real_molecules"] = float(N_real)
-        stats["pos_gen_norm_mean"] = pos_gen_norms.mean().item()
-        stats["pos_gen_norm_std"] = pos_gen_norms.std().item()
-        stats["pos_real_norm_mean"] = pos_real_norms.mean().item()
-        stats["pos_mol_nn_l2_distance"] = dist_pos.min(dim=1).values.mean().item()
-        stats["pos_invalid_dist_frac"] = (~valid_mask).float().mean().item()
+    # Obtain actual pairs mask
+    pair_mask_pos = gen_mask[:, None, :] * real_mask[None, :, :]                # shape: (N_gen, N_real, max_nodes)
+    pair_mask_neg = gen_mask[:, None, :] * gen_mask[None, :, :]                 # shape: (N_gen, N_gen, max_nodes)
 
-    aggregated_v = torch.zeros_like(old_gen_scaled)
+    # Calculate pairwise distances for positions of molecules
+    mol_dist_pos = _pairwise_geodesic_distance(mol_pos_gen, mol_pos_real, pair_mask_pos, "euclidean")  # shape: (N_gen, N_real)
+    mol_dist_neg = _pairwise_geodesic_distance(mol_pos_gen, old_pos_gen, pair_mask_neg, "euclidean")   # shape: (N_gen, N_real)
 
-    for tau in temperatures:
-        tau_key = str(tau).replace(".", "_")
-        tau_eff = tau * (D**0.5)
+    # Mask self connections in negative with high value
+    mol_dist_neg.fill_diagonal_(1e8)
 
-        V_tau, A_row, A_pos, A_neg = _attention_weighted_field(
-            old_gen_scaled,
-            real_mol_scaled,
-            dist_pos_scaled,
-            dist_neg_scaled,
-            tau_eff,
-            "inverse_attn",
-        )
-
-        force_scale = (
-            torch.sqrt(((V_tau**2).sum(dim=-1).mean() / D).clamp(min=1e-10))
-            .detach()
-            .clamp(min=1e-5, max=1e3)
-        )
-        V_tau_norm = V_tau / force_scale
-        aggregated_v += V_tau_norm
-
-        with torch.no_grad():
-            row_entropy = -(A_row * (A_row + 1e-30).log()).sum(dim=-1).mean()
-            row_entropy_uniform = torch.log(
-                torch.tensor(N_targets, device=A_row.device, dtype=torch.float)
-            )
-            pos_mass = A_pos.sum(dim=1)
-            neg_mass = A_neg.sum(dim=1)
-            stats[f"pos_attn_entropy_{tau_key}"] = row_entropy.item()
-            stats[f"pos_attn_entropy_rel_{tau_key}"] = (
-                row_entropy / row_entropy_uniform
-            ).item()
-            stats[f"pos_force_scale_{tau_key}"] = force_scale.item()
-            stats[f"pos_v_norm_{tau_key}"] = V_tau_norm.norm(dim=-1).mean().item()
-            stats[f"pos_attn_real_mass_frac_{tau_key}"] = (
-                (pos_mass / (pos_mass + neg_mass).clamp_min(1e-8)).mean().item()
-            )
-
-    target = (old_gen_scaled + aggregated_v).detach()
-    gen_scaled = gen_mol / scale
-    coord_mask = gen_mask.unsqueeze(-1).expand(-1, -1, pos_gen.shape[-1])
-    coord_mask = coord_mask.flatten(start_dim=1)
-    loss = F.mse_loss(gen_scaled[coord_mask], target[coord_mask])
-
-    if not torch.isfinite(loss):
-        raise TrainingDivergedException(
-            f"Non-finite position loss ({loss.item()!r}). "
-            f"pos_gen range: [{pos_gen.min().item():.3g}, {pos_gen.max().item():.3g}], "
-            f"pos_real range: [{pos_real.min().item():.3g}, {pos_real.max().item():.3g}], "
-            f"scale={scale.item():.3g}"
-        )
-
-    return loss, stats
+    return None
 
 
-def _positions_to_padded_molecules(
+def _pairwise_geodesic_distance(
+        x: torch.Tensor,
+        y: torch.Tensor,
+        pair_mask: torch.Tensor,
+        manifold: str = "euclidean"
+) -> torch.Tensor:
+    """
+    Calculates the pairwise distance between atoms for the molecule attributes depending on 
+    the specified geodesic distance. Assumed that molecules are aligned.
+    Args:
+        x: [N_x, max_nodes, z]
+        y: [N_y, max_nodes, z]
+        pair_mask: [N_x, N_y, max_nodes]
+    """
+
+    if manifold == "euclidean":
+        diff = x[:, None, :, :] - y[None, :, :, :]                              # shape: (N_x, N_y, max_nodes, z)
+        sq_dist_per_atom = (diff ** 2).sum(dim=-1)                              # shape: (N_x, N_y, max_nodes)
+        masked_sq_dist = sq_dist_per_atom * pair_mask   
+
+        # Scale by num of atoms shared
+        num_atoms_shared = pair_mask.sum(dim=-1).clamp_min(1.0)                 # shape: (N_x, N_y)
+        distances = torch.sqrt(masked_sq_dist.sum(dim=-1) / num_atoms_shared)   # shape: (N_x, N_y)
+    elif manifold == "spherical":
+        distances = ...
+    else:
+        raise ValueError("Undefined geodesic distance queried.")
+    return distances
+
+
+def _molecules_to_padded(
     pos: torch.Tensor,
+    atom_types: torch.Tensor,
     batch_vec: torch.Tensor,
     max_nodes: int | None = None,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    
     graph_ids = torch.unique(batch_vec, sorted=True)
     counts = torch.stack([(batch_vec == graph_id).sum() for graph_id in graph_ids])
     if max_nodes is None:
         max_nodes = int(counts.max().item())
 
-    padded = pos.new_zeros((graph_ids.numel(), max_nodes, pos.shape[-1]))
+    padded_pos = pos.new_zeros((graph_ids.numel(), max_nodes, pos.shape[-1]))
+    padded_atom_types = atom_types.new_zeros(
+        (graph_ids.numel(), max_nodes, *atom_types.shape[1:])
+    )
     mask = torch.zeros(
-        (graph_ids.numel(), max_nodes), dtype=torch.bool, device=pos.device
+        (graph_ids.numel(), max_nodes), device=pos.device
     )
 
     for i, graph_id in enumerate(graph_ids):
-        graph_pos = pos[batch_vec == graph_id]
-        n = min(graph_pos.shape[0], max_nodes)
-        padded[i, :n] = graph_pos[:n]
-        mask[i, :n] = True
+        graph_mask = batch_vec == graph_id
 
-    return padded, mask
+        graph_pos = pos[graph_mask]
+        graph_atom_types = atom_types[graph_mask]
+
+        n = min(graph_pos.shape[0], max_nodes)
+        padded_pos[i, :n] = graph_pos[:n]
+        padded_atom_types[i, :n] = graph_atom_types[:n]
+        mask[i, :n] = 1.0
+
+    return padded_pos, padded_atom_types, mask
 
 
 def _max_nodes_per_graph(batch_vec: torch.Tensor) -> int:

@@ -224,3 +224,5 @@ checkpoints/
 *.out
 
 ls
+
+.DS_Store
