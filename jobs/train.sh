@@ -5,7 +5,7 @@
 #SBATCH --job-name=test_train
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
-#SBATCH --time=00:20:00
+#SBATCH --time=04:00:00
 #SBATCH --output=slurm_output_%A.out
 
 module purge

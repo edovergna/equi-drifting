@@ -29,14 +29,13 @@ from model import (
 from model.wandb_utils import load_pretrained_generator
 from parse_args import parse_args
 
-
 def main(args: argparse.Namespace):
 
     device, precision, deterministic, benchmark = initialize_training_config(args)
 
     run = wandb.init(
         entity="equivariant-drifting",
-        project="kristian-positions-only",
+        project="riemannian",
         group=args.group_tag,
         mode="offline" if args.offline else "online",
         config=vars(args),

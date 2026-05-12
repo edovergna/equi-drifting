@@ -10,6 +10,7 @@ WANDB_ENTITY = "equivariant-drifting"
 WANDB_PROJECT = "col-daniel-tests"
 WANDB_PATH = f"{WANDB_ENTITY}/{WANDB_PROJECT}"
 
+# TODO: check wether load and saving models is compatible with riemannian encoder
 
 def load_config(wandb_run_id: str):
     api = wandb.Api()
@@ -72,14 +73,5 @@ def load_pretrained_generator(
 
         print(f"  Downloading generator_{variant}.pth")
         _download_component(run, f"generator_{variant}.pth", tmp_path / "generator.pth")
-
-        print(f"  Downloading feature_extractor_{variant}.pth")
-        found = _download_component(
-            run, f"feature_extractor_{variant}.pth", tmp_path / "feature_extractor.pth"
-        )
-        if not found:
-            print(
-                f"  feature_extractor_{variant}.pth not found — was not fine-tuned, skipping."
-            )
-
+        
         lit_module.load_individual_components(tmp_path)
