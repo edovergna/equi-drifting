@@ -4,9 +4,7 @@ import torch
 import torch.nn.functional as F
 import wandb
 
-
-class TrainingDivergedException(Exception):
-    """Raised when the drift loss becomes non-finite. Triggers a clean training stop."""
+from . import TrainingDivergedException
 
 
 def _attention_weighted_field(
@@ -316,14 +314,11 @@ def compute_norm_based_drift_loss(
     old_gen_scaled = old_gen / scale_inputs  # [N_gen, D]
     phi_real_scaled = phi_real / scale_inputs  # [N_real, D]
 
-    # Squared norms in scaled space
     gen_norms = (old_gen_scaled**2).sum(dim=1)  # [N_gen]
     real_norms = (phi_real_scaled**2).sum(dim=1)  # [N_real]
 
-    # Norm differences for attraction (gen vs real) and repulsion (gen vs gen)
     diff_pos = gen_norms[:, None] - real_norms[None, :]  # [N_gen, N_real]
     diff_neg = gen_norms[:, None] - gen_norms[None, :]  # [N_gen, N_gen]
-
     diff_neg = diff_neg + torch.eye(N_gen, device=phi_gen.device) * 1e6
 
     stats = {}
@@ -366,7 +361,6 @@ def compute_norm_based_drift_loss(
 
         f_norm_val = (total_force_R**2).mean()
         force_scale = torch.sqrt(f_norm_val.clamp(min=1e-8)).detach()
-
         V_across_taus = V_across_taus + total_force_R / force_scale
 
         with torch.no_grad():

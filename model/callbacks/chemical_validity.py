@@ -7,7 +7,7 @@ from lightning.pytorch import Callback, LightningModule, Trainer
 import wandb
 
 from ..mol_utils import (batch_to_stability, batch_to_validity,
-                         heavy_atom_counts)
+                        heavy_atom_counts)
 
 
 class ChemicalValidityCallback(Callback):
@@ -15,10 +15,10 @@ class ChemicalValidityCallback(Callback):
     Computes chemical validity and uniqueness of generated molecules each validation epoch.
 
     Collects up to MAX_MOLS generated molecules, then logs:
-      - chem/validity        — fraction of structurally valid molecules
-      - chem/uniqueness      — fraction of unique valid molecules (unique SMILES / formulas)
-      - chem/heavy_atom_mean — mean number of heavy (non-H) atoms per generated molecule
-      - chem/valid_smiles    — WandB table of unique valid identifiers and their counts
+    - chem/validity        — fraction of structurally valid molecules
+    - chem/uniqueness      — fraction of unique valid molecules (unique SMILES / formulas)
+    - chem/heavy_atom_mean — mean number of heavy (non-H) atoms per generated molecule
+    - chem/valid_smiles    — WandB table of unique valid identifiers and their counts
     """
 
     MAX_MOLS = 512
