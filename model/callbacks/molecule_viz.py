@@ -1,5 +1,8 @@
 import io
 
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -7,6 +10,8 @@ from lightning.pytorch import Callback, LightningModule, Trainer
 from PIL import Image as PILImage
 
 import wandb
+
+from ..mol_utils import infer_types_single
 
 _ATOM_NAMES = ["H", "C", "N", "O", "F"]
 _ATOM_COLORS = ["lightgray", "dimgray", "steelblue", "tomato", "limegreen"]
@@ -31,7 +36,6 @@ class MoleculeVisualizationCallback(Callback):
         "phi_gen",
         "phi_real",
         "pos_gen",
-        "gen_atom_types",
         "pos_real",
         "real_atom_types",
         "gen_batch_vec",
@@ -39,11 +43,16 @@ class MoleculeVisualizationCallback(Callback):
     }
 
     def __init__(
-        self, n_molecules: int = 4, bond_threshold: float = 2.0, every_n_epochs: int = 1
+        self,
+        n_molecules: int = 4,
+        bond_threshold: float = 2.0,
+        every_n_epochs: int = 1,
+        infer_method: str = "heuristic",
     ):
         self.n_molecules = n_molecules
         self.bond_threshold = bond_threshold
         self.every_n_epochs = every_n_epochs
+        self.infer_method = infer_method
         self._ref: dict | None = None
         self._gen_atom_types: list[torch.Tensor] = []
         self._real_atom_types: list[torch.Tensor] = []
@@ -61,7 +70,10 @@ class MoleculeVisualizationCallback(Callback):
             return
         if batch_idx == 0:
             self._ref = {k: outputs[k] for k in self._REQUIRED_KEYS}
-        self._gen_atom_types.append(outputs["gen_atom_types"].cpu())
+            self._ref["gen_atom_types"] = outputs.get("gen_atom_types")
+        gen_atom_types = outputs.get("gen_atom_types")
+        if gen_atom_types is not None:
+            self._gen_atom_types.append(gen_atom_types.cpu())
         self._real_atom_types.append(outputs["real_atom_types"].argmax(dim=-1).cpu())
 
     def on_validation_epoch_end(
@@ -105,21 +117,21 @@ class MoleculeVisualizationCallback(Callback):
                 "mol/random_gen": render_group(
                     random_idx,
                     ref["pos_gen"],
-                    ref["gen_atom_types"],
+                    ref.get("gen_atom_types"),
                     gen_batch_vec,
                     "gen",
                 ),
                 "mol/best_gen": render_group(
                     best_idx,
                     ref["pos_gen"],
-                    ref["gen_atom_types"],
+                    ref.get("gen_atom_types"),
                     gen_batch_vec,
                     f"best d={nn_dists[best_idx[0]]:.2f}",
                 ),
                 "mol/worst_gen": render_group(
                     worst_idx,
                     ref["pos_gen"],
-                    ref["gen_atom_types"],
+                    ref.get("gen_atom_types"),
                     gen_batch_vec,
                     f"worst d={nn_dists[worst_idx[0]]:.2f}",
                 ),
@@ -141,7 +153,7 @@ class MoleculeVisualizationCallback(Callback):
     def _render_mol(
         self,
         pos: torch.Tensor,
-        atom_types: torch.Tensor,
+        atom_types: torch.Tensor | None,
         batch_vec: torch.Tensor,
         graph_idx: int,
         title: str = "",
@@ -149,25 +161,48 @@ class MoleculeVisualizationCallback(Callback):
 
         mask = batch_vec == graph_idx
         p = pos[mask].numpy()
-        types = atom_types[mask].numpy()
+        if atom_types is not None:
+            types = atom_types[mask].numpy()
+        elif self.infer_method is not None:
+            types = infer_types_single(p.astype(np.float64), self.infer_method)
+        else:
+            types = None
 
         fig = plt.figure(figsize=(4, 4))
         ax = fig.add_subplot(111, projection="3d")
 
-        for t, (color, name) in enumerate(zip(_ATOM_COLORS, _ATOM_NAMES)):
-            m = types == t
-            if m.any():
-                ax.scatter(
-                    p[m, 0],
-                    p[m, 1],
-                    p[m, 2],
-                    c=color,
-                    s=120,
-                    label=name,
-                    depthshade=True,
-                    edgecolors="k",
-                    linewidths=0.3,
-                )
+        has_valid_types = (
+            types is not None
+            and len(types) == len(p)
+            and np.isin(types, np.arange(len(_ATOM_NAMES))).any()
+        )
+
+        if len(p) > 0 and not has_valid_types:
+            ax.scatter(
+                p[:, 0],
+                p[:, 1],
+                p[:, 2],
+                c="steelblue",
+                s=90,
+                depthshade=True,
+                edgecolors="k",
+                linewidths=0.3,
+            )
+        elif has_valid_types:
+            for t, (color, name) in enumerate(zip(_ATOM_COLORS, _ATOM_NAMES)):
+                m = types == t
+                if m.any():
+                    ax.scatter(
+                        p[m, 0],
+                        p[m, 1],
+                        p[m, 2],
+                        c=color,
+                        s=120,
+                        label=name,
+                        depthshade=True,
+                        edgecolors="k",
+                        linewidths=0.3,
+                    )
 
         for i in range(len(p)):
             for j in range(i + 1, len(p)):
@@ -182,7 +217,9 @@ class MoleculeVisualizationCallback(Callback):
                     )
 
         ax.set_title(title, fontsize=9)
-        ax.legend(loc="upper right", fontsize=6, markerscale=0.7)
+        handles, _ = ax.get_legend_handles_labels()
+        if handles:
+            ax.legend(loc="upper right", fontsize=6, markerscale=0.7)
         ax.set_box_aspect([1, 1, 1])
 
         buf = io.BytesIO()

@@ -13,11 +13,19 @@ from lightning.pytorch.callbacks import EarlyStopping
 from lightning.pytorch.loggers import WandbLogger
 
 import wandb
-from model import (AtomTypeDistributionCallback, ChemicalValidityCallback,
-                   DriftingMoleculeGenerator, EmbeddingMonitorCallback,
-                   GeneratorCheckpointCallback, GradientMonitorCallback,
-                   MoleculeVisualizationCallback, QM9DataModule,
-                   SizeDistributionCallback, initialize_training_config, RiemannianDriftingMoleculeGenerator)
+from model import (
+    AtomTypeDistributionCallback,
+    ChemicalValidityCallback,
+    EuclideanGenerator,
+    RiemannianGenerator,
+    EmbeddingMonitorCallback,
+    GeneratorCheckpointCallback,
+    GradientMonitorCallback,
+    MoleculeVisualizationCallback,
+    QM9DataModule,
+    SizeDistributionCallback,
+    initialize_training_config,
+)
 from model.wandb_utils import load_pretrained_generator
 from parse_args import parse_args
 
@@ -36,10 +44,11 @@ def main(args: argparse.Namespace):
     try:
         datamodule = QM9DataModule(
             root=args.root,
-            batch_size=args.batch_size,
-            num_workers=args.num_workers,
+            n_real_molecules=args.n_real_molecules,
+            num_workers=min(args.num_workers, args.n_real_molecules),
             force_reload=args.force_reload,
             sample_frac=args.sample_frac,
+            max_num_atoms=args.max_num_atoms,
         )
 
         generator_cfg = {
@@ -48,12 +57,16 @@ def main(args: argparse.Namespace):
             "num_atom_types": 5,
             "num_bond_types": 5,
             "predict_bond_types": args.predict_bond_types,
+            "predict_atom_types": args.predict_atom_types,
             "pos_clamp": args.pos_clamp,
             "pos_clamp_type": args.pos_clamp_type,
             "c_pos_clamp": args.c_pos_clamp,
             "p_pos_clamp": args.p_pos_clamp,
             "norm_pos_clamp": args.norm_pos_clamp,
             "prior_pos_clamp": args.prior_pos_clamp,
+            "use_feature_extractor": args.use_feature_extractor,
+            "infer_types_from_pos": args.infer_types_from_pos,
+            "infer_method": args.infer_method,
         }
 
         drift_cfg = {
@@ -62,9 +75,13 @@ def main(args: argparse.Namespace):
             "temperatures": args.temperatures,
             "loss_variant": args.loss_variant,
             "atom_type_temp": args.atom_type_temp,
+            "n_gen_molecules": args.n_gen_molecules,
         }
 
-        model = RiemannianDriftingMoleculeGenerator(generator_cfg, drift_cfg)
+        if args.generator == "riemannian":
+            model = RiemannianGenerator(generator_cfg, drift_cfg)
+        else:
+            model = EuclideanGenerator(generator_cfg, drift_cfg)
 
         if args.wandb_run_id:
             print(f"Loading pretrained generator from wandb run: {args.wandb_run_id}")
@@ -78,7 +95,10 @@ def main(args: argparse.Namespace):
             GradientMonitorCallback(),
             EmbeddingMonitorCallback(),
             MoleculeVisualizationCallback(
-                n_molecules=4, bond_threshold=2.0, every_n_epochs=1
+                n_molecules=min(4, args.n_real_molecules),
+                bond_threshold=2.0,
+                every_n_epochs=1,
+                infer_method=args.infer_method,
             ),
             ChemicalValidityCallback(),
             # SizeDistributionCallback(),

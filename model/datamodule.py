@@ -52,17 +52,19 @@ class QM9DataModule(pl.LightningDataModule):
     def __init__(
         self,
         root: str = "data/QM9",
-        batch_size: int = 128,
+        n_real_molecules: int = 128,
         num_workers: int = 4,
         force_reload: bool = False,
         sample_frac: float = 1.0,
+        max_num_atoms: int | None = None,
     ):
         super().__init__()
         self.root = root
-        self.batch_size = batch_size
+        self.n_real_molecules = n_real_molecules
         self.num_workers = num_workers
         self.force_reload = force_reload
         self.sample_frac = sample_frac
+        self.max_num_atoms = max_num_atoms
         self.pin_memory = torch.cuda.is_available()
 
     def setup(self, stage=None):
@@ -92,10 +94,30 @@ class QM9DataModule(pl.LightningDataModule):
                     del sys.modules[k]
             sys.modules.update(_rdkit_saved)
 
+        if self.max_num_atoms is not None:
+            keep = [i for i, d in enumerate(dataset) if d.num_nodes <= self.max_num_atoms]
+            dataset = dataset.index_select(keep)
+
         n = len(dataset)
-        n_train = min(_N_TRAIN, n)
-        n_val = min(_N_VAL, n - n_train)
-        n_test = n - n_train - n_val
+        if n == 0:
+            raise ValueError(
+                "No QM9 molecules remain after filtering. "
+                "Relax --max_num_atoms or remove the filter."
+            )
+
+        if n >= _N_TRAIN + _N_VAL:
+            n_train = min(_N_TRAIN, n)
+            n_val = min(_N_VAL, n - n_train)
+            n_test = n - n_train - n_val
+        else:
+            # When filters such as --max_num_atoms shrink the dataset below the
+            # canonical QM9 split sizes, keep the same rough split proportions.
+            n_val = max(1, int(round(n * _N_VAL / (_N_TRAIN + _N_VAL))))
+            n_test = max(1, int(round(n * 0.1))) if n >= 3 else 0
+            n_train = n - n_val - n_test
+            if n_train < 1:
+                n_train = 1
+                n_val = max(0, n - n_train - n_test)
 
         # Reproducible permutation matching the EPT standard split (seed=0)
         rng = np.random.default_rng(0)
@@ -107,24 +129,26 @@ class QM9DataModule(pl.LightningDataModule):
         if self.sample_frac < 1.0:
             # Subsample each split proportionally, with a fixed secondary seed
             srng = np.random.default_rng(42)
-            train_idx = srng.choice(
-                train_idx, size=max(1, int(self.sample_frac * n_train)), replace=False
-            )
-            val_idx = srng.choice(
-                val_idx, size=max(1, int(self.sample_frac * n_val)), replace=False
-            )
-            test_idx = srng.choice(
-                test_idx, size=max(1, int(self.sample_frac * n_test)), replace=False
-            )
+            train_idx = self._subsample_split(srng, train_idx)
+            val_idx = self._subsample_split(srng, val_idx)
+            test_idx = self._subsample_split(srng, test_idx)
 
         self.train_set = Subset(dataset, train_idx)
         self.val_set = Subset(dataset, val_idx)
         self.test_set = Subset(dataset, test_idx)
 
+    def _subsample_split(
+        self, rng: np.random.Generator, indices: np.ndarray
+    ) -> np.ndarray:
+        if len(indices) == 0:
+            return indices
+        size = max(1, int(self.sample_frac * len(indices)))
+        return rng.choice(indices, size=size, replace=False)
+
     def train_dataloader(self) -> DataLoader:
         return DataLoader(
             self.train_set,
-            batch_size=self.batch_size,
+            batch_size=self.n_real_molecules,
             shuffle=True,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
@@ -134,7 +158,7 @@ class QM9DataModule(pl.LightningDataModule):
     def val_dataloader(self) -> DataLoader:
         return DataLoader(
             self.val_set,
-            batch_size=self.batch_size,
+            batch_size=self.n_real_molecules,
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,
@@ -144,7 +168,7 @@ class QM9DataModule(pl.LightningDataModule):
     def test_dataloader(self) -> DataLoader:
         return DataLoader(
             self.test_set,
-            batch_size=self.batch_size,
+            batch_size=self.n_real_molecules,
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True,

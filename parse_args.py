@@ -16,16 +16,31 @@ def parse_args():
         help="Whether to force reload the QM9 dataset (required after modifying pre_transform).",
     )
     parser.add_argument(
+        "--n_gen_molecules",
+        type=int,
+        default=64,
+        help="Number of molecules to generate per forward pass during training and validation.",
+    )
+    parser.add_argument(
         "--sample_frac",
         type=float,
         default=1.0,
         help="Fraction of each split to use (0 < sample_frac <= 1.0). Useful for quick iteration runs.",
     )
     parser.add_argument(
+        "--max_num_atoms",
+        type=int,
+        default=None,
+        help="Keep only molecules with at most this many atoms (inclusive). None means no filter.",
+    )
+    parser.add_argument(
         "--seed", type=int, default=42, help="Random seed for reproducibility."
     )
     parser.add_argument(
-        "--batch_size", type=int, default=128, help="Batch size for training."
+        "--n_real_molecules",
+        type=int,
+        default=128,
+        help="Number of real molecules per batch.",
     )
     parser.add_argument(
         "--num_workers", type=int, default=2, help="Number of workers for data loading."
@@ -48,6 +63,37 @@ def parse_args():
         "--predict_bond_types",
         action="store_true",
         help="Whether to predict bond types.",
+    )
+    parser.add_argument(
+        "--predict_atom_types",
+        action="store_true",
+        help="Whether to predict atom types.",
+    )
+    parser.add_argument(
+        "--use_feature_extractor",
+        dest="use_feature_extractor",
+        action="store_true",
+        help="Use EPT feature extraction before computing drift loss.",
+    )
+    parser.add_argument(
+        "--infer_types_from_pos",
+        action="store_true",
+        help=(
+            "Infer atom types from generated positions, replacing EGNN-predicted atom "
+            "types in the EPT feature extractor call. Method is set by --infer_method."
+        ),
+    )
+    parser.add_argument(
+        "--infer_method",
+        type=str,
+        default="heuristic",
+        choices=["degree", "heuristic"],
+        help=(
+            "Atom-type inference method used when --infer_types_from_pos is set "
+            "(and for molecule visualisation when atom types are unavailable). "
+            "'degree': simple connectivity-degree mapping. "
+            "'heuristic': QM9-specific rules using bond lengths + neighbourhood chemistry."
+        ),
     )
     parser.add_argument(
         "--temperatures",
@@ -88,13 +134,13 @@ def parse_args():
     parser.add_argument(
         "--pos_clamp",
         type=float,
-        default=10.0,
+        default=100.0,
         help="Clamp generated atom positions to [-pos_clamp, pos_clamp] after centering (Angstroms).",
     )
     parser.add_argument(
         "--pos_clamp_type",
         type=str,
-        default="geom",
+        default="hard",
         choices=["hard", "tanh", "geom"],
         help=(
             "Position clamping strategy: 'hard' (hard clamp to ±pos_clamp), "
@@ -123,8 +169,15 @@ def parse_args():
     parser.add_argument(
         "--prior_pos_clamp",
         type=float,
-        default=3.0,
+        default=4.0,
         help="Clamp prior position samples to [-prior_pos_clamp, prior_pos_clamp] standard deviations.",
+    )
+    parser.add_argument(
+        "--generator",
+        type=str,
+        default="euclidean",
+        choices=["euclidean", "riemannian"],
+        help="Generator variant to train: 'euclidean' (EPT-based) or 'riemannian' (spherical atom types).",
     )
     # Wandb args
     parser.add_argument(

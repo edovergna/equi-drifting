@@ -192,10 +192,12 @@ class EGNN(nn.Module):
         num_bond_types: int,
         n_layers: int = 4,
         predict_bond_types: bool = False,
+        predict_atom_types: bool = True,
     ):
         super().__init__()
 
         self.compute_heads = predict_bond_types
+        self.predict_atom_types = predict_atom_types
 
         self.embedding = nn.Linear(num_atom_types, hidden_nf)
 
@@ -205,7 +207,8 @@ class EGNN(nn.Module):
 
         # atom_head is always instantiated: its output feeds the EPT feature extractor.
         # bond_head is only instantiated when compute_heads=True (currently unused in loss).
-        self.atom_head = AtomHead(hidden_nf, num_atom_types)
+        if self.predict_atom_types:
+            self.atom_head = AtomHead(hidden_nf, num_atom_types)
         if predict_bond_types:
             self.bond_head = BondHead(hidden_nf, num_bond_types)
 
@@ -226,7 +229,7 @@ class EGNN(nn.Module):
             edge_attr, coord_diff = self.compute_edge_features(pos, edge_index)
             x, pos = block(x, pos, edge_index, edge_attr, coord_diff)
 
-        atom_logits = self.atom_head(x)
+        atom_logits = self.atom_head(x) if self.predict_atom_types else None
 
         if not self.compute_heads:
             return atom_logits, None, pos
