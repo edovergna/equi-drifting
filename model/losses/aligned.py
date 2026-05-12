@@ -5,6 +5,8 @@ import torch.nn.functional as F
 import wandb
 
 from . import TrainingDivergedException
+from ..spherical_utils import product_tangent_norm, sphere_exp, geodesic_distance
+
 
 def compute_aligning_drift_loss(
     pos_gen: torch.Tensor,
@@ -14,7 +16,13 @@ def compute_aligning_drift_loss(
     gen_batch_vec: torch.Tensor,
     real_batch_vec: torch.Tensor
 ) -> tuple[torch.Tensor, dict[str, float]]:
+    """
+    Drifting field loss directly on 3D molecules by aligning the generated molecules with the real ones.
+    Assumes that x_gen_sphere is already mapped to the spherical space
 
+    Returns (loss, stats) where stats is a flat dict of float diagnostics safe to
+    pass directly to self.log(). Raises TrainingDivergedException on non-finite loss.
+    """
     return None
 
 def compute_position_drift_loss(
