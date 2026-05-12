@@ -1,8 +1,5 @@
-from typing import Tuple
-
 import torch
 import torch.nn.functional as F
-import wandb
 
 from . import TrainingDivergedException
 from ..spherical_utils import product_tangent_norm, sphere_exp, geodesic_distance
@@ -16,6 +13,7 @@ def compute_aligning_drift_loss(
     gen_batch_vec: torch.Tensor,
     real_batch_vec: torch.Tensor,
     temperatures: tuple[float, ...] = (0.02, 0.05, 0.02),
+    eps: float = 1e-8
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """
     Drifting field loss directly on 3D molecules by aligning the generated molecules with the real ones.
@@ -24,6 +22,10 @@ def compute_aligning_drift_loss(
     Returns (loss, stats) where stats is a flat dict of float diagnostics safe to
     pass directly to self.log(). Raises TrainingDivergedException on non-finite loss.
     """
+    # TO ASK: currently when there is an atom to many, which is not paired, I just ignore it so that it does not 
+    # play a role in the loss. How should we incorporate this?
+
+    x_real = x_real.float()
 
     max_nodes = max(
         _max_nodes_per_graph(gen_batch_vec),
@@ -49,13 +51,63 @@ def compute_aligning_drift_loss(
     pair_mask_neg = gen_mask[:, None, :] * gen_mask[None, :, :]                 # shape: (N_gen, N_gen, max_nodes)
 
     # Calculate pairwise distances for positions of molecules
-    mol_dist_pos = _pairwise_geodesic_distance(mol_pos_gen, mol_pos_real, pair_mask_pos, "euclidean")  # shape: (N_gen, N_real)
-    mol_dist_neg = _pairwise_geodesic_distance(mol_pos_gen, old_pos_gen, pair_mask_neg, "euclidean")   # shape: (N_gen, N_real)
+    posit_dist_pos, posit_diff_pos = _pairwise_geodesic_distance(mol_pos_gen, mol_pos_real, pair_mask_pos, "euclidean")  # shape: (N_gen, N_real)
+    posit_dist_neg, posit_diff_neg = _pairwise_geodesic_distance(mol_pos_gen, old_pos_gen, pair_mask_neg, "euclidean")   # shape: (N_gen, N_gen)
+
+    # TODO: change atom types to spherical space, currently in euclidean space
+    types_dist_pos, types_diff_pos = _pairwise_geodesic_distance(mol_x_gen_sphere, mol_x_real, pair_mask_pos, "euclidean")
+    types_dist_neg, types_diff_neg = _pairwise_geodesic_distance(mol_x_gen_sphere, old_x_gen_sphere, pair_mask_neg, "euclidean")
 
     # Mask self connections in negative with high value
-    mol_dist_neg.fill_diagonal_(1e8)
+    posit_dist_neg.fill_diagonal_(1e8)
+    types_dist_neg.fill_diagonal_(1e8)
 
-    return None
+    v_pos_across_tau = torch.zeros_like(old_pos_gen)
+    v_type_across_tau = torch.zeros_like(old_x_gen_sphere)
+
+    for tau in temperatures:
+        v_posit_tau = _compute_V_at_temp(tau, posit_dist_pos, posit_dist_neg, posit_diff_pos, posit_diff_neg)
+        v_types_tau = _compute_V_at_temp(tau, types_dist_pos, types_dist_neg, types_diff_pos, types_diff_neg)
+
+        # Rescale per temp
+        lambda_posit_t = v_posit_tau.pow(2).mean().sqrt().clamp_min(eps)
+        v_posit_tau = v_posit_tau / lambda_posit_t
+        
+        lambda_types_t = v_types_tau.pow(2).mean().sqrt().clamp_min(eps)
+        v_types_tau = v_types_tau / lambda_types_t
+
+        v_pos_across_tau += v_posit_tau
+        v_type_across_tau += v_types_tau
+
+    # TODO: add rescaling of V
+
+    # Calculate target for positions
+    target_positions = (old_pos_gen + v_pos_across_tau).detach()            # shape [N_mol, max_atoms, 3]
+
+    # Calculate target for atom types via the exponential mapping of the spherical space
+    target_types = sphere_exp(old_x_gen_sphere, v_type_across_tau, eps).detach()     # shape: [N_mol, max_atoms, 5]
+
+    # Distance metric for the euclidean space
+    molecule_position_dist = ((mol_pos_gen - target_positions).pow(2).sum(dim=-1) * gen_mask).sum(dim=-1) / gen_mask.sum(dim=-1).clamp_min(1.0)
+
+    # Geodesic distances for atom types on the sphere
+    molecule_types_dist = (geodesic_distance(mol_x_gen_sphere, target_types, eps).pow(2) * gen_mask).sum(dim=-1) / gen_mask.sum(dim=-1).clamp_min(1.0)
+
+    # Combine the distances per molecule, then loss is average distance
+    combined_dist = molecule_position_dist + molecule_types_dist
+    loss = combined_dist.mean()
+
+    if not torch.isfinite(loss):
+        raise TrainingDivergedException(f"Non-finite loss ({loss.item()!r}). ")
+    # TODO: check if rescaling combined distance is needed
+    stats: dict[str, float] = {}
+    with torch.no_grad():
+        stats["average_position_distance"] = molecule_position_dist.mean().item()
+        stats["average_types_distance"] = molecule_types_dist.mean().item()
+        stats["std_position_distance"] = molecule_position_dist.std().item()
+        stats["std_types_distance"] = molecule_types_dist.std().item()
+
+    return loss, stats
 
 
 def _pairwise_geodesic_distance(
@@ -84,8 +136,47 @@ def _pairwise_geodesic_distance(
     elif manifold == "spherical":
         distances = ...
     else:
-        raise ValueError("Undefined geodesic distance queried.")
-    return distances
+        raise ValueError("Undefined manifold.")
+    return distances, diff
+
+
+def _compute_V_at_temp(
+    temp: float,
+    dist_pos: torch.Tensor,
+    dist_neg: torch.Tensor,
+    diff_pos: torch.Tensor,
+    diff_neg: torch.Tensor,
+    manifold: str = "euclidean",
+) -> torch.Tensor:  
+    
+    if manifold == "euclidean":
+        log_k_pos = - (dist_pos / temp)
+        log_k_neg = - (dist_neg / temp)
+
+        W_pos = F.softmax(log_k_pos, dim=-1)
+        W_neg = F.softmax(log_k_neg, dim=-1)
+
+        min_laplace_dist = 0.01
+        inv_dist_pos = 1.0 / dist_pos.clamp_min(min_laplace_dist)
+
+        dist_neg_safe = dist_neg.clone()
+        dist_neg_safe.fill_diagonal_(1.0)
+        inv_dist_neg = 1.0 / dist_neg_safe.clamp_min(min_laplace_dist)
+
+        # TO ASK: ask about sqrt dim in floor's code
+        term_pos = diff_pos * inv_dist_pos.unsqueeze(-1).unsqueeze(-1) / temp
+        term_neg = diff_neg * inv_dist_neg.unsqueeze(-1).unsqueeze(-1) / temp
+
+        V_pos_at_temp = (W_pos.unsqueeze(-1).unsqueeze(-1) * term_pos).sum(dim=1)
+        V_neg_at_temp = (W_neg.unsqueeze(-1).unsqueeze(-1) * term_neg).sum(dim=1)
+
+        V_at_temp = V_pos_at_temp - V_neg_at_temp
+    elif manifold == "spherical":
+        # TO ASK: ask about whtether the gradient version behaves differently under spherical manifold
+        V_at_temp = ...
+    else:
+        raise ValueError("Undefined manifold.")
+    return V_at_temp
 
 
 def _molecules_to_padded(

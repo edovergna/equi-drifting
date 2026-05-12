@@ -98,13 +98,13 @@ def sphere_exp(x: torch.Tensor, v: torch.Tensor, eps: float = 1e-8) -> torch.Ten
 
 
 def geodesic_distance(
-    x: torch.Tensor,  # [N_atoms, 5]
-    y: torch.Tensor,  # [N_atoms, 5]
+    x: torch.Tensor,  # [Num_mol, max_atoms, 5]
+    y: torch.Tensor,  # [Num_mol, max_atoms, 5]
     eps: float = 1e-8,
 ) -> torch.Tensor:
     x = sphere_normalize(x, eps)
     y = sphere_normalize(y, eps)
 
-    dot = (x * y).sum(dim=-1).clamp(-1.0 + 1e-7, 1.0 - 1e-7)  # [N_atoms]
-    return torch.acos(dot)  # [N_atoms]
+    dot = (x * y).sum(dim=-1).clamp(-1.0 + 1e-7, 1.0 - 1e-7) 
+    return torch.acos(dot)  # [N_mol, max_atoms]
 
