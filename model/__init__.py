@@ -4,5 +4,5 @@ from .callbacks import (AtomTypeDistributionCallback, ChemicalValidityCallback,
                         SizeDistributionCallback)
 from .datamodule import QM9DataModule
 from .litmodules.euclidean import EuclideanGenerator
-from .litmodules.riemanian import RiemmanianGenerator
+from .litmodules.riemannian import RiemannianGenerator
 from .train_utils import initialize_training_config

@@ -9,7 +9,7 @@ from ..losses.riemannian import compute_molecule_based_drift_loss
 from .base import BaseDriftingMoleculeGenerator
 
 
-class RiemmanianGenerator(BaseDriftingMoleculeGenerator):
+class RiemannianGenerator(BaseDriftingMoleculeGenerator):
     _SAVE_COMPONENTS = ["generator"]
     _LOAD_COMPONENTS = ["generator"]
 

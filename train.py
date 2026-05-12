@@ -17,7 +17,7 @@ from model import (
     AtomTypeDistributionCallback,
     ChemicalValidityCallback,
     EuclideanGenerator,
-    RiemmanianGenerator,
+    RiemannianGenerator,
     EmbeddingMonitorCallback,
     GeneratorCheckpointCallback,
     GradientMonitorCallback,
@@ -80,7 +80,7 @@ def main(args: argparse.Namespace):
         }
 
         if args.generator == "riemannian":
-            model = RiemmanianGenerator(generator_cfg, drift_cfg)
+            model = RiemannianGenerator(generator_cfg, drift_cfg)
         else:
             model = EuclideanGenerator(generator_cfg, drift_cfg)
 
