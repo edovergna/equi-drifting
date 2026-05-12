@@ -4,9 +4,18 @@ import torch
 import torch.nn.functional as F
 import wandb
 
+from . import TrainingDivergedException
 
-class TrainingDivergedException(Exception):
-    """Raised when the drift loss becomes non-finite. Triggers a clean training stop."""
+def compute_aligning_drift_loss(
+    pos_gen: torch.Tensor,
+    pos_real: torch.Tensor,
+    x_gen_sphere: torch.Tensor,
+    x_real: torch.Tensor,
+    gen_batch_vec: torch.Tensor,
+    real_batch_vec: torch.Tensor
+) -> tuple[torch.Tensor, dict[str, float]]:
+
+    return None
 
 def compute_position_drift_loss(
     pos_gen: torch.Tensor,

@@ -9,14 +9,10 @@ from torch.optim.lr_scheduler import OneCycleLR
 
 from ..losses.aligned import (
     TrainingDivergedException,
-    # compute_inverse_attn_drift_loss,
-    # compute_norm_based_drift_loss,
-    # compute_position_drift_loss,
-    # original_compute_drift_loss,
+    compute_aligning_drift_loss
 )
 from ..egnn import EGNN
 from ..geometry import center_positions_per_graph, per_graph_center_norms
-from ..mol_utils import infer_types_from_pos_batch
 from ..sample_prior import compute_size_distribution, sample_prior_batch
 
 from ..spherical_utils import (probs_to_sphere, sphere_to_probs)
@@ -183,32 +179,6 @@ class AlignedDriftingMoleculeGenerator(LightningModule):
             gen_batch_vec,
         )
 
-    def _compute_loss(
-        self,
-        pos_gen: torch.Tensor,
-        pos_real: torch.Tensor,
-        atom_gen: torch.Tensor,
-        atom_real: torch.Tensor,
-        gen_batch_vec: torch.Tensor | None = None,
-        real_batch_vec: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, dict]:
-        # if not self.use_feature_extractor:
-        #     return compute_position_drift_loss(
-        #         phi_gen,
-        #         phi_real,
-        #         gen_batch_vec,
-        #         real_batch_vec,
-        #         self.temperatures,
-        #     )
-        # if self.loss_variant == "original":
-        #     return original_compute_drift_loss(phi_gen, phi_real, self.temperatures)
-        # elif self.loss_variant == "inverse_attn":
-        #     return compute_inverse_attn_drift_loss(phi_gen, phi_real, self.temperatures)
-        # else:
-        #     return compute_norm_based_drift_loss(phi_gen, phi_real, self.temperatures)
-
-        return None
-
     def on_after_backward(self):
         if self._norm_rescale_grad is not None:
             self.log(
@@ -224,8 +194,7 @@ class AlignedDriftingMoleculeGenerator(LightningModule):
         pos_real, x_real = batch.pos, batch.real_atom_types
 
         try:
-            #TODO: change to the aligned drift loss
-            loss, stats = self._compute_loss(
+            loss, stats = compute_aligning_drift_loss(
                 pos_gen, pos_real, x_gen_sphere, x_real, gen_batch_vec, batch.batch
             )
         except TrainingDivergedException as e:
@@ -279,8 +248,7 @@ class AlignedDriftingMoleculeGenerator(LightningModule):
 
         pos_real, x_real = batch.pos, batch.real_atom_types
 
-        #TODO: change to the aligned drift loss
-        val_loss, stats = self._compute_loss(
+        val_loss, stats = compute_aligning_drift_loss(
                 pos_gen, pos_real, x_gen_sphere, x_real, gen_batch_vec, batch.batch
             )
 
@@ -357,8 +325,7 @@ class AlignedDriftingMoleculeGenerator(LightningModule):
         pos_gen, x_gen_sphere, gen_batch_vec = self._forward(batch)
         pos_real, x_real = batch.pos, batch.real_atom_types
 
-        #TODO: change to the aligned drift loss
-        test_loss, _ = self._compute_loss(
+        test_loss, _ = compute_aligning_drift_loss(
                 pos_gen, pos_real, x_gen_sphere, x_real, gen_batch_vec, batch.batch
             )
 
