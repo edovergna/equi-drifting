@@ -5,8 +5,8 @@ import torch.nn.functional as F
 
 from ept.ept_loader import load_ept_feature_extractor
 
-from ..drift_loss import (
-    TrainingDivergedException,
+from ..losses import TrainingDivergedException
+from ..losses.euclidean import (
     compute_inverse_attn_drift_loss,
     compute_norm_based_drift_loss,
     compute_position_drift_loss,

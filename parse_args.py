@@ -172,6 +172,13 @@ def parse_args():
         default=4.0,
         help="Clamp prior position samples to [-prior_pos_clamp, prior_pos_clamp] standard deviations.",
     )
+    parser.add_argument(
+        "--generator",
+        type=str,
+        default="euclidean",
+        choices=["euclidean", "riemannian"],
+        help="Generator variant to train: 'euclidean' (EPT-based) or 'riemannian' (spherical atom types).",
+    )
     # Wandb args
     parser.add_argument(
         "--wandb_run_id",

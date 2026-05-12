@@ -17,6 +17,7 @@ from model import (
     AtomTypeDistributionCallback,
     ChemicalValidityCallback,
     EuclideanGenerator,
+    RiemmanianGenerator,
     EmbeddingMonitorCallback,
     GeneratorCheckpointCallback,
     GradientMonitorCallback,
@@ -78,7 +79,10 @@ def main(args: argparse.Namespace):
             "n_gen_molecules": args.n_gen_molecules,
         }
 
-        model = EuclideanGenerator(generator_cfg, drift_cfg)
+        if args.generator == "riemannian":
+            model = RiemmanianGenerator(generator_cfg, drift_cfg)
+        else:
+            model = EuclideanGenerator(generator_cfg, drift_cfg)
 
         if args.wandb_run_id:
             print(f"Loading pretrained generator from wandb run: {args.wandb_run_id}")

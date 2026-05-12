@@ -1,13 +1,11 @@
 import torch
 import torch.nn.functional as F
 
-from ..drift_losses.mol_drift_loss import (
-    TrainingDivergedException,
-    compute_molecule_based_drift_loss,
-)
 from ..egnn import EGNN
 from ..geometry import batch_size_for_logging, center_positions_per_graph, per_graph_center_norms
-from ..spherical_utils import probs_to_sphere, sphere_to_probs
+from ..losses import TrainingDivergedException
+from ..losses.geometry import probs_to_sphere, sphere_to_probs
+from ..losses.riemannian import compute_molecule_based_drift_loss
 from .base import BaseDriftingMoleculeGenerator
 
 
