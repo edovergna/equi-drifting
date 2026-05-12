@@ -45,7 +45,7 @@ def parse_args() -> argparse.Namespace:
         "--infer_method",
         type=str,
         default="heuristic",
-        choices=["degree", "heuristic"],
+        choices=["degree", "heuristic", "stability"],
         help="Atom-type inference method to benchmark.",
     )
     parser.add_argument(
