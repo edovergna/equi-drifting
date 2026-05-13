@@ -219,3 +219,8 @@ __marimo__/
 settings.json
 
 checkpoints/
+
+
+*.out
+
+ls

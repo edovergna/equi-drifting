@@ -3,5 +3,6 @@ from .callbacks import (AtomTypeDistributionCallback, ChemicalValidityCallback,
                         GradientMonitorCallback, MoleculeVisualizationCallback,
                         SizeDistributionCallback)
 from .datamodule import QM9DataModule
-from .lit_modules import DriftingMoleculeGenerator
+from .litmodules.euclidean import EuclideanGenerator
+from .litmodules.riemannian import RiemannianGenerator
 from .train_utils import initialize_training_config

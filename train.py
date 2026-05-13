@@ -16,7 +16,8 @@ import wandb
 from model import (
     AtomTypeDistributionCallback,
     ChemicalValidityCallback,
-    DriftingMoleculeGenerator,
+    EuclideanGenerator,
+    RiemannianGenerator,
     EmbeddingMonitorCallback,
     GeneratorCheckpointCallback,
     GradientMonitorCallback,
@@ -57,12 +58,16 @@ def main(args: argparse.Namespace):
             "num_atom_types": 5,
             "num_bond_types": 5,
             "predict_bond_types": args.predict_bond_types,
+            "predict_atom_types": args.predict_atom_types,
             "pos_clamp": args.pos_clamp,
             "pos_clamp_type": args.pos_clamp_type,
             "c_pos_clamp": args.c_pos_clamp,
             "p_pos_clamp": args.p_pos_clamp,
             "norm_pos_clamp": args.norm_pos_clamp,
             "prior_pos_clamp": args.prior_pos_clamp,
+            "use_feature_extractor": args.use_feature_extractor,
+            "infer_types_from_pos": args.infer_types_from_pos,
+            "infer_method": args.infer_method,
         }
 
         drift_cfg = {
@@ -79,7 +84,10 @@ def main(args: argparse.Namespace):
             "equiv_phi_mode": args.equiv_phi_mode,
         }
 
-        model = DriftingMoleculeGenerator(generator_cfg, drift_cfg)
+        if args.generator == "riemannian":
+            model = RiemannianGenerator(generator_cfg, drift_cfg)
+        else:
+            model = EuclideanGenerator(generator_cfg, drift_cfg)
 
         if args.wandb_run_id:
             print(f"Loading pretrained generator from wandb run: {args.wandb_run_id}")
@@ -96,6 +104,7 @@ def main(args: argparse.Namespace):
                 n_molecules=min(4, args.n_real_molecules),
                 bond_threshold=2.0,
                 every_n_epochs=1,
+                infer_method=args.infer_method,
             ),
             ChemicalValidityCallback(),
             # SizeDistributionCallback(),

@@ -56,9 +56,13 @@ def sample_atom_dirichlet_noise(
         A_prob: [total_nodes, num_atom_types]
         S_sqrt: [total_nodes, num_atom_types]
     """
-    alpha_atom = torch.ones(num_atom_types, device=device, dtype=dtype)
+    sample_device = device
+    if device is not None and getattr(device, "type", None) == "mps":
+        sample_device = torch.device("cpu")
+
+    alpha_atom = torch.ones(num_atom_types, device=sample_device, dtype=dtype)
     dist = torch.distributions.Dirichlet(alpha_atom)
-    A_prob = dist.sample((total_nodes,))
+    A_prob = dist.sample((total_nodes,)).to(device)
     S_sqrt = torch.sqrt(A_prob.clamp_min(1e-12))
     return A_prob, S_sqrt
 

@@ -13,6 +13,19 @@ module load 2025
 module load Anaconda3/2025.06-1
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate equi
+
 cd "$HOME/dutch-daniel2"
 
-python train.py --sample_frac 1.0 --lr 1e-4 --check_val_every_n_epoch 10 --max_epochs 300 --num_workers 8 --n_real_molecules 2048 --hidden_dim 256 --num_layers 8  --gradient_clip_val 0.1 --phi_mode moments --equiv_phi_mode vector
+python train.py \
+  --group_tag test_moments \
+  --sample_frac 0.01 \
+  --n_real_molecules 4 \
+  --n_gen_molecules 32 \
+  --max_num_atoms 18 \
+  --num_workers 8 \
+  --max_epochs 50 \
+  --check_val_every_n_epoch 5 \
+  --hidden_dim 256 \
+  --num_layers 8 \
+  --phi_mode moments \
+  --equiv_phi_mode vector
