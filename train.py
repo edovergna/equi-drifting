@@ -1,4 +1,5 @@
 import sys
+import traceback
 from pathlib import Path
 
 # Make sure the project root is in the Python path for imports
@@ -35,7 +36,7 @@ def main(args: argparse.Namespace):
 
     run = wandb.init(
         entity="equivariant-drifting",
-        project="riemannian",
+        project="test-chemical-props",
         group=args.group_tag,
         mode="offline" if args.offline else "online",
         config=vars(args),
@@ -130,6 +131,8 @@ def main(args: argparse.Namespace):
         print("\nTraining interrupted.")
         wandb.finish()
     except Exception:
+        print("\nAn error occurred during training:")
+        traceback.print_exc()
         wandb.finish(exit_code=1)
         raise
     else:
