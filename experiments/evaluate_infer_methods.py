@@ -93,7 +93,7 @@ def main() -> None:
     dm.setup()
 
     test_loader = DataLoader(
-        dm.test_set,
+        dm.train_set,
         batch_size=_BATCH_SIZE,
         shuffle=False,
         num_workers=0,
