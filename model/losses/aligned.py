@@ -23,7 +23,7 @@ def compute_aligning_drift_loss(
     pass directly to self.log(). Raises TrainingDivergedException on non-finite loss.
     """
     # TO ASK: currently when there is an atom to many, which is not paired, I just ignore it so that it does not 
-    # play a role in the loss. How should we incorporate this?
+    # play a role in the loss. How should we incorporate this? -> conditional on number of atoms
 
     x_real = x_real.float()
 
@@ -34,7 +34,7 @@ def compute_aligning_drift_loss(
 
     mol_pos_gen, mol_x_gen_sphere, gen_mask = _molecules_to_padded(pos_gen, x_gen_sphere, gen_batch_vec, max_nodes)
     mol_pos_real, mol_x_real, real_mask = _molecules_to_padded(pos_real, x_real, real_batch_vec, max_nodes)
-
+    
     # TODO: add aligning here
 
     # Assume for now that the molecules are aligned, so that the atoms are ordered in a way that they correspond
