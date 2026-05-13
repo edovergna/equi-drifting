@@ -33,9 +33,8 @@ class MoleculeVisualizationCallback(Callback):
     """
 
     _REQUIRED_KEYS = {
-        "phi_gen",
-        "phi_real",
         "pos_gen",
+        "gen_atom_types"
         "pos_real",
         "real_atom_types",
         "gen_batch_vec",
@@ -92,19 +91,17 @@ class MoleculeVisualizationCallback(Callback):
 
         try:
             ref = self._ref
-            phi_gen = ref["phi_gen"].float()
-            phi_real = ref["phi_real"].float()
             gen_batch_vec = ref["gen_batch_vec"]
             real_batch_vec = ref["batch_vec"]
-            n_graphs = int(phi_gen.shape[0])
+            n_gen_graphs = gen_batch_vec.max() + 1
 
-            nn_dists = torch.cdist(phi_gen, phi_real).min(dim=1).values
-            all_idx = list(range(n_graphs))
-            ranked = sorted(all_idx, key=lambda i: nn_dists[i].item())
+
+            all_idx = list(range(n_gen_graphs))
+            #ranked = sorted(all_idx, key=lambda i: nn_dists[i].item())
 
             random_idx = all_idx[: self.n_molecules]
-            best_idx = ranked[: self.n_molecules]
-            worst_idx = ranked[-self.n_molecules :]
+            #best_idx = ranked[: self.n_molecules]
+            #worst_idx = ranked[-self.n_molecules :]
 
             def render_group(indices, pos, atom_types, bvec, label_prefix):
                 return [
@@ -121,23 +118,24 @@ class MoleculeVisualizationCallback(Callback):
                     gen_batch_vec,
                     "gen",
                 ),
-                "mol/best_gen": render_group(
-                    best_idx,
-                    ref["pos_gen"],
-                    ref.get("gen_atom_types"),
-                    gen_batch_vec,
-                    f"best d={nn_dists[best_idx[0]]:.2f}",
-                ),
-                "mol/worst_gen": render_group(
-                    worst_idx,
-                    ref["pos_gen"],
-                    ref.get("gen_atom_types"),
-                    gen_batch_vec,
-                    f"worst d={nn_dists[worst_idx[0]]:.2f}",
-                ),
                 "mol/real_ref": render_group(
                     random_idx, ref["pos_real"], real_atom_types, real_batch_vec, "real"
                 ),
+                # "mol/best_gen": render_group(
+                #     best_idx,
+                #     ref["pos_gen"],
+                #     ref.get("gen_atom_types"),
+                #     gen_batch_vec,
+                #     f"best d={nn_dists[best_idx[0]]:.2f}",
+                # ),
+                # "mol/worst_gen": render_group(
+                #     worst_idx,
+                #     ref["pos_gen"],
+                #     ref.get("gen_atom_types"),
+                #     gen_batch_vec,
+                #     f"worst d={nn_dists[worst_idx[0]]:.2f}",
+                # ),
+                
             }
 
             if gen_types is not None and real_types is not None:

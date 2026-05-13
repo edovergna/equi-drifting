@@ -92,21 +92,21 @@ def main(args: argparse.Namespace):
                 args.wandb_run_id, model, variant=args.wandb_variant
             )
 
-        #gen_ckpt = GeneratorCheckpointCallback(monitor="val_loss", mode="min")
+        gen_ckpt = GeneratorCheckpointCallback(monitor="val_loss", mode="min")
 
         callbacks = [
             GradientMonitorCallback(),
             ChemicalValidityCallback(),
+            gen_ckpt,
+            MoleculeVisualizationCallback(
+                n_molecules=min(10, args.n_real_molecules),
+                bond_threshold=2.0,
+                every_n_epochs=1,
+                infer_method=args.infer_method,
+            ),
+            SizeDistributionCallback(),
             # EmbeddingMonitorCallback(),
-            # MoleculeVisualizationCallback(
-            #     n_molecules=min(4, args.n_real_molecules),
-            #     bond_threshold=2.0,
-            #     every_n_epochs=1,
-            #     infer_method=args.infer_method,
-            # ),
-            # SizeDistributionCallback(),
             # AtomTypeDistributionCallback(),
-            #gen_ckpt,
         ]
 
         trainer = pl.Trainer(
