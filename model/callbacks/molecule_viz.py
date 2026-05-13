@@ -34,7 +34,7 @@ class MoleculeVisualizationCallback(Callback):
 
     _REQUIRED_KEYS = {
         "pos_gen",
-        "gen_atom_types"
+        "gen_atom_types",
         "pos_real",
         "real_atom_types",
         "gen_batch_vec",
