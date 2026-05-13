@@ -177,8 +177,8 @@ def parse_args():
         "--generator",
         type=str,
         default="euclidean",
-        choices=["euclidean", "riemannian"],
-        help="Generator variant to train: 'euclidean' (EPT-based) or 'riemannian' (spherical atom types).",
+        choices=["euclidean", "riemannian", "aligned"],
+        help="Generator variant to train: 'euclidean' (EPT-based) or 'riemannian' (spherical atom types) or 'aligned'.",
     )
     # Wandb args
     parser.add_argument(

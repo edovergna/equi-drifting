@@ -44,10 +44,7 @@ class GeneratorCheckpointCallback(Callback):
         if self._is_better(current):
             self._best_score = current
             self._best_state_dict = copy.deepcopy(pl_module.generator.state_dict())
-            if pl_module._is_feature_extractor_trainable():
-                self._best_fe_state_dict = copy.deepcopy(
-                    pl_module.feature_extractor.ept_model.state_dict()
-                )
+            
 
     def _save_and_log(self, trainer: Trainer, pl_module: LightningModule) -> None:
         logger = trainer.logger
@@ -72,29 +69,13 @@ class GeneratorCheckpointCallback(Callback):
                 f"({self.monitor}={self._best_score:.6f})."
             )
 
-        if pl_module._is_feature_extractor_trainable():
-            fe_final_path = os.path.join(save_path, "feature_extractor_final.pth")
-            torch.save(
-                pl_module.feature_extractor.ept_model.state_dict(), fe_final_path
-            )
-            wandb.save(fe_final_path, base_path=run_dir)
-            print("Logged feature_extractor_final.pth to wandb.")
-
-            if self._best_fe_state_dict is not None:
-                fe_best_path = os.path.join(save_path, "feature_extractor_best.pth")
-                torch.save(self._best_fe_state_dict, fe_best_path)
-                wandb.save(fe_best_path, base_path=run_dir)
-                print("Logged feature_extractor_best.pth to wandb.")
+    
 
     def load_best_weights(self, pl_module: LightningModule) -> bool:
         """Loads the best in-memory state dict(s) into pl_module. Returns True if applied."""
         if self._best_state_dict is None:
             return False
         pl_module.generator.load_state_dict(self._best_state_dict)
-        if self._best_fe_state_dict is not None:
-            pl_module.feature_extractor.ept_model.load_state_dict(
-                self._best_fe_state_dict
-            )
         print(
             f"Loaded best weights ({self.monitor}={self._best_score:.6f}) into model."
         )

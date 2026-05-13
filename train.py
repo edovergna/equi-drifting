@@ -25,6 +25,7 @@ from model import (
     MoleculeVisualizationCallback,
     QM9DataModule,
     SizeDistributionCallback,
+    AlignedDriftingMoleculeGenerator,
     initialize_training_config,
 )
 from model.wandb_utils import load_pretrained_generator
@@ -36,7 +37,7 @@ def main(args: argparse.Namespace):
 
     run = wandb.init(
         entity="equivariant-drifting",
-        project="test-chemical-props",
+        project="aligned",
         group=args.group_tag,
         mode="offline" if args.offline else "online",
         config=vars(args),
@@ -81,6 +82,8 @@ def main(args: argparse.Namespace):
 
         if args.generator == "riemannian":
             model = RiemannianGenerator(generator_cfg, drift_cfg)
+        elif args.generator == "aligned":
+            model = AlignedDriftingMoleculeGenerator(generator_cfg, drift_cfg)
         else:
             model = EuclideanGenerator(generator_cfg, drift_cfg)
 
@@ -94,17 +97,17 @@ def main(args: argparse.Namespace):
 
         callbacks = [
             GradientMonitorCallback(),
-            EmbeddingMonitorCallback(),
+            ChemicalValidityCallback(),
+            gen_ckpt,
             MoleculeVisualizationCallback(
-                n_molecules=min(4, args.n_real_molecules),
+                n_molecules=min(10, args.n_real_molecules),
                 bond_threshold=2.0,
                 every_n_epochs=1,
                 infer_method=args.infer_method,
             ),
-            ChemicalValidityCallback(),
-            # SizeDistributionCallback(),
+            SizeDistributionCallback(),
+            # EmbeddingMonitorCallback(),
             # AtomTypeDistributionCallback(),
-            gen_ckpt,
         ]
 
         trainer = pl.Trainer(

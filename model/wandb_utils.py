@@ -10,7 +10,6 @@ WANDB_ENTITY = "equivariant-drifting"
 WANDB_PROJECT = "col-daniel-tests"
 WANDB_PATH = f"{WANDB_ENTITY}/{WANDB_PROJECT}"
 
-# TODO: check wether load and saving models is compatible with riemannian encoder
 
 def load_config(wandb_run_id: str):
     api = wandb.Api()

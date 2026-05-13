@@ -5,4 +5,5 @@ from .callbacks import (AtomTypeDistributionCallback, ChemicalValidityCallback,
 from .datamodule import QM9DataModule
 from .litmodules.euclidean import EuclideanGenerator
 from .litmodules.riemannian import RiemannianGenerator
+from .litmodules.aligned_lit_module import AlignedDriftingMoleculeGenerator
 from .train_utils import initialize_training_config
