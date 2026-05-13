@@ -17,6 +17,7 @@ class RiemannianGenerator(BaseDriftingMoleculeGenerator):
         default_generator_cfg = {
             "hidden_nf": 128,
             "n_layers": 2,
+            "coord_aggr": "mean",
             "num_atom_types": 5,
             "num_bond_types": 5,
             "coordinate_clamp_range": 5.0,
@@ -51,6 +52,7 @@ class RiemannianGenerator(BaseDriftingMoleculeGenerator):
             num_atom_types=cfg["num_atom_types"],
             num_bond_types=cfg["num_bond_types"],
             predict_bond_types=cfg["predict_bond_types"],
+            coord_aggr=cfg["coord_aggr"],
         )
 
     def _is_feature_extractor_trainable(self) -> bool:

@@ -26,6 +26,7 @@ class EuclideanGenerator(BaseDriftingMoleculeGenerator):
         default_generator_cfg = {
             "hidden_nf": 128,
             "n_layers": 2,
+            "coord_aggr": "mean",
             "num_atom_types": 5,
             "num_bond_types": 5,
             "coordinate_clamp_range": 3.0,
@@ -92,6 +93,7 @@ class EuclideanGenerator(BaseDriftingMoleculeGenerator):
             num_bond_types=cfg["num_bond_types"],
             predict_bond_types=cfg["predict_bond_types"],
             predict_atom_types=cfg["predict_atom_types"],
+            coord_aggr=cfg["coord_aggr"],
         )
 
     def _init_feature_extractor(self):

@@ -36,7 +36,7 @@ def main(args: argparse.Namespace):
 
     run = wandb.init(
         entity="equivariant-drifting",
-        project="test-chemical-props",
+        project="olivier-tests",
         group=args.group_tag,
         mode="offline" if args.offline else "online",
         config=vars(args),
@@ -55,6 +55,7 @@ def main(args: argparse.Namespace):
         generator_cfg = {
             "hidden_nf": args.hidden_dim,
             "n_layers": args.num_layers,
+            "coord_aggr": args.coord_aggr,
             "num_atom_types": 5,
             "num_bond_types": 5,
             "predict_bond_types": args.predict_bond_types,

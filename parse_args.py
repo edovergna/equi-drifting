@@ -127,6 +127,13 @@ def parse_args():
         help="Number of layers for the EGNN model.",
     )
     parser.add_argument(
+        "--coord_aggr",
+        type=str,
+        default="mean",
+        choices=["add", "mean"],
+        help="Aggregation method for EGNN coordinate updates.",
+    )
+    parser.add_argument(
         "--atom_type_temp",
         type=float,
         default=1.0,

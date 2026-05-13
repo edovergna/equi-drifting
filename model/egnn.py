@@ -74,9 +74,15 @@ class EquivariantUpdate(MessagePassing):
     }
 
     def __init__(
-        self, hidden_nf: int, edges_in_d: int = 1, act_fn: nn.Module = nn.SiLU()
+        self,
+        hidden_nf: int,
+        edges_in_d: int = 1,
+        act_fn: nn.Module = nn.SiLU(),
+        coord_aggr: str = "mean",
     ):
-        super().__init__(aggr="add")
+        if coord_aggr not in {"add", "mean"}:
+            raise ValueError(f"Unsupported coordinate aggregation: {coord_aggr}")
+        super().__init__(aggr=coord_aggr)
 
         input_edge = hidden_nf * 2 + edges_in_d
 
@@ -120,14 +126,14 @@ class EquivariantUpdate(MessagePassing):
 
 
 class EquivariantBlock(nn.Module):
-    def __init__(self, hidden_nf: int, n_layers: int = 2):
+    def __init__(self, hidden_nf: int, n_layers: int = 2, coord_aggr: str = "mean"):
         super().__init__()
 
         self.gcls = nn.ModuleList(
             [GCL(hidden_nf, hidden_nf, hidden_nf) for _ in range(n_layers)]
         )
 
-        self.coord_update = EquivariantUpdate(hidden_nf)
+        self.coord_update = EquivariantUpdate(hidden_nf, coord_aggr=coord_aggr)
 
     def forward(
         self,
@@ -193,16 +199,21 @@ class EGNN(nn.Module):
         n_layers: int = 4,
         predict_bond_types: bool = False,
         predict_atom_types: bool = True,
+        coord_aggr: str = "mean",
     ):
         super().__init__()
 
         self.compute_heads = predict_bond_types
         self.predict_atom_types = predict_atom_types
+        self.coord_aggr = coord_aggr
 
         self.embedding = nn.Linear(num_atom_types, hidden_nf)
 
         self.blocks = nn.ModuleList(
-            [EquivariantBlock(hidden_nf) for _ in range(n_layers)]
+            [
+                EquivariantBlock(hidden_nf, coord_aggr=coord_aggr)
+                for _ in range(n_layers)
+            ]
         )
 
         # atom_head is always instantiated: its output feeds the EPT feature extractor.
