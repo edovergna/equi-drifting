@@ -17,6 +17,7 @@ Usage:
 
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -31,7 +32,12 @@ import wandb
 from torch_geometric.loader import DataLoader
 
 from model.datamodule import QM9DataModule
-from model.mol_utils import infer_types_from_pos_batch
+from model.mol_utils import (
+    batch_to_stability,
+    batch_to_validity,
+    heavy_atom_counts,
+    infer_types_from_pos_batch,
+)
 
 _BATCH_SIZE = 256
 _ELEM_NAMES = ["H", "C", "N", "O", "F"]
@@ -104,6 +110,11 @@ def main() -> None:
     total_time = 0.0
     n_evaluated = 0
 
+    pos_list: list[torch.Tensor] = []
+    atype_list: list[torch.Tensor] = []
+    bvec_list: list[torch.Tensor] = []
+    offset = 0
+
     print(f"Evaluating '{args.infer_method}' on up to {args.n_molecules} molecules ...")
     for data in test_loader:
         if n_evaluated >= args.n_molecules:
@@ -129,6 +140,11 @@ def main() -> None:
         for t, p in zip(true_idx.tolist(), pred_idx.tolist()):
             confusion[t, p] += 1
 
+        pos_list.append(data.pos.cpu())
+        atype_list.append(pred_idx.cpu())
+        bvec_list.append(data.batch.cpu() + offset)
+        offset += n_in_batch
+
         n_evaluated += n_in_batch
         print(f"  {n_evaluated}/{args.n_molecules} evaluated ...", end="\r")
 
@@ -150,6 +166,27 @@ def main() -> None:
             confusion[i, i] / true_count if true_count else 0.0
         )
 
+    # Chemical validity / stability on inferred atom types
+    pos = torch.cat(pos_list, dim=0)
+    a_hard = torch.cat(atype_list, dim=0)
+    bvec = torch.cat(bvec_list, dim=0)
+
+    results = batch_to_validity(pos, a_hard, bvec)
+    heavy = heavy_atom_counts(a_hard, bvec)
+    atom_stable_frac, mol_stable_frac = batch_to_stability(pos, a_hard, bvec)
+
+    n_total = len(results)
+    n_valid = sum(1 for ok, _ in results if ok)
+    valid_ids = [ident for ok, ident in results if ok and ident is not None]
+
+    metrics["chem/validity"] = n_valid / n_total if n_total > 0 else 0.0
+    metrics["chem/uniqueness"] = (
+        len(set(valid_ids)) / len(valid_ids) if valid_ids else 0.0
+    )
+    metrics["chem/heavy_atom_mean"] = float(np.mean(heavy)) if heavy else 0.0
+    metrics["chem/atom_stability"] = atom_stable_frac
+    metrics["chem/mol_stability"] = mol_stable_frac
+
     print("\n=== Results ===")
     for k, v in metrics.items():
         print(f"  {k}: {v:.4f}" if isinstance(v, float) else f"  {k}: {v}")
@@ -162,6 +199,14 @@ def main() -> None:
     for i, elem in enumerate(_ELEM_NAMES):
         conf_table.add_data(elem, *confusion[i].tolist())
     wandb.log({"confusion_matrix": conf_table})
+
+    try:
+        table = wandb.Table(columns=["identifier", "count"])
+        for ident, cnt in Counter(valid_ids).most_common(50):
+            table.add_data(ident, cnt)
+        wandb.log({"chem/valid_smiles": table})
+    except Exception:
+        pass
 
     run.finish()
 
