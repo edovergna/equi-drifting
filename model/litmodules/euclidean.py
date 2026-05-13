@@ -407,7 +407,7 @@ class EuclideanGenerator(BaseDriftingMoleculeGenerator):
 
         bs = self.n_gen_molecules
 
-        if self.atom_type_loss_weight > 0.0:
+        if self.atom_type_loss_weight > 0.0 and gen_atom_types is not None:
             gen_type_dist = gen_atom_types.float().mean(dim=0)  # [5], STE grad
             real_type_dist = batch.real_atom_types.float().mean(dim=0).detach()  # [5]
             atom_type_loss = F.mse_loss(gen_type_dist, real_type_dist)
@@ -462,7 +462,7 @@ class EuclideanGenerator(BaseDriftingMoleculeGenerator):
             phi_gen, phi_real, gen_batch_vec, batch.batch
         )
 
-        if self.atom_type_loss_weight > 0.0:
+        if self.atom_type_loss_weight > 0.0 and gen_atom_types is not None:
             gen_type_dist = gen_atom_types.float().mean(dim=0)
             real_type_dist = batch.real_atom_types.float().mean(dim=0).detach()
             atom_type_loss = F.mse_loss(gen_type_dist, real_type_dist)
