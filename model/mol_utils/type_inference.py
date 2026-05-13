@@ -1,11 +1,16 @@
 import numpy as np
 import torch
 
-from .bonds import get_bond_order
 from .constants import (
     _ATOM_NAMES,
     _ATOMIC_NUMS,
     _STABLE_VALENCE,
+    _BONDS1,
+    _BONDS2,
+    _BONDS3,
+    _MARGIN1,
+    _MARGIN2,
+    _MARGIN3,
     _GENERIC_BOND_THRESHOLD,
     _H_BOND_MAX,
     _CARBONYL_O_MAX,
@@ -69,7 +74,12 @@ def _infer_types_from_degree(positions: np.ndarray) -> np.ndarray:
     adj = (dists < _GENERIC_BOND_THRESHOLD) & (dists > 0)
     degrees = adj.sum(axis=1)
 
-    type_indices = np.where(degrees >= 2, 1, 0)
+    type_indices = np.where(
+        degrees >= 4, 1,
+        np.where(degrees == 3, 2,
+        np.where(degrees == 2, 3,
+        0)),
+    )
 
     terminal_mask = degrees == 1
     if terminal_mask.any():
@@ -136,12 +146,37 @@ def _infer_types_heuristic(positions: np.ndarray) -> np.ndarray:
     return types
 
 
+def _build_bo_table(n: int, dists: np.ndarray) -> np.ndarray:
+    """Precompute bo_table[i, j, c1, c2]: bond order when atom i has type c1, j has type c2.
+
+    Uses vectorised numpy threshold comparisons over the full n×n distance matrix
+    for each of the 25 QM9 type-pair combinations — no per-pair Python loop.
+    """
+    n_types = 5
+    bo_table = np.zeros((n, n, n_types, n_types), dtype=np.int8)
+    for c1 in range(n_types):
+        for c2 in range(n_types):
+            a1, a2 = _ATOM_NAMES[c1], _ATOM_NAMES[c2]
+            t1 = _BONDS1.get(a1, {}).get(a2) or _BONDS1.get(a2, {}).get(a1)
+            if t1 is None:
+                continue
+            t2 = _BONDS2.get(a1, {}).get(a2) or _BONDS2.get(a2, {}).get(a1)
+            t3 = _BONDS3.get(a1, {}).get(a2) or _BONDS3.get(a2, {}).get(a1)
+            slab = bo_table[:, :, c1, c2]
+            slab[dists < (t1 + _MARGIN1) / 100.0] = 1
+            if t2 is not None:
+                slab[dists < (t2 + _MARGIN2) / 100.0] = 2
+            if t3 is not None:
+                slab[dists < (t3 + _MARGIN3) / 100.0] = 3
+            np.fill_diagonal(slab, 0)
+    return bo_table
+
+
 def _infer_types_stability_guided(positions: np.ndarray) -> np.ndarray:
     """Heuristic seed refined by greedy bond-order stability maximisation.
 
-    Uses the EDM bond-length tables (via get_bond_order) to compute per-atom
-    bond totals, then iteratively flips each unstable atom to the candidate
-    type that gains the most stable atoms, until fully stable or no improvement.
+    Precomputes all possible bond orders into a lookup table, then uses
+    vectorised incremental delta updates — no per-pair loops in the refinement.
     """
     types = _infer_types_heuristic(positions).copy()
     n = len(types)
@@ -149,42 +184,46 @@ def _infer_types_stability_guided(positions: np.ndarray) -> np.ndarray:
         return types
 
     dists = np.linalg.norm(positions[:, None] - positions[None, :], axis=-1)
+    bo_table = _build_bo_table(n, dists)
 
-    def _bond_counts(t):
-        counts = np.zeros(n, dtype=int)
-        for i in range(n):
-            for j in range(i + 1, n):
-                o = get_bond_order(_ATOM_NAMES[t[i]], _ATOM_NAMES[t[j]], dists[i, j])
-                counts[i] += o
-                counts[j] += o
-        return counts
+    stable_vals = np.array([_STABLE_VALENCE[_ATOMIC_NUMS[c]] for c in range(5)])
+    idx = np.arange(n)
 
-    def _n_stable(t, counts):
-        return sum(counts[i] == _STABLE_VALENCE[_ATOMIC_NUMS[t[i]]] for i in range(n))
+    # counts[i] = sum_j bo_table[i, j, types[i], types[j]]
+    counts = bo_table[idx[:, None], idx[None, :], types[:, None], types[None, :]].sum(axis=1)
 
     for _ in range(n):
-        counts = _bond_counts(types)
-        n_stable = _n_stable(types, counts)
-        if n_stable == n:
+        targets = stable_vals[types]
+        stable_mask = counts == targets
+        if stable_mask.all():
             break
 
-        stable_mask = np.array([
-            counts[i] == _STABLE_VALENCE[_ATOMIC_NUMS[types[i]]] for i in range(n)
-        ])
         best_gain, best_i, best_c = 0, -1, -1
+        n_curr = int(stable_mask.sum())
 
         for i in np.where(~stable_mask)[0]:
             for c in range(5):
                 if c == types[i]:
                     continue
-                trial = types.copy()
-                trial[i] = c
-                gain = _n_stable(trial, _bond_counts(trial)) - n_stable
+                # O(n) vectorised delta: bond count changes when atom i flips to type c
+                delta = (bo_table[i, idx, c, types] - bo_table[i, idx, types[i], types]).astype(int)
+                delta[i] = 0  # no self-bond
+                trial_counts = counts + delta
+                trial_counts[i] += delta.sum()
+                trial_targets = targets.copy()
+                trial_targets[i] = stable_vals[c]
+                gain = int((trial_counts == trial_targets).sum()) - n_curr
                 if gain > best_gain:
                     best_gain, best_i, best_c = gain, i, c
 
         if best_i == -1:
             break
+
+        # Apply the best flip and update counts incrementally
+        delta = (bo_table[best_i, idx, best_c, types] - bo_table[best_i, idx, types[best_i], types]).astype(int)
+        delta[best_i] = 0
+        counts += delta
+        counts[best_i] += delta.sum()
         types[best_i] = best_c
 
     return types
