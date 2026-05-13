@@ -53,14 +53,14 @@ class DriftingMoleculeGenerator(LightningModule):
             "final_div_factor": 1e4,
             # KL divergence weight for atom-type distribution matching.
             # Prevents the generator from collapsing to a single atom type.
-            "atom_type_loss_weight": 1.0,
+            "atom_type_loss_weight": 0.0,
             # Geometry loss: penalise atom overlap and isolated atoms.
             # Overlap term: pairs closer than 0.7 Å.
             # Isolation term: atoms with no neighbour within 2.5 Å.
-            "geom_loss_weight": 1.0,
+            "geom_loss_weight": 0.0,
             # Soft valence loss: penalise wrong bond counts per atom type.
             # Directly targets validity. Anneals naturally alongside geom_loss.
-            "valence_loss_weight": 1.0,
+            "valence_loss_weight": 0.0,
             # How to build the per-molecule fingerprint fed to the drift loss:
             #   'graph_repr' — EPT's variance-preserving sum of atom features [G, 512] (default/legacy)
             #   'moments'    — cat(mean(H_atoms), std(H_atoms)) per graph [G, 1024];
@@ -88,9 +88,9 @@ class DriftingMoleculeGenerator(LightningModule):
         self.loss_variant = self.drift_cfg["loss_variant"]
         self.atom_type_temp = self.drift_cfg.get("atom_type_temp", 1.0)
         self.n_gen_molecules = self.drift_cfg.get("n_gen_molecules", 64)
-        self.atom_type_loss_weight = self.drift_cfg.get("atom_type_loss_weight", 1.0)
-        self.geom_loss_weight = self.drift_cfg.get("geom_loss_weight", 1.0)
-        self.valence_loss_weight = self.drift_cfg.get("valence_loss_weight", 1.0)
+        self.atom_type_loss_weight = self.drift_cfg.get("atom_type_loss_weight", 0.0)
+        self.geom_loss_weight = self.drift_cfg.get("geom_loss_weight", 0.0)
+        self.valence_loss_weight = self.drift_cfg.get("valence_loss_weight", 0.0)
         self.phi_mode = self.drift_cfg.get("phi_mode", "graph_repr")
         self.equiv_phi_mode = self.drift_cfg.get("equiv_phi_mode", "norm")
         self.pos_clamp = self.generator_cfg["pos_clamp"]
