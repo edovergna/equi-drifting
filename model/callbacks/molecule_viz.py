@@ -11,6 +11,8 @@ from PIL import Image as PILImage
 
 import wandb
 
+from ..mol_utils import infer_types_single
+
 _ATOM_NAMES = ["H", "C", "N", "O", "F"]
 _ATOM_COLORS = ["lightgray", "dimgray", "steelblue", "tomato", "limegreen"]
 
@@ -41,11 +43,16 @@ class MoleculeVisualizationCallback(Callback):
     }
 
     def __init__(
-        self, n_molecules: int = 4, bond_threshold: float = 2.0, every_n_epochs: int = 1
+        self,
+        n_molecules: int = 4,
+        bond_threshold: float = 2.0,
+        every_n_epochs: int = 1,
+        infer_method: str = "heuristic",
     ):
         self.n_molecules = n_molecules
         self.bond_threshold = bond_threshold
         self.every_n_epochs = every_n_epochs
+        self.infer_method = infer_method
         self._ref: dict | None = None
         self._gen_atom_types: list[torch.Tensor] = []
         self._real_atom_types: list[torch.Tensor] = []
@@ -154,7 +161,12 @@ class MoleculeVisualizationCallback(Callback):
 
         mask = batch_vec == graph_idx
         p = pos[mask].numpy()
-        types = atom_types[mask].numpy() if atom_types is not None else None
+        if atom_types is not None:
+            types = atom_types[mask].numpy()
+        elif self.infer_method is not None:
+            types = infer_types_single(p.astype(np.float64), self.infer_method)
+        else:
+            types = None
 
         fig = plt.figure(figsize=(4, 4))
         ax = fig.add_subplot(111, projection="3d")
