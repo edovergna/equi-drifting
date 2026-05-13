@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 
 from . import TrainingDivergedException
-from ..spherical_utils import product_tangent_norm, sphere_exp, geodesic_distance
+from ..spherical_utils import product_tangent_norm, sphere_exp, geodesic_distance, sphere_normalize, sphere_project_tangent
 
 
 def compute_aligning_drift_loss(
@@ -51,12 +51,13 @@ def compute_aligning_drift_loss(
     pair_mask_neg = gen_mask[:, None, :] * gen_mask[None, :, :]                 # shape: (N_gen, N_gen, max_nodes)
 
     # Calculate pairwise distances for positions of molecules
-    posit_dist_pos, posit_diff_pos = _pairwise_geodesic_distance(mol_pos_gen, mol_pos_real, pair_mask_pos, "euclidean")  # shape: (N_gen, N_real)
-    posit_dist_neg, posit_diff_neg = _pairwise_geodesic_distance(mol_pos_gen, old_pos_gen, pair_mask_neg, "euclidean")   # shape: (N_gen, N_gen)
+    posit_dist_pos, posit_diff_pos = _pairwise_geodesic_distance(mol_pos_gen, mol_pos_real, pair_mask_pos, "euclidean")  
+    posit_dist_neg, posit_diff_neg = _pairwise_geodesic_distance(mol_pos_gen, old_pos_gen, pair_mask_neg, "euclidean")   
 
-    # TODO: change atom types to spherical space, currently in euclidean space
-    types_dist_pos, types_diff_pos = _pairwise_geodesic_distance(mol_x_gen_sphere, mol_x_real, pair_mask_pos, "euclidean")
-    types_dist_neg, types_diff_neg = _pairwise_geodesic_distance(mol_x_gen_sphere, old_x_gen_sphere, pair_mask_neg, "euclidean")
+    # Calculate pairwise distances for types of molecules in spherical space
+    types_dist_pos, types_diff_pos = _pairwise_geodesic_distance(mol_x_gen_sphere, mol_x_real, pair_mask_pos, "spherical")
+    types_dist_neg, types_diff_neg = _pairwise_geodesic_distance(mol_x_gen_sphere, old_x_gen_sphere, pair_mask_neg, "spherical")    
+    # TO ASK: should we rescale these distances
 
     # Mask self connections in negative with high value
     posit_dist_neg.fill_diagonal_(1e8)
@@ -79,7 +80,9 @@ def compute_aligning_drift_loss(
         v_pos_across_tau += v_posit_tau
         v_type_across_tau += v_types_tau
 
-    # TODO: add rescaling of V
+    # TODO: add rescaling of V, PLUS ASK IF NECESSARY
+
+    v_type_across_tau = sphere_project_tangent(old_x_gen_sphere, v_type_across_tau)
 
     # Calculate target for positions
     target_positions = (old_pos_gen + v_pos_across_tau).detach()            # shape [N_mol, max_atoms, 3]
@@ -114,7 +117,8 @@ def _pairwise_geodesic_distance(
         x: torch.Tensor,
         y: torch.Tensor,
         pair_mask: torch.Tensor,
-        manifold: str = "euclidean"
+        manifold: str = "euclidean",
+        eps: float = 1e-8,
 ) -> torch.Tensor:
     """
     Calculates the pairwise distance between atoms for the molecule attributes depending on 
@@ -134,7 +138,25 @@ def _pairwise_geodesic_distance(
         num_atoms_shared = pair_mask.sum(dim=-1).clamp_min(1.0)                 # shape: (N_x, N_y)
         distances = torch.sqrt(masked_sq_dist.sum(dim=-1) / num_atoms_shared)   # shape: (N_x, N_y)
     elif manifold == "spherical":
-        distances = ...
+        x = sphere_normalize(x, eps)
+        y = sphere_normalize(y, eps)
+
+        dot = torch.einsum("blc,nlc->bnl", x, y).clamp(-1.0 + 1e-7, 1.0 - 1e-7)
+        theta = torch.acos(dot)  # [N_x, N_y, max_nodes]
+        distances = torch.sqrt(theta.pow(2).sum(dim=-1).clamp_min(eps))  # [N_x, N_y]
+
+        u = y.unsqueeze(0) - dot.unsqueeze(-1) * x.unsqueeze(1)  # [N_x, N_y, max_nodes, z]
+        u_norm = u.norm(dim=-1, keepdim=True)
+
+        scale = theta.unsqueeze(-1) / u_norm.clamp_min(eps)
+        out = scale * u
+
+        small = theta.unsqueeze(-1) < 1e-5
+        first_order = sphere_project_tangent(
+            x.unsqueeze(1), y.unsqueeze(0) - x.unsqueeze(1)
+        )
+        out = torch.where(small, first_order, out)
+        diff = sphere_project_tangent(x.unsqueeze(1), out)  # shape: (N_x, N_y, max_nodes, z)
     else:
         raise ValueError("Undefined manifold.")
     return distances, diff
