@@ -45,7 +45,7 @@ def parse_args() -> argparse.Namespace:
         "--infer_method",
         type=str,
         default="heuristic",
-        choices=["degree", "heuristic"],
+        choices=["degree", "heuristic", "stability"],
         help="Atom-type inference method to benchmark.",
     )
     parser.add_argument(
@@ -93,7 +93,7 @@ def main() -> None:
     dm.setup()
 
     test_loader = DataLoader(
-        dm.test_set,
+        dm.train_set,
         batch_size=_BATCH_SIZE,
         shuffle=False,
         num_workers=0,

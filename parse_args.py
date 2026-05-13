@@ -87,12 +87,13 @@ def parse_args():
         "--infer_method",
         type=str,
         default="heuristic",
-        choices=["degree", "heuristic"],
+        choices=["degree", "heuristic", "stability"],
         help=(
             "Atom-type inference method used when --infer_types_from_pos is set "
             "(and for molecule visualisation when atom types are unavailable). "
             "'degree': simple connectivity-degree mapping. "
             "'heuristic': QM9-specific rules using bond lengths + neighbourhood chemistry."
+            "'stability': heuristic seed refined by greedy bond-order stability maximisation."
         ),
     )
     parser.add_argument(
