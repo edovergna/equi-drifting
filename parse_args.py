@@ -246,22 +246,10 @@ def parse_args():
         help="Trainer precision mode. Use auto to pick fast safe defaults.",
     )
     parser.add_argument(
-        "--atom_type_loss_weight",
-        type=float,
-        default=1.0,
-        help="Weight for the KL divergence atom-type distribution matching loss. 0 to disable.",
-    )
-    parser.add_argument(
         "--gradient_clip_val",
         type=float,
         default=0.1,
         help="Maximum gradient norm for clipping. Lower values prevent exploding gradients.",
-    )
-    parser.add_argument(
-        "--geom_loss_weight",
-        type=float,
-        default=1.0,
-        help="Weight for the geometry loss (overlap + isolation penalty on 3D positions). 0 to disable.",
     )
     parser.add_argument(
         "--equiv_phi_mode",
@@ -286,11 +274,5 @@ def parse_args():
             "'moments' (mean+std of per-atom H_atoms, 1024-dim; implicitly encodes "
             "valence/geometry via EPT pretraining)."
         ),
-    )
-    parser.add_argument(
-        "--valence_loss_weight",
-        type=float,
-        default=1.0,
-        help="Weight for the soft valence loss. Penalises wrong bond counts per atom type. 0 to disable.",
     )
     return parser.parse_args()
