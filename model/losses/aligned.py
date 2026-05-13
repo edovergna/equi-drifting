@@ -119,7 +119,7 @@ def _pairwise_geodesic_distance(
         pair_mask: torch.Tensor,
         manifold: str = "euclidean",
         eps: float = 1e-8,
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Calculates the pairwise distance between atoms for the molecule attributes depending on 
     the specified geodesic distance. Assumed that molecules are aligned.
@@ -143,7 +143,9 @@ def _pairwise_geodesic_distance(
 
         dot = torch.einsum("blc,nlc->bnl", x, y).clamp(-1.0 + 1e-7, 1.0 - 1e-7)
         theta = torch.acos(dot)  # [N_x, N_y, max_nodes]
-        distances = torch.sqrt(theta.pow(2).sum(dim=-1).clamp_min(eps))  # [N_x, N_y]
+        masked_theta_sq = theta.pow(2) * pair_mask
+
+        distances = torch.sqrt(masked_theta_sq.pow(2).sum(dim=-1).clamp_min(eps))  # [N_x, N_y]
 
         u = y.unsqueeze(0) - dot.unsqueeze(-1) * x.unsqueeze(1)  # [N_x, N_y, max_nodes, z]
         u_norm = u.norm(dim=-1, keepdim=True)
@@ -157,6 +159,8 @@ def _pairwise_geodesic_distance(
         )
         out = torch.where(small, first_order, out)
         diff = sphere_project_tangent(x.unsqueeze(1), out)  # shape: (N_x, N_y, max_nodes, z)
+
+        diff = diff * pair_mask.unsqueeze(-1)
     else:
         raise ValueError("Undefined manifold.")
     return distances, diff
