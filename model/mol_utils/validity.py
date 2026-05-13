@@ -4,6 +4,8 @@ import numpy as np
 import torch
 from rdkit import Chem
 from rdkit.Chem import RWMol
+from rdkit import RDLogger
+RDLogger.DisableLog('rdApp.*')
 
 from .bonds import get_bond_order, _RDKIT_BOND_TYPES
 from .constants import (
