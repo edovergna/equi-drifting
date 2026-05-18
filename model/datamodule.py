@@ -16,6 +16,8 @@ from .sample_prior import get_dense_edge_index
 # Matches gen_splits_gdb9 in the EPT preprocessing script: seed=0, 110k/10k/rest.
 _N_TRAIN = 110_000
 _N_VAL = 10_000
+_MIN_QM9_ATOMS = 5
+_MAX_QM9_ATOMS = 29
 
 
 class EncodeAtomTypesTransform:
@@ -56,7 +58,7 @@ class QM9DataModule(pl.LightningDataModule):
         num_workers: int = 4,
         force_reload: bool = False,
         sample_frac: float = 1.0,
-        max_num_atoms: int | None = None,
+        num_atoms: int | None = None,
     ):
         super().__init__()
         self.root = root
@@ -64,7 +66,7 @@ class QM9DataModule(pl.LightningDataModule):
         self.num_workers = num_workers
         self.force_reload = force_reload
         self.sample_frac = sample_frac
-        self.max_num_atoms = max_num_atoms
+        self.num_atoms = num_atoms
         self.pin_memory = torch.cuda.is_available()
 
     def setup(self, stage=None):
@@ -94,15 +96,20 @@ class QM9DataModule(pl.LightningDataModule):
                     del sys.modules[k]
             sys.modules.update(_rdkit_saved)
 
-        if self.max_num_atoms is not None:
-            keep = [i for i, d in enumerate(dataset) if d.num_nodes <= self.max_num_atoms]
+        if self.num_atoms is not None:
+            if not _MIN_QM9_ATOMS <= self.num_atoms <= _MAX_QM9_ATOMS:
+                raise ValueError(
+                    f"num_atoms must be between {_MIN_QM9_ATOMS} and {_MAX_QM9_ATOMS}, "
+                    f"got {self.num_atoms}."
+                )
+            keep = [i for i, d in enumerate(dataset) if d.num_nodes == self.num_atoms]
             dataset = dataset.index_select(keep)
 
         n = len(dataset)
         if n == 0:
             raise ValueError(
                 "No QM9 molecules remain after filtering. "
-                "Relax --max_num_atoms or remove the filter."
+                "Relax --max_num_atoms/--num_atoms or remove the filter."
             )
 
         if n >= _N_TRAIN + _N_VAL:

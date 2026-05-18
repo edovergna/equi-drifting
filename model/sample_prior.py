@@ -24,13 +24,14 @@ def get_dense_edge_index(n: int, device: torch.device) -> torch.Tensor:
 
 
 def compute_size_distribution(dataset) -> tuple[np.ndarray, np.ndarray]:
-    """Compute empirical atom-count distribution over the full underlying QM9 dataset."""
-    underlying = dataset.dataset if hasattr(dataset, "dataset") else dataset
-
-    if hasattr(underlying, "slices") and "pos" in underlying.slices:
-        sizes = torch.diff(underlying.slices["pos"])  # [n_molecules]
+    """Compute empirical atom-count distribution over the provided QM9 dataset."""
+    if hasattr(dataset, "dataset") and hasattr(dataset, "indices"):
+        sizes = torch.tensor([dataset.dataset[int(i)].num_nodes for i in dataset.indices])
     else:
-        sizes = torch.tensor([underlying[i].num_nodes for i in range(len(underlying))])
+        sizes = torch.tensor([dataset[i].num_nodes for i in range(len(dataset))])
+
+    if sizes.numel() == 0:
+        raise ValueError("Cannot compute atom-count distribution for an empty dataset.")
 
     counts = torch.bincount(sizes.long())
     mask = counts > 0

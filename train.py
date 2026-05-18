@@ -49,7 +49,7 @@ def main(args: argparse.Namespace):
             num_workers=min(args.num_workers, args.n_real_molecules),
             force_reload=args.force_reload,
             sample_frac=args.sample_frac,
-            max_num_atoms=args.max_num_atoms,
+            num_atoms=args.num_atoms,
         )
 
         generator_cfg = {
