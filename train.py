@@ -18,7 +18,6 @@ from model import (
     AtomTypeDistributionCallback,
     ChemicalValidityCallback,
     MoleculeGenerator,
-    EmbeddingMonitorCallback,
     GeneratorCheckpointCallback,
     GradientMonitorCallback,
     MoleculeVisualizationCallback,
@@ -91,7 +90,6 @@ def main(args: argparse.Namespace):
 
         callbacks = [
             GradientMonitorCallback(),
-            EmbeddingMonitorCallback(),
             MoleculeVisualizationCallback(
                 n_molecules=min(4, args.n_real_molecules),
                 bond_threshold=2.0,

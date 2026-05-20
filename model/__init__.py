@@ -1,5 +1,5 @@
 from .callbacks import (AtomTypeDistributionCallback, ChemicalValidityCallback,
-                        EmbeddingMonitorCallback, GeneratorCheckpointCallback,
+                        GeneratorCheckpointCallback,
                         GradientMonitorCallback, MoleculeVisualizationCallback,
                         SizeDistributionCallback)
 from .datamodule import QM9DataModule
