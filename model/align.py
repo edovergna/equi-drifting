@@ -1,8 +1,9 @@
 # Adding Kabsch algorithm and Hungarian method
 import torch
 from torch_linear_assignment import batch_linear_assignment
-# TODO: add configs + add multiple sigmas
-@torch.no_grad()
+from .spherical_utils import sphere_normalize
+
+
 def _kabsch_rotations(gen_pos, real_pos):
     """
     Supports:
@@ -76,8 +77,8 @@ def _hungarian_method_batched(
     gen_pos,
     real_pos,
     eps,
-    type_weight=1.0,
-    pos_weight=0.0,
+    t_weight=1.0,
+    p_weight=1.0,
 ):
     cost_matrix = _build_cost_matrix(
         gen_types=gen_types,
@@ -85,8 +86,8 @@ def _hungarian_method_batched(
         gen_pos=gen_pos,
         real_pos=real_pos,
         eps=eps,
-        type_weight=type_weight,
-        pos_weight=pos_weight,
+        t_weight=t_weight,
+        p_weight=p_weight,
     )
 
     N_gen = cost_matrix.shape[0]
@@ -109,8 +110,8 @@ def _build_cost_matrix(
     gen_pos,
     real_pos,
     eps,
-    type_weight=1.0,
-    pos_weight=0.0,
+    t_weight=1.0,
+    p_weight=1.0,
 ):
     """
     Supports:
@@ -157,7 +158,7 @@ def _build_cost_matrix(
 
     pos_cost = (gen_pos_exp - real_pos_exp).pow(2).sum(dim=-1)
 
-    cost_matrix = type_weight * type_cost + pos_weight * pos_cost
+    cost_matrix = t_weight * type_cost + p_weight * pos_cost
 
     return cost_matrix
 
@@ -253,18 +254,22 @@ def unpermute_real_order_to_gen_order(x_perm, assignment):
 
     return x
 
-# TODO: change inputs to cfg
+
+@torch.no_grad()
 def find_rotation_and_permutation(
     gen_pos,
     real_pos,
     gen_types,
     real_types,
-    sigma,
-    eps,
-    max_iter,
-    pos_tol=1e-4,
-    min_iter=1,
+    cfg
 ):
+
+    eps = cfg["eps"]
+    max_iter = cfg["max_iter"]
+    pos_tol = cfg["p_tol"]
+    p_weight = cfg["p_weight"]
+    t_weight = cfg["t_weight"]
+
     g_types = gen_types.clone().detach()
     g_pos = gen_pos.clone().detach()
 
@@ -286,7 +291,7 @@ def find_rotation_and_permutation(
     ).view(1, 1, 3, 3).expand(N_gen, N_real, 3, 3).clone()
 
     for step in range(max_iter):
-        pos_weight = 0.0 if step == 0 else 0.1
+        pos_weight = 0.0 if step == 0 else p_weight
         old_g_pos = _to_pairwise(g_pos, N_real)
         old_g_types = _to_pairwise(g_types, N_real)
 
@@ -296,8 +301,8 @@ def find_rotation_and_permutation(
             g_pos,
             real_pos,
             eps=eps,
-            type_weight=1.0,
-            pos_weight=pos_weight,
+            t_weight=t_weight,
+            p_weight=pos_weight,
         )
         
         cand_g_pos = permute_generated_to_real_order(g_pos, step_assignment)
@@ -334,10 +339,7 @@ def find_rotation_and_permutation(
         rmse = _pairwise_position_rmse(g_pos, real_pos)
         done = rmse <= pos_tol
 
-        if step + 1 < min_iter:
-            active = torch.ones_like(done)
-        else:
-            active = ~done
+        active = ~done
 
         if not active.any():
             break
