@@ -270,8 +270,8 @@ def find_rotation_and_permutation(
     p_weight = cfg["p_weight"]
     t_weight = cfg["t_weight"]
 
-    g_types = gen_types.clone().detach()
-    g_pos = gen_pos.clone().detach()
+    g_types = gen_types.copy()
+    g_pos = gen_pos.copy()
 
     N_gen = gen_pos.shape[0]
     N_real = real_pos.shape[0]
