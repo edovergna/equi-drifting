@@ -4,7 +4,6 @@ import torch.nn.functional as F
 from .spherical_utils import product_tangent_norm, sphere_exp, geodesic_distance, sphere_normalize, sphere_project_tangent
 from .align import find_rotation_and_permutation, permute_generated_to_real_order, apply_pairwise_rotation, unpermute_real_order_to_gen_order
 
-# TODO: add reshaping within loss
 class TrainingDivergedException(Exception):
     """Raised when the drift loss becomes non-finite. Triggers a clean training stop."""
 
