@@ -5,7 +5,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train a flow matching model on QM9.")
 
     # --------------------------
-    # Data
+    # Data Args
     # --------------------------
     parser.add_argument(
         "--root",
@@ -19,17 +19,12 @@ def parse_args():
         help="Whether to force reload the QM9 dataset (required after modifying pre_transform).",
     )
     parser.add_argument(
-        "--n_gen_molecules",
-        type=int,
-        default=64,
-        help="Number of molecules to generate per forward pass during training and validation.",
-    )
-    parser.add_argument(
         "--sample_frac",
         type=float,
         default=1.0,
         help="Fraction of each split to use (0 < sample_frac <= 1.0). Useful for quick iteration runs.",
     )
+    # TODO: should become the exact number of atoms
     parser.add_argument(
         "--max_num_atoms",
         type=int,
@@ -38,6 +33,12 @@ def parse_args():
     )
     parser.add_argument(
         "--seed", type=int, default=42, help="Random seed for reproducibility."
+    )
+    parser.add_argument(
+        "--n_gen_molecules",
+        type=int,
+        default=64,
+        help="Number of molecules to generate per forward pass during training and validation.",
     )
     parser.add_argument(
         "--n_real_molecules",
@@ -50,7 +51,7 @@ def parse_args():
     )
 
     # --------------------
-    # Optimization
+    # Optimization Args
     # --------------------
     parser.add_argument(
         "--max_epochs", type=int, default=120, help="Maximum number of training epochs."
@@ -66,63 +67,8 @@ def parse_args():
     )
 
     # ------------------
-    # Model Args
+    # EGNN Args
     # ------------------
-    parser.add_argument(
-        "--predict_bond_types",
-        action="store_true",
-        help="Whether to predict bond types.",
-    )
-    parser.add_argument(
-        "--predict_atom_types",
-        action="store_true",
-        help="Whether to predict atom types.",
-    )
-    parser.add_argument(
-        "--use_feature_extractor",
-        dest="use_feature_extractor",
-        action="store_true",
-        help="Use EPT feature extraction before computing drift loss.",
-    )
-    parser.add_argument(
-        "--infer_types_from_pos",
-        action="store_true",
-        help=(
-            "Infer atom types from generated positions, replacing EGNN-predicted atom "
-            "types in the EPT feature extractor call. Method is set by --infer_method."
-        ),
-    )
-    parser.add_argument(
-        "--infer_method",
-        type=str,
-        default="heuristic",
-        choices=["degree", "heuristic", "stability"],
-        help=(
-            "Atom-type inference method used when --infer_types_from_pos is set "
-            "(and for molecule visualisation when atom types are unavailable). "
-            "'degree': simple connectivity-degree mapping. "
-            "'heuristic': QM9-specific rules using bond lengths + neighbourhood chemistry."
-            "'stability': heuristic seed refined by greedy bond-order stability maximisation."
-        ),
-    )
-    parser.add_argument(
-        "--temperatures",
-        type=float,
-        nargs="+",
-        default=[0.02, 0.05, 0.2],
-        help="Temperature values for the drifting field (space-separated, e.g. --temperatures 0.02 0.05 0.2).",
-    )
-    parser.add_argument(
-        "--loss_variant",
-        type=str,
-        default="norm_based",
-        choices=["original", "inverse_attn", "norm_based"],
-        help=(
-            "Drift loss variant: 'original' (coupled attention weighting, single tau), "
-            "'inverse_attn' (normalized attention weighting, multi-tau), "
-            "'norm_based' (norm-difference kernel, multi-tau)."
-        ),
-    )
     parser.add_argument(
         "--hidden_dim",
         type=int,
@@ -136,69 +82,108 @@ def parse_args():
         help="Number of layers for the EGNN model.",
     )
     parser.add_argument(
-        "--coord_aggr",
+        "--aggr_type",
         type=str,
-        default="mean",
-        choices=["add", "mean"],
+        default="sum",
+        choices=["sum", "mean"],
         help="Aggregation method for EGNN coordinate updates.",
     )
+    parser.add_argument(
+        "--attention",
+        type=bool,
+        default=True,
+        help="Whether EGNN model uses attention."
+    )
+    parser.add_argument(
+        "--tanh_coord_updates",
+        type=bool,
+        default=False,
+        help="Whether to use tanh coordinate updates in EGNN."
+    )
+    #TODO: check if needed
     parser.add_argument(
         "--atom_type_temp",
         type=float,
         default=1.0,
         help="Temperature (tau) for Gumbel-softmax atom type sampling during generation.",
     )
+
+    # -----------------------
+    # Drift Loss Args
+    # -----------------------
+    # TODO: to be checked
     parser.add_argument(
-        "--pos_clamp",
+        "--position_sigma",
         type=float,
-        default=100.0,
-        help="Clamp generated atom positions to [-pos_clamp, pos_clamp] after centering (Angstroms).",
+        default=1.0,
+        help="Sigma value for the drifting field of positions.",
     )
     parser.add_argument(
-        "--pos_clamp_type",
-        type=str,
-        default="hard",
-        choices=["hard", "tanh", "geom"],
-        help=(
-            "Position clamping strategy: 'hard' (hard clamp to ±pos_clamp), "
-            "'tanh' (tanh rescaling with norm_pos_clamp scale), "
-            "'geom' (geometric rescale with c_pos_clamp and p_pos_clamp)."
-        ),
-    )
-    parser.add_argument(
-        "--c_pos_clamp",
+        "--types_sigma",
         type=float,
-        default=5.0,
-        help="Scale parameter (Angstroms) for geom pos clamp: rescale = 1 / (1 + (|pos| / c)^p).",
+        default=1.0,
+        help="Sigma value for the drifting field of types."
     )
     parser.add_argument(
-        "--p_pos_clamp",
+        "--positions_eta",
         type=float,
-        default=4.0,
-        help="Power parameter for geom pos clamp: rescale = 1 / (1 + (|pos| / c)^p).",
+        default=1.0,
+        help="Step-size for the drifting field of positions."
     )
     parser.add_argument(
-        "--norm_pos_clamp",
+        "--types_eta",
         type=float,
-        default=10.0,
-        help="Normalization scale (Angstroms) for tanh pos clamp: pos_out = pos_clamp * tanh(|pos| / norm_pos_clamp).",
+        default=1.0,
+        help="Step-size for the drifting field of types."
     )
     parser.add_argument(
-        "--prior_pos_clamp",
+        "--scale_euclidean",
         type=float,
-        default=4.0,
-        help="Clamp prior position samples to [-prior_pos_clamp, prior_pos_clamp] standard deviations.",
+        default=1.0,
+        help="Scale Euclidean loss within combined loss."
     )
     parser.add_argument(
-        "--generator",
-        type=str,
-        default="euclidean",
-        choices=["euclidean", "riemannian"],
-        help="Generator variant to train: 'euclidean' (EPT-based) or 'riemannian' (spherical atom types).",
+        "--scale_spherical",
+        type=float,
+        default=1.0,
+        help="Scale spherical loss within combined loss."
+    )
+    parser.add_argument(
+        "--epsilon",
+        type=float,
+        default=1e-8,
     )
 
     # --------------------
-    # Wandb args
+    # Aligning Args
+    # --------------------
+    parser.add_argument(
+        "--max_iter",
+        type=int,
+        default=10,
+        help="Max number of iterations the alignment is ran for."
+    )
+    parser.add_argument(
+        "--position_tol",
+        type=float,
+        default=1e-4,
+        help="Distance tolerance for considering alignment to be converged"
+    )
+    parser.add_argument(
+        "position_weight",
+        type=float,
+        default=1.0,
+        help="Weight of positional cost in cost matrix for the Hungarian method."
+    )
+    parser.add_argument(
+        "types_weight",
+        type=float,
+        default=1.0,
+        help="Weight of types cost in cost matrix for the Hungarian method."
+    )
+
+    # --------------------
+    # Wandb Args
     # --------------------
     parser.add_argument(
         "--wandb_run_id",
