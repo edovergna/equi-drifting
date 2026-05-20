@@ -100,12 +100,11 @@ def parse_args():
         default=False,
         help="Whether to use tanh coordinate updates in EGNN."
     )
-    #TODO: check if needed
     parser.add_argument(
-        "--atom_type_temp",
-        type=float,
-        default=1.0,
-        help="Temperature (tau) for Gumbel-softmax atom type sampling during generation.",
+        "--num_atom_types",
+        type=int,
+        default=5,
+        help="How many atom types are possible to predict."
     )
 
     # -----------------------
@@ -170,13 +169,13 @@ def parse_args():
         help="Distance tolerance for considering alignment to be converged"
     )
     parser.add_argument(
-        "position_weight",
+        "--position_weight",
         type=float,
         default=1.0,
         help="Weight of positional cost in cost matrix for the Hungarian method."
     )
     parser.add_argument(
-        "types_weight",
+        "--types_weight",
         type=float,
         default=1.0,
         help="Weight of types cost in cost matrix for the Hungarian method."
