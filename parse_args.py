@@ -115,7 +115,6 @@ def parse_args():
     # -----------------------
     # Drift Loss Args
     # -----------------------
-    # TODO: to be checked
     parser.add_argument(
         "--position_sigma",
         type=float,

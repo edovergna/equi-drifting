@@ -34,9 +34,9 @@ def get_device() -> torch.device:
     if torch.cuda.is_available():
         print("CUDA is available. Using GPU.")
         device = torch.device("cuda")
-    elif torch.backends.mps.is_available():
-        print("MPS is available. Using Apple Silicon GPU.")
-        device = torch.device("mps")
+    # elif torch.backends.mps.is_available():
+    #     print("MPS is available. Using Apple Silicon GPU.")
+    #     device = torch.device("mps")
     else:
         print("GPU is not available. Using CPU.")
         device = torch.device("cpu")

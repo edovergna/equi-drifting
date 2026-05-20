@@ -50,7 +50,6 @@ def main(args: argparse.Namespace):
             max_num_atoms=args.max_num_atoms,
             min_num_atoms=args.min_num_atoms,
         )
-        # TODO: probably add num_atoms arg here as well
         generator_cfg = {
             "hidden_nf": args.hidden_dim,
             "n_layers": args.num_layers,
