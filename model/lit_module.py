@@ -9,7 +9,7 @@ from torch.optim.lr_scheduler import OneCycleLR
 
 from .drift_loss import (
     TrainingDivergedException,
-    compute_aligning_drift_loss
+    compute_drift_loss
 )
 from .egnn import EGNN
 from .geometry import center_positions_per_graph, per_graph_center_norms
@@ -90,51 +90,53 @@ class MoleculeGenerator(LightningModule):
             "Atom size distribution not set. Call set_size_distribution() before sampling, "
             "or ensure the model is bound to a trainer with a QM9DataModule."
         )
-    # TODO: should just be one single number of atoms
     def _sample_prior_batch(
-        self, n_molecules: int
+        self, n_molecules: int, num_atoms: int | None = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        if self._size_values is None or self._size_probs is None:
-            self._init_size_distribution()
+        if num_atoms is None:
+            if self._size_values is None or self._size_probs is None:
+                self._init_size_distribution()
+            size_values = self._size_values
+            size_probs = self._size_probs
+        else:
+            size_values = np.array([num_atoms], dtype=int)
+            size_probs = np.array([1.0], dtype=float)
 
         x, pos, batch_vec, dense_edge_index, atom_counts = sample_prior_batch(
             n_molecules,
-            self._size_values,
-            self._size_probs,
+            size_values,
+            size_probs,
             self.generator_cfg["num_atom_types"],
-            self.prior_pos_clamp,
             self.device,
         )
-        self._last_sampled_counts = atom_counts  # read by SizeDistributionCallback
-        self._last_sampled_atom_probs = (
-            x.detach().cpu().numpy()
-        )  # read by AtomTypeDistributionCallback
+        self._last_sampled_counts = atom_counts
+        self._last_sampled_atom_probs = x.detach().cpu().numpy()
         return x, pos, batch_vec, dense_edge_index
 
-    def _forward(self, batch):
+    def _forward(self, batch, num_atoms):
         """Shared forward pass: prior → EGNN → center → hard atoms → EPT embeddings."""
         # Sample from the prior distribution
         x_prior, pos_prior, gen_batch_vec, gen_dense_edge_index = (
-            self._sample_prior_batch(self.n_gen_molecules)
+            self._sample_prior_batch(self.n_gen_molecules, num_atoms)
         )
 
         pos_prior = center_positions_per_graph(pos_prior, gen_batch_vec)
 
         # Generate molecule with EGNN
-        x_logits, _, pos_gen = self.generator(x_prior, pos_prior, gen_dense_edge_index)
+        gen_pos, gen_types = self.generator(x_prior, pos_prior, gen_dense_edge_index)
 
         # Center positions
-        pos_gen = center_positions_per_graph(pos_gen, gen_batch_vec)
+        gen_pos = center_positions_per_graph(gen_pos, gen_batch_vec)
 
         # Turn x_logits into probabilites
-        x_prob = F.softmax(x_logits, dim=-1)
+        gen_types_prob = F.softmax(gen_types, dim=-1)
 
         # And project to the sphere
-        x_gen_sphere = probs_to_sphere(x_prob, self.eps)
+        gen_types_sphere = probs_to_sphere(gen_types_prob, self.eps)
 
         return (
-            pos_gen,
-            x_gen_sphere,
+            gen_pos,
+            gen_types_sphere,
             gen_batch_vec,
         )
 
@@ -147,14 +149,18 @@ class MoleculeGenerator(LightningModule):
                 on_epoch=False,
             )
 
+    def _batch_num_atoms(self, batch) -> int:
+        return int((batch.ptr[1] - batch.ptr[0]).item())
+
     def training_step(self, batch, batch_idx):
-        pos_gen, x_gen_sphere, gen_batch_vec = self._forward(batch)
+        num_atoms = self._batch_num_atoms(batch)
+        pos_gen, x_gen_sphere, gen_batch_vec = self._forward(batch, num_atoms)
 
         pos_real, x_real = batch.pos, batch.real_atom_types
 
         try:
-            loss, stats = compute_aligning_drift_loss(
-                pos_gen, pos_real, x_gen_sphere, x_real, gen_batch_vec, batch.batch
+            loss, stats = compute_drift_loss(
+                pos_gen, pos_real, x_gen_sphere, x_real, num_atoms, self.drift_cfg
             )
         except TrainingDivergedException as e:
             self.print(f"\n[Step {self.global_step}] {e}\nStopping training.")
@@ -203,12 +209,13 @@ class MoleculeGenerator(LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        pos_gen, x_gen_sphere, gen_batch_vec = self._forward(batch)
+        num_atoms = self._batch_num_atoms(batch)
+        pos_gen, x_gen_sphere, gen_batch_vec = self._forward(batch, num_atoms)
 
         pos_real, x_real = batch.pos, batch.real_atom_types
 
-        val_loss, stats = compute_aligning_drift_loss(
-                pos_gen, pos_real, x_gen_sphere, x_real, gen_batch_vec, batch.batch
+        val_loss, stats = compute_drift_loss(
+                pos_gen, pos_real, x_gen_sphere, x_real, num_atoms, self.drift_cfg
             )
 
         bs = self.n_gen_molecules
@@ -281,11 +288,12 @@ class MoleculeGenerator(LightningModule):
         self._val_hist_stats = {}
 
     def test_step(self, batch, batch_idx):
-        pos_gen, x_gen_sphere, gen_batch_vec = self._forward(batch)
+        num_atoms = self._batch_num_atoms(batch)
+        pos_gen, x_gen_sphere, gen_batch_vec = self._forward(batch, num_atoms)
         pos_real, x_real = batch.pos, batch.real_atom_types
 
-        test_loss, _ = compute_aligning_drift_loss(
-                pos_gen, pos_real, x_gen_sphere, x_real, gen_batch_vec, batch.batch
+        test_loss, _ = compute_drift_loss(
+                pos_gen, pos_real, x_gen_sphere, x_real, num_atoms, self.drift_cfg
             )
 
         bs = self.n_gen_molecules

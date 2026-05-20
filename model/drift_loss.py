@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 
 from .spherical_utils import product_tangent_norm, sphere_exp, geodesic_distance, sphere_normalize, sphere_project_tangent
-
+# TODO: add reshaping within loss
 class TrainingDivergedException(Exception):
     """Raised when the drift loss becomes non-finite. Triggers a clean training stop."""
 
