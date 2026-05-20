@@ -24,7 +24,12 @@ def parse_args():
         default=1.0,
         help="Fraction of each split to use (0 < sample_frac <= 1.0). Useful for quick iteration runs.",
     )
-    # TODO: should become the exact number of atoms
+    parser.add_argument(
+        "--min_num_atoms",
+        type=int,
+        default=None,
+        help="Keep only molecules with at least this many atoms (inclusive). None means no filter."
+    )
     parser.add_argument(
         "--max_num_atoms",
         type=int,

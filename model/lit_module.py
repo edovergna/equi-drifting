@@ -15,7 +15,7 @@ from .egnn import EGNN
 from .geometry import center_positions_per_graph, per_graph_center_norms
 from .sample_prior import compute_size_distribution, sample_prior_batch
 
-from ..spherical_utils import (probs_to_sphere, sphere_to_probs)
+from .spherical_utils import (probs_to_sphere, sphere_to_probs)
 
 
 class MoleculeGenerator(LightningModule):
@@ -29,29 +29,24 @@ class MoleculeGenerator(LightningModule):
             "hidden_nf": 128,
             "n_layers": 2,
             "num_atom_types": 5,
-            "num_bond_types": 5,
-            "coordinate_clamp_range": 3.0,
-            "predict_bond_types": False,
-            "predict_atom_types": True,
-            "pos_clamp": 20.0,
-            "pos_clamp_type": "geom",
-            "c_pos_clamp": 5.0,
-            "p_pos_clamp": 4.0,
-            "norm_pos_clamp": 10.0,
-            "prior_pos_clamp": 3.0,
-            "use_feature_extractor": False,
-            "infer_types_from_pos": False,
-            "infer_method": "heuristic",
+            "aggr_type": "sum",
+            "tanh_coord_updates": True,
+            "attention": True
         }
         default_drift_cfg = {
-            "lr": 1e-4,
+            "lr": 2e-4,
             "weight_decay": 1e-4,
-            "temperatures": [0.02, 0.05, 0.2],
-            "loss_variant": "original",
-            "atom_type_temp": 1.0,
-            "pct_start": 0.1,
-            "div_factor": 25.0,
-            "final_div_factor": 1e4,
+            "p_sigma": 1.0,
+            "t_sigma": 1.0,
+            "p_eta": 1.0,
+            "t_eta": 1.0,
+            "scale_eucl": 1.0,
+            "scale_spher": 1.0,
+            "eps": 1e-8,
+            "max_iter": 10,
+            "p_tol": 1e-4,
+            "p_weight": 1.0,
+            "t_weight": 1.0,
         }
 
         self.generator_cfg = {**default_generator_cfg, **(generator_cfg or {})}
@@ -62,21 +57,8 @@ class MoleculeGenerator(LightningModule):
 
         self.generator = self._init_generator(self.generator_cfg)
 
-        self.temperatures = self.drift_cfg["temperatures"]
-        self.loss_variant = self.drift_cfg["loss_variant"]
-        self.atom_type_temp = self.drift_cfg.get("atom_type_temp", 1.0)
         self.n_gen_molecules = self.drift_cfg.get("n_gen_molecules", 64)
-        self.pos_clamp = self.generator_cfg["pos_clamp"]
-        self.pos_clamp_type = self.generator_cfg["pos_clamp_type"]
-        self.c_pos_clamp = self.generator_cfg["c_pos_clamp"]
-        self.p_pos_clamp = self.generator_cfg["p_pos_clamp"]
-        self.norm_pos_clamp = self.generator_cfg["norm_pos_clamp"]
-        self.prior_pos_clamp = self.generator_cfg["prior_pos_clamp"]
-        self.infer_types_from_pos = self.generator_cfg.get("infer_types_from_pos", False)
-        self.infer_method = self.generator_cfg.get("infer_method", "heuristic")
-
-        # Hard coded epsilon!! TODO: make it in cfg
-        self.eps = 1e-8
+        self.eps = self.drift_cfg.get("eps", 1e-8)
 
         self._size_values: np.ndarray | None = None
         self._size_probs: np.ndarray | None = None
@@ -85,11 +67,11 @@ class MoleculeGenerator(LightningModule):
     def _init_generator(self, cfg) -> EGNN:
         return EGNN(
             hidden_nf=cfg["hidden_nf"],
-            n_layers=cfg["n_layers"],
+            num_blocks=cfg["n_layers"],
             num_atom_types=cfg["num_atom_types"],
-            num_bond_types=cfg["num_bond_types"],
-            predict_bond_types=cfg["predict_bond_types"],
-            predict_atom_types=cfg["predict_atom_types"],
+            aggr_type=cfg["aggr_type"],
+            tanh_coord_updates=cfg["tanh_coord_updates"],
+            attention=cfg["attention"],
         )
 
     def set_size_distribution(self, sizes: np.ndarray, probs: np.ndarray) -> None:
@@ -108,7 +90,7 @@ class MoleculeGenerator(LightningModule):
             "Atom size distribution not set. Call set_size_distribution() before sampling, "
             "or ensure the model is bound to a trainer with a QM9DataModule."
         )
-
+    # TODO: should just be one single number of atoms
     def _sample_prior_batch(
         self, n_molecules: int
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -143,29 +125,6 @@ class MoleculeGenerator(LightningModule):
 
         # Center positions
         pos_gen = center_positions_per_graph(pos_gen, gen_batch_vec)
-
-        # Clamp generated positions - lets try no clamping of final positions
-        # self._norm_rescale_grad = None
-        # if self.pos_clamp_type == "hard":
-        #     pos_gen = pos_gen.clamp(-self.pos_clamp, self.pos_clamp)
-        # elif self.pos_clamp_type == "tanh":
-        #     norm = pos_gen.norm(dim=-1, keepdim=True)
-        #     rescale = torch.tanh(norm / self.norm_pos_clamp) / (
-        #         norm / self.norm_pos_clamp + 1e-8
-        #     )
-        #     if not self.trainer.sanity_checking and self.trainer.validating is False:
-        #         rescale.register_hook(
-        #             lambda g: setattr(self, "_norm_rescale_grad", g.abs().mean().item())
-        #         )
-        #     pos_gen = pos_gen * rescale
-        # else:  # geom
-        #     norm = pos_gen.norm(dim=-1)
-        #     rescale = 1 / (1 + (norm / self.c_pos_clamp) ** self.p_pos_clamp)
-        #     if not self.trainer.sanity_checking and self.trainer.validating is False:
-        #         rescale.register_hook(
-        #             lambda g: setattr(self, "_norm_rescale_grad", g.abs().mean().item())
-        #         )
-        #     pos_gen = pos_gen * rescale.unsqueeze(-1)
 
         # Turn x_logits into probabilites
         x_prob = F.softmax(x_logits, dim=-1)
@@ -354,7 +313,7 @@ class MoleculeGenerator(LightningModule):
             self.generator.parameters(),
             lr=self.drift_cfg["lr"],
             weight_decay=self.drift_cfg["weight_decay"],
-            eps=1e-8,
+            eps=self.eps,
         )
         scheduler = OneCycleLR(
             optimizer,
