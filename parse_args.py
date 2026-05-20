@@ -3,7 +3,10 @@ import argparse
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train a flow matching model on QM9.")
+
+    # --------------------------
     # Data
+    # --------------------------
     parser.add_argument(
         "--root",
         type=str,
@@ -45,7 +48,10 @@ def parse_args():
     parser.add_argument(
         "--num_workers", type=int, default=2, help="Number of workers for data loading."
     )
+
+    # --------------------
     # Optimization
+    # --------------------
     parser.add_argument(
         "--max_epochs", type=int, default=120, help="Maximum number of training epochs."
     )
@@ -58,7 +64,10 @@ def parse_args():
         default=5e-5,
         help="Weight decay for the optimizer.",
     )
+
+    # ------------------
     # Model Args
+    # ------------------
     parser.add_argument(
         "--predict_bond_types",
         action="store_true",
@@ -187,7 +196,10 @@ def parse_args():
         choices=["euclidean", "riemannian"],
         help="Generator variant to train: 'euclidean' (EPT-based) or 'riemannian' (spherical atom types).",
     )
+
+    # --------------------
     # Wandb args
+    # --------------------
     parser.add_argument(
         "--wandb_run_id",
         type=str,
@@ -212,7 +224,10 @@ def parse_args():
         default="default_group",
         help="Group tag for Weights & Biases logging.",
     )
+
+    # -------------------
     # Lightning args
+    # -------------------
     parser.add_argument(
         "--log_every_n_steps", type=int, default=10, help="Log every n steps."
     )

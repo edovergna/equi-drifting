@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 
-from . import TrainingDivergedException
+from .losses import TrainingDivergedException
 from ..spherical_utils import product_tangent_norm, sphere_exp, geodesic_distance, sphere_normalize, sphere_project_tangent
 
 
