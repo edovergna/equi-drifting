@@ -2,73 +2,73 @@
 import torch
 from torch_linear_assignment import batch_linear_assignment
 from .spherical_utils import sphere_normalize
+from contextlib import nullcontext
 
 
 def _kabsch_rotations(gen_pos, real_pos):
-    """
-    Supports:
-        gen_pos:  [N_gen, N_atoms, 3]
-        gen_pos:  [N_gen, N_real, N_atoms, 3]
-        real_pos: [N_real, N_atoms, 3]
+    out_dtype = gen_pos.dtype
+    device_type = gen_pos.device.type
+    autocast_ctx = (
+        torch.autocast(device_type=device_type, enabled=False)
+        if device_type in {"cuda", "cpu"}
+        else nullcontext()
+    )
 
-    Returns:
-        R: [N_gen, N_real, 3, 3]
+    with autocast_ctx:
+        gen_pos = gen_pos.float()
+        real_pos = real_pos.float()
 
-    R[g, r] aligns gen_pos[g] or gen_pos[g, r] to real_pos[r].
-    """
-    if real_pos.ndim != 3:
-        raise ValueError(f"real_pos must be [N_real, N_atoms, 3], got {real_pos.shape}")
-
-    if gen_pos.ndim == 3:
-        if gen_pos.shape[1:] != real_pos.shape[1:]:
+        if real_pos.ndim != 3:
             raise ValueError(
-                f"Shape mismatch: gen_pos {gen_pos.shape}, real_pos {real_pos.shape}"
+                f"real_pos must be [N_real, N_atoms, 3], got {real_pos.shape}"
             )
 
-        gen_c = gen_pos - gen_pos.mean(dim=1, keepdim=True)
-        real_c = real_pos - real_pos.mean(dim=1, keepdim=True)
+        if gen_pos.ndim == 3:
+            if gen_pos.shape[1:] != real_pos.shape[1:]:
+                raise ValueError(
+                    f"Shape mismatch: gen_pos {gen_pos.shape}, real_pos {real_pos.shape}"
+                )
 
-        # H[g, r] = gen_c[g].T @ real_c[r]
-        H = torch.einsum("gni,rnj->grij", gen_c, real_c)
+            gen_c = gen_pos - gen_pos.mean(dim=1, keepdim=True)
+            real_c = real_pos - real_pos.mean(dim=1, keepdim=True)
+            H = torch.einsum("gni,rnj->grij", gen_c, real_c)
 
-    elif gen_pos.ndim == 4:
-        if gen_pos.shape[1] != real_pos.shape[0]:
-            raise ValueError(
-                f"Pairwise gen_pos has N_real={gen_pos.shape[1]}, "
-                f"but real_pos has N_real={real_pos.shape[0]}"
-            )
-        if gen_pos.shape[2:] != real_pos.shape[1:]:
-            raise ValueError(
-                f"Shape mismatch: gen_pos {gen_pos.shape}, real_pos {real_pos.shape}"
-            )
+        elif gen_pos.ndim == 4:
+            if gen_pos.shape[1] != real_pos.shape[0]:
+                raise ValueError(
+                    f"Pairwise gen_pos has N_real={gen_pos.shape[1]}, "
+                    f"but real_pos has N_real={real_pos.shape[0]}"
+                )
+            if gen_pos.shape[2:] != real_pos.shape[1:]:
+                raise ValueError(
+                    f"Shape mismatch: gen_pos {gen_pos.shape}, real_pos {real_pos.shape}"
+                )
 
-        gen_c = gen_pos - gen_pos.mean(dim=2, keepdim=True)
-        real_c = real_pos - real_pos.mean(dim=1, keepdim=True)
+            gen_c = gen_pos - gen_pos.mean(dim=2, keepdim=True)
+            real_c = real_pos - real_pos.mean(dim=1, keepdim=True)
+            H = torch.einsum("grni,rnj->grij", gen_c, real_c)
 
-        # H[g, r] = gen_c[g, r].T @ real_c[r]
-        H = torch.einsum("grni,rnj->grij", gen_c, real_c)
+        else:
+            raise ValueError(f"gen_pos must be 3D or 4D, got {gen_pos.shape}")
 
-    else:
-        raise ValueError(f"gen_pos must be 3D or 4D, got {gen_pos.shape}")
+        H_flat = H.reshape(-1, 3, 3)
 
-    H_flat = H.reshape(-1, 3, 3)
+        U, S, Vh = torch.linalg.svd(H_flat)
 
-    U, S, Vh = torch.linalg.svd(H_flat)
+        V = Vh.transpose(-2, -1)
+        Ut = U.transpose(-2, -1)
 
-    V = Vh.transpose(-2, -1)
-    Ut = U.transpose(-2, -1)
-
-    R = V @ Ut
-
-    det = torch.det(R)
-    mask = det < 0
-
-    if mask.any():
-        V = V.clone()
-        V[mask, :, -1] *= -1
         R = V @ Ut
 
-    return R.reshape(H.shape[0], H.shape[1], 3, 3)
+        det = torch.det(R)
+        mask = det < 0
+
+        if mask.any():
+            V = V.clone()
+            V[mask, :, -1] *= -1
+            R = V @ Ut
+
+        return R.reshape(H.shape[0], H.shape[1], 3, 3).to(out_dtype)
 
 
 def _hungarian_method_batched(
