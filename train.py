@@ -101,7 +101,7 @@ def main(args: argparse.Namespace):
         ]
 
         trainer = pl.Trainer(
-            accelerator="auto",
+            accelerator="cpu",
             max_epochs=args.max_epochs,
             devices=1,
             deterministic=deterministic,
@@ -118,7 +118,10 @@ def main(args: argparse.Namespace):
 
         trainer.fit(model, datamodule=datamodule)
         gen_ckpt.load_best_weights(model)
-        trainer.test(model, datamodule=datamodule)
+        if len(datamodule.test_set) > 0:
+            trainer.test(model, datamodule=datamodule)
+        else:
+            print("Skipping test: test set is empty after atom-count filtering.")
 
     except KeyboardInterrupt:
         print("\nTraining interrupted.")
