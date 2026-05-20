@@ -88,6 +88,9 @@ def compute_drift_loss(
 
     loss = (scale_eucl * molecule_position_dist + scale_spher * molecule_types_dist).mean()
 
+    if not torch.isfinite(loss):
+        raise TrainingDivergedException()
+
     stats: dict[str, float] = {}
     with torch.no_grad():
         stats["mean_euclidean_distance"] = (molecule_position_dist).mean().item()

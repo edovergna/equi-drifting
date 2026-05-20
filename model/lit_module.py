@@ -49,6 +49,9 @@ class MoleculeGenerator(LightningModule):
             "t_weight": 1.0,
             "n_gen_molecules": 64,
             "num_atom_types": 5,
+            "pct_start": 0.1,
+            "div_factor": 25.0,
+            "final_div_factor": 1e4,
         }
 
         self.generator_cfg = {**default_generator_cfg, **(generator_cfg or {})}

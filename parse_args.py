@@ -95,14 +95,14 @@ def parse_args():
     )
     parser.add_argument(
         "--attention",
-        type=bool,
+        action=argparse.BooleanOptionalAction,
         default=True,
         help="Whether EGNN model uses attention."
     )
     parser.add_argument(
         "--tanh_coord_updates",
-        type=bool,
-        default=False,
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="Whether to use tanh coordinate updates in EGNN."
     )
     parser.add_argument(
@@ -129,7 +129,7 @@ def parse_args():
         help="Sigma value for the drifting field of types."
     )
     parser.add_argument(
-        "--positions_eta",
+        "--position_eta",
         type=float,
         default=1.0,
         help="Step-size for the drifting field of positions."
