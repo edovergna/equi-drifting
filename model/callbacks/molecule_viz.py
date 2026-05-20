@@ -36,7 +36,7 @@ class MoleculeVisualizationCallback(Callback):
         "pos_gen",
         "pos_real",
         "real_atom_types",
-        "gen_atom_types"
+        "gen_atom_types",
         "gen_batch_vec",
         "batch_vec",
     }

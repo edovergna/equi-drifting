@@ -94,7 +94,6 @@ def main(args: argparse.Namespace):
                 n_molecules=min(4, args.n_real_molecules),
                 bond_threshold=2.0,
                 every_n_epochs=1,
-                infer_method=args.infer_method,
             ),
             ChemicalValidityCallback(),
             # SizeDistributionCallback(),
