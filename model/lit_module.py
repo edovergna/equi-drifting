@@ -125,7 +125,7 @@ class MoleculeGenerator(LightningModule):
         pos_prior = center_positions_per_graph(pos_prior, gen_batch_vec)
 
         # Generate molecule with EGNN
-        gen_pos, gen_types = self.generator(x_prior, pos_prior, gen_dense_edge_index)
+        gen_pos, gen_types = self.generator(pos_prior, x_prior, gen_dense_edge_index)
 
         # Center positions
         gen_pos = center_positions_per_graph(gen_pos, gen_batch_vec)
