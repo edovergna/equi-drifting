@@ -18,7 +18,7 @@ from .sample_prior import compute_size_distribution, sample_prior_batch
 from ..spherical_utils import (probs_to_sphere, sphere_to_probs)
 
 
-class AlignedDriftingMoleculeGenerator(LightningModule):
+class MoleculeGenerator(LightningModule):
     _SAVE_COMPONENTS = ["generator"]
     _LOAD_COMPONENTS = ["generator"]
 

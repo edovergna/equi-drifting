@@ -17,8 +17,7 @@ import wandb
 from model import (
     AtomTypeDistributionCallback,
     ChemicalValidityCallback,
-    EuclideanGenerator,
-    RiemannianGenerator,
+    MoleculeGenerator,
     EmbeddingMonitorCallback,
     GeneratorCheckpointCallback,
     GradientMonitorCallback,
@@ -36,7 +35,7 @@ def main(args: argparse.Namespace):
 
     run = wandb.init(
         entity="equivariant-drifting",
-        project="olivier-tests",
+        project="aligned-drifting",
         group=args.group_tag,
         mode="offline" if args.offline else "online",
         config=vars(args),
@@ -80,10 +79,7 @@ def main(args: argparse.Namespace):
             "n_gen_molecules": args.n_gen_molecules,
         }
 
-        if args.generator == "riemannian":
-            model = RiemannianGenerator(generator_cfg, drift_cfg)
-        else:
-            model = EuclideanGenerator(generator_cfg, drift_cfg)
+        model = MoleculeGenerator(generator_cfg, drift_cfg)
 
         if args.wandb_run_id:
             print(f"Loading pretrained generator from wandb run: {args.wandb_run_id}")

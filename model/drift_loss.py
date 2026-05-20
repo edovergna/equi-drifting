@@ -1,9 +1,10 @@
 import torch
 import torch.nn.functional as F
 
-from .losses import TrainingDivergedException
-from ..spherical_utils import product_tangent_norm, sphere_exp, geodesic_distance, sphere_normalize, sphere_project_tangent
+from .spherical_utils import product_tangent_norm, sphere_exp, geodesic_distance, sphere_normalize, sphere_project_tangent
 
+class TrainingDivergedException(Exception):
+    """Raised when the drift loss becomes non-finite. Triggers a clean training stop."""
 
 def compute_aligning_drift_loss(
     pos_gen: torch.Tensor,

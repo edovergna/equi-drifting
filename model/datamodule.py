@@ -47,7 +47,6 @@ class FullyConnectedTransform:
         data.dense_edge_index = get_dense_edge_index(data.num_nodes, device)
         return data
 
-# TODO: pre-transform for training molecules
 class QM9DataModule(pl.LightningDataModule):
     def __init__(
         self,
