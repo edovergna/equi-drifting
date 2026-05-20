@@ -47,6 +47,8 @@ class MoleculeGenerator(LightningModule):
             "p_tol": 1e-4,
             "p_weight": 1.0,
             "t_weight": 1.0,
+            "n_gen_molecules": 64,
+            "num_atom_types": 5,
         }
 
         self.generator_cfg = {**default_generator_cfg, **(generator_cfg or {})}
@@ -154,13 +156,13 @@ class MoleculeGenerator(LightningModule):
 
     def training_step(self, batch, batch_idx):
         num_atoms = self._batch_num_atoms(batch)
-        pos_gen, x_gen_sphere, gen_batch_vec = self._forward(batch, num_atoms)
+        gen_pos, gen_types_sphere, gen_batch_vec = self._forward(batch, num_atoms)
 
-        pos_real, x_real = batch.pos, batch.real_atom_types
+        real_pos, real_types = batch.pos, batch.real_atom_types
 
         try:
             loss, stats = compute_drift_loss(
-                pos_gen, pos_real, x_gen_sphere, x_real, num_atoms, self.drift_cfg
+                gen_pos, real_pos, gen_types_sphere, real_types, num_atoms, self.drift_cfg
             )
         except TrainingDivergedException as e:
             self.print(f"\n[Step {self.global_step}] {e}\nStopping training.")
@@ -194,10 +196,10 @@ class MoleculeGenerator(LightningModule):
         )
 
         with torch.no_grad():
-            pos_norms = pos_gen.norm(dim=-1)
-            gen_center_norms = per_graph_center_norms(pos_gen, gen_batch_vec)
+            pos_norms = gen_pos.norm(dim=-1)
+            gen_center_norms = per_graph_center_norms(gen_pos, gen_batch_vec)
             real_center_norms = per_graph_center_norms(batch.pos, batch.batch)
-            max_dist = torch.cdist(pos_gen, pos_gen).max()
+            max_dist = torch.cdist(gen_pos, gen_pos).max()
 
         self.log("geom/pos_gen_norm_mean", pos_norms.mean(), batch_size=bs)
         self.log("geom/pos_gen_norm_std", pos_norms.std(), batch_size=bs)
@@ -210,12 +212,12 @@ class MoleculeGenerator(LightningModule):
 
     def validation_step(self, batch, batch_idx):
         num_atoms = self._batch_num_atoms(batch)
-        pos_gen, x_gen_sphere, gen_batch_vec = self._forward(batch, num_atoms)
+        gen_pos, gen_types_sphere, gen_batch_vec = self._forward(batch, num_atoms)
 
-        pos_real, x_real = batch.pos, batch.real_atom_types
+        real_pos, real_types = batch.pos, batch.real_atom_types
 
         val_loss, stats = compute_drift_loss(
-                pos_gen, pos_real, x_gen_sphere, x_real, num_atoms, self.drift_cfg
+                gen_pos, real_pos, gen_types_sphere, real_types, num_atoms, self.drift_cfg
             )
 
         bs = self.n_gen_molecules
@@ -244,7 +246,7 @@ class MoleculeGenerator(LightningModule):
             self._val_hist_stats = {f"drift_val/{k}": v for k, v in hist_stats.items()}
 
         with torch.no_grad():
-            gen_cn = per_graph_center_norms(pos_gen, gen_batch_vec)
+            gen_cn = per_graph_center_norms(gen_pos, gen_batch_vec)
             real_cn = per_graph_center_norms(batch.pos, batch.batch)
         self.log(
             "debug/val_gen_center_norm_mean",
@@ -263,11 +265,11 @@ class MoleculeGenerator(LightningModule):
 
         # Project sphere embeddings back to probabilities
         with torch.no_grad():
-            x_prob = sphere_to_probs(x_gen_sphere, self.eps)
+            gen_types_prob = sphere_to_probs(gen_types_sphere, self.eps)
 
         return {
-            "pos_gen": pos_gen.detach().cpu(),
-            "gen_atom_types": x_prob.detach().cpu().argmax(dim=-1),
+            "pos_gen": gen_pos.detach().cpu(),
+            "gen_atom_types": gen_types_prob.detach().cpu().argmax(dim=-1),
             "pos_real": batch.pos.detach().cpu(),
             "real_atom_types": batch.real_atom_types.detach().cpu(),
             "gen_batch_vec": gen_batch_vec.detach().cpu(),
@@ -289,11 +291,11 @@ class MoleculeGenerator(LightningModule):
 
     def test_step(self, batch, batch_idx):
         num_atoms = self._batch_num_atoms(batch)
-        pos_gen, x_gen_sphere, gen_batch_vec = self._forward(batch, num_atoms)
-        pos_real, x_real = batch.pos, batch.real_atom_types
+        gen_pos, gen_types_sphere, gen_batch_vec = self._forward(batch, num_atoms)
+        real_pos, real_types = batch.pos, batch.real_atom_types
 
         test_loss, _ = compute_drift_loss(
-                pos_gen, pos_real, x_gen_sphere, x_real, num_atoms, self.drift_cfg
+                gen_pos, real_pos, gen_types_sphere, real_types, num_atoms, self.drift_cfg
             )
 
         bs = self.n_gen_molecules

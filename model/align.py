@@ -1,7 +1,7 @@
 # Adding Kabsch algorithm and Hungarian method
 import torch
 from torch_linear_assignment import batch_linear_assignment
-
+# TODO: add configs + add multiple sigmas
 @torch.no_grad()
 def _kabsch_rotations(gen_pos, real_pos):
     """
@@ -253,7 +253,7 @@ def unpermute_real_order_to_gen_order(x_perm, assignment):
 
     return x
 
-
+# TODO: change inputs to cfg
 def find_rotation_and_permutation(
     gen_pos,
     real_pos,
