@@ -33,11 +33,10 @@ class MoleculeVisualizationCallback(Callback):
     """
 
     _REQUIRED_KEYS = {
-        "phi_gen",
-        "phi_real",
         "pos_gen",
         "pos_real",
         "real_atom_types",
+        "gen_atom_types",
         "gen_batch_vec",
         "batch_vec",
     }
@@ -47,12 +46,10 @@ class MoleculeVisualizationCallback(Callback):
         n_molecules: int = 4,
         bond_threshold: float = 2.0,
         every_n_epochs: int = 1,
-        infer_method: str = "heuristic",
     ):
         self.n_molecules = n_molecules
         self.bond_threshold = bond_threshold
         self.every_n_epochs = every_n_epochs
-        self.infer_method = infer_method
         self._ref: dict | None = None
         self._gen_atom_types: list[torch.Tensor] = []
         self._real_atom_types: list[torch.Tensor] = []
@@ -92,13 +89,20 @@ class MoleculeVisualizationCallback(Callback):
 
         try:
             ref = self._ref
-            phi_gen = ref["phi_gen"].float()
-            phi_real = ref["phi_real"].float()
             gen_batch_vec = ref["gen_batch_vec"]
             real_batch_vec = ref["batch_vec"]
-            n_graphs = int(phi_gen.shape[0])
 
-            nn_dists = torch.cdist(phi_gen, phi_real).min(dim=1).values
+            num_atoms = int((gen_batch_vec == 0).sum().item())
+
+            gen_pos_mol = ref["pos_gen"].reshape(-1, num_atoms, 3)
+            real_pos_mol = ref["pos_real"].reshape(-1, num_atoms, 3)
+
+            gen_flat = gen_pos_mol.reshape(gen_pos_mol.shape[0], -1)
+            real_flat = real_pos_mol.reshape(real_pos_mol.shape[0], -1)
+
+            nn_dists = (torch.cdist(gen_flat, real_flat) / (num_atoms ** 0.5)).min(dim=1).values
+
+            n_graphs = gen_pos_mol.shape[0]
             all_idx = list(range(n_graphs))
             ranked = sorted(all_idx, key=lambda i: nn_dists[i].item())
 
@@ -163,8 +167,6 @@ class MoleculeVisualizationCallback(Callback):
         p = pos[mask].numpy()
         if atom_types is not None:
             types = atom_types[mask].numpy()
-        elif self.infer_method is not None:
-            types = infer_types_single(p.astype(np.float64), self.infer_method)
         else:
             types = None
 

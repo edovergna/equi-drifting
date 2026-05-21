@@ -1,8 +1,9 @@
 import torch
 
-
 def sphere_normalize(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-    """Normalize each position independently onto S^3."""
+    """
+    Normalize each position independently onto S^3.
+    """
     return x / x.norm(dim=-1, keepdim=True).clamp_min(eps)
 
 
@@ -60,7 +61,7 @@ def sphere_log(x: torch.Tensor, y: torch.Tensor, eps: float = 1e-8) -> torch.Ten
     y = sphere_normalize(y, eps)
 
     dot = (x * y).sum(dim=-1, keepdim=True).clamp(-1.0 + 1e-7, 1.0 - 1e-7)
-    theta = torch.acos(dot)
+    theta = torch.acos(dot)  # [..., L, 1]
 
     u = y - dot * x
     u_norm = u.norm(dim=-1, keepdim=True)
@@ -96,12 +97,12 @@ def sphere_exp(x: torch.Tensor, v: torch.Tensor, eps: float = 1e-8) -> torch.Ten
 
 
 def geodesic_distance(
-    x: torch.Tensor,  # [N_atoms, 5]
-    y: torch.Tensor,  # [N_atoms, 5]
+    x: torch.Tensor,  # [N_x, N_atoms, 5]
+    y: torch.Tensor,  # [N_y, N_atoms, 5]
     eps: float = 1e-8,
 ) -> torch.Tensor:
     x = sphere_normalize(x, eps)
     y = sphere_normalize(y, eps)
 
-    dot = (x * y).sum(dim=-1).clamp(-1.0 + 1e-7, 1.0 - 1e-7)  # [N_atoms]
-    return torch.acos(dot)  # [N_atoms]
+    dot = (x * y).sum(dim=-1).clamp(-1.0 + 1e-7, 1.0 - 1e-7) 
+    return torch.acos(dot)  # [N_mol, max_atoms]

@@ -17,9 +17,7 @@ import wandb
 from model import (
     AtomTypeDistributionCallback,
     ChemicalValidityCallback,
-    EuclideanGenerator,
-    RiemannianGenerator,
-    EmbeddingMonitorCallback,
+    MoleculeGenerator,
     GeneratorCheckpointCallback,
     GradientMonitorCallback,
     MoleculeVisualizationCallback,
@@ -36,7 +34,7 @@ def main(args: argparse.Namespace):
 
     run = wandb.init(
         entity="equivariant-drifting",
-        project="olivier-tests",
+        project="aligned-drifting",
         group=args.group_tag,
         mode="offline" if args.offline else "online",
         config=vars(args),
@@ -50,40 +48,44 @@ def main(args: argparse.Namespace):
             force_reload=args.force_reload,
             sample_frac=args.sample_frac,
             max_num_atoms=args.max_num_atoms,
+            min_num_atoms=args.min_num_atoms,
         )
-
         generator_cfg = {
             "hidden_nf": args.hidden_dim,
             "n_layers": args.num_layers,
-            "coord_aggr": args.coord_aggr,
-            "num_atom_types": 5,
-            "num_bond_types": 5,
-            "predict_bond_types": args.predict_bond_types,
-            "predict_atom_types": args.predict_atom_types,
-            "pos_clamp": args.pos_clamp,
-            "pos_clamp_type": args.pos_clamp_type,
-            "c_pos_clamp": args.c_pos_clamp,
-            "p_pos_clamp": args.p_pos_clamp,
-            "norm_pos_clamp": args.norm_pos_clamp,
-            "prior_pos_clamp": args.prior_pos_clamp,
-            "use_feature_extractor": args.use_feature_extractor,
-            "infer_types_from_pos": args.infer_types_from_pos,
-            "infer_method": args.infer_method,
+            "aggr_type": args.aggr_type,
+            "num_atom_types": args.num_atom_types,
+            "tanh_coord_updates": args.tanh_coord_updates,
+            "attention": args.attention,
         }
 
         drift_cfg = {
             "lr": args.lr,
             "weight_decay": args.weight_decay,
-            "temperatures": args.temperatures,
-            "loss_variant": args.loss_variant,
-            "atom_type_temp": args.atom_type_temp,
+            "p_sigma": args.position_sigma,
+            "t_sigma": args.types_sigma,
+            "p_eta": args.position_eta,
+            "t_eta": args.types_eta,
+            "scale_eucl": args.scale_euclidean,
+            "scale_spher": args.scale_spherical,
+            "eps": args.epsilon,
+            "max_iter": args.max_iter,
+            "p_tol": args.position_tol,
+            "p_weight": args.position_weight,
+            "t_weight": args.types_weight,
             "n_gen_molecules": args.n_gen_molecules,
+            "num_atom_types": args.num_atom_types,
+            "chem_refinement": args.chem_refinement,
+            "max_epochs": args.max_epochs,
+            "start_frac_epoch": args.start_frac_epoch,
+            "lambda_clash": args.lambda_clash,
+            "lambda_valence_excess": args.lambda_valence_excess,
+            "lambda_hydrogen_valence": args.lambda_hydrogen_valence,
+            "clash_threshold": args.clash_threshold,
+            "bond_temperature": args.bond_temperature,
         }
 
-        if args.generator == "riemannian":
-            model = RiemannianGenerator(generator_cfg, drift_cfg)
-        else:
-            model = EuclideanGenerator(generator_cfg, drift_cfg)
+        model = MoleculeGenerator(generator_cfg, drift_cfg)
 
         if args.wandb_run_id:
             print(f"Loading pretrained generator from wandb run: {args.wandb_run_id}")
@@ -95,12 +97,10 @@ def main(args: argparse.Namespace):
 
         callbacks = [
             GradientMonitorCallback(),
-            EmbeddingMonitorCallback(),
             MoleculeVisualizationCallback(
                 n_molecules=min(4, args.n_real_molecules),
                 bond_threshold=2.0,
                 every_n_epochs=1,
-                infer_method=args.infer_method,
             ),
             ChemicalValidityCallback(),
             # SizeDistributionCallback(),
@@ -109,7 +109,7 @@ def main(args: argparse.Namespace):
         ]
 
         trainer = pl.Trainer(
-            accelerator="auto",
+            accelerator="cpu",
             max_epochs=args.max_epochs,
             devices=1,
             deterministic=deterministic,
@@ -126,7 +126,10 @@ def main(args: argparse.Namespace):
 
         trainer.fit(model, datamodule=datamodule)
         gen_ckpt.load_best_weights(model)
-        trainer.test(model, datamodule=datamodule)
+        if len(datamodule.test_set) > 0:
+            trainer.test(model, datamodule=datamodule)
+        else:
+            print("Skipping test: test set is empty after atom-count filtering.")
 
     except KeyboardInterrupt:
         print("\nTraining interrupted.")

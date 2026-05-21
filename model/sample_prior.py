@@ -77,13 +77,12 @@ def sample_prior_batch(
     size_values: np.ndarray,
     size_probs: np.ndarray,
     num_atom_types: int,
-    prior_pos_clamp: float,
     device: torch.device,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, np.ndarray]:
     """Sample n_molecules from the prior using the QM9 atom-count distribution.
 
     1. Draws atom counts for each molecule from the empirical QM9 distribution.
-    2. Samples Gaussian positions (clamped) and Dirichlet atom features per node.
+    2. Samples Gaussian positions and types.
     3. Builds the batched dense_edge_index (fully-connected, no self-loops, offset
        per molecule) and the batch membership vector.
 
@@ -97,10 +96,8 @@ def sample_prior_batch(
     atom_counts = np.random.choice(size_values, size=n_molecules, p=size_probs)
     total_nodes = int(atom_counts.sum())
 
-    pos = torch.randn(total_nodes, 3, device=device).clamp(
-        -prior_pos_clamp, prior_pos_clamp
-    )
-    x = sample_atom_dirichlet_noise(total_nodes, num_atom_types, device=device)[0]
+    pos = torch.randn(total_nodes, 3, device=device)
+    types = torch.randn(total_nodes, num_atom_types, device=device)
 
     batch_vec = torch.repeat_interleave(
         torch.arange(n_molecules, device=device),
@@ -114,4 +111,4 @@ def sample_prior_batch(
         offset += n
     dense_edge_index = torch.cat(parts, dim=1)
 
-    return x, pos, batch_vec, dense_edge_index, atom_counts
+    return types, pos, batch_vec, dense_edge_index, atom_counts
