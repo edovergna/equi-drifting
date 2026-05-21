@@ -80,7 +80,7 @@ def main(args: argparse.Namespace):
             "start_frac_epoch": args.start_frac_epoch,
             "lambda_clash": args.lambda_clash,
             "lambda_valence_excess": args.lambda_valence_excess,
-            "lambda_hydrogen_valence": args.lambda_hydorgen_valence,
+            "lambda_hydrogen_valence": args.lambda_hydrogen_valence,
             "clash_threshold": args.clash_threshold,
             "bond_temperature": args.bond_temperature,
         }

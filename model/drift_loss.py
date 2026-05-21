@@ -90,7 +90,6 @@ def compute_drift_loss(
 
     loss = (scale_eucl * molecule_position_dist + scale_spher * molecule_types_dist).mean()
 
-    #TODO: add inputs
     if chem_refinement:
         chem_loss, chem_stats = compute_chem_loss(gen_pos, sphere_to_probs(gen_types_sphere, eps), cfg)
         loss = loss + chem_loss
@@ -111,7 +110,8 @@ def compute_drift_loss(
         stats["mean_V_types_pos"] = product_tangent_norm(V_types_pos, eps).mean().item()
         stats["mean_V_types_neg"] = product_tangent_norm(V_types_neg, eps).mean().item()
     
-    stats.update(chem_stats)
+    if chem_refinement:
+        stats.update(chem_stats)
 
     return loss, stats
 
