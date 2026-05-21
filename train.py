@@ -109,7 +109,7 @@ def main(args: argparse.Namespace):
         ]
 
         trainer = pl.Trainer(
-            accelerator="cpu",
+            accelerator="auto",
             max_epochs=args.max_epochs,
             devices=1,
             deterministic=deterministic,
