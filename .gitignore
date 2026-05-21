@@ -224,3 +224,4 @@ checkpoints/
 *.out
 
 ls
+notebooks/aligned_temperature_results/*
