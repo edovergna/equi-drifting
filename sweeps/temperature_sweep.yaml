@@ -21,59 +21,22 @@ command:
   - ${env}
   - python
   - ${program}
-
-  - --n_real_molecules
-  - "128"
-
-  - --n_gen_molecules
-  - "128"
-
-  - --num_workers
-  - "8"
-
-  - --max_epochs
-  - "750"
-
-  - --min_num_atoms
-  - "8"
-
-  - --max_num_atoms
-  - "8"
-
-  - --check_val_every_n_epoch
-  - "1"
-
-  - --hidden_dim
-  - "256"
-
-  - --num_layers
-  - "7"
-
-  - --max_iter
-  - "1"
-
-  - --sample_frac
-  - "1.0"
-
-  - --position_sigma
-  - ${position_sigma}
-
-  - --types_sigma
-  - ${types_sigma}
-
-  - --position_eta
-  - "0.7"
-
-  - --types_eta
-  - "0.4"
-
-  - --lr
-  - "2e-4"
-
-  - --position_weight
-  - "0.5"
-
+  - --n_real_molecules=128
+  - --n_gen_molecules=128
+  - --num_workers=8
+  - --max_epochs=750
+  - --min_num_atoms=8
+  - --max_num_atoms=8
+  - --check_val_every_n_epoch=1
+  - --hidden_dim=256
+  - --num_layers=7
+  - --max_iter=1
+  - --sample_frac=1.0
+  - --position_sigma=${position_sigma}
+  - --types_sigma=${types_sigma}
+  - --position_eta=0.7
+  - --types_eta=0.4
+  - --lr=2e-4
+  - --position_weight=0.5
   - --chem_refinement
-
-  - --group_tag
-  - "sigma_sweep_atoms8"
+  - --group_tag=sigma_sweep_atoms8
