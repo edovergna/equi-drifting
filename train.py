@@ -77,6 +77,12 @@ def main(args: argparse.Namespace):
             "num_atom_types": args.num_atom_types,
             "chem_refinement": args.chem_refinement,
             "max_epochs": args.max_epochs,
+            "start_frac_epoch": args.start_frac_epoch,
+            "lambda_clash": args.lambda_clash,
+            "lambda_valence_excess": args.lambda_valence_excess,
+            "lambda_hydrogen_valence": args.lambda_hydorgen_valence,
+            "clash_threshold": args.clash_threshold,
+            "bond_temperature": args.bond_temperature,
         }
 
         model = MoleculeGenerator(generator_cfg, drift_cfg)

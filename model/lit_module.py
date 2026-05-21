@@ -52,6 +52,11 @@ class MoleculeGenerator(LightningModule):
             "pct_start": 0.1,
             "div_factor": 25.0,
             "final_div_factor": 1e4,
+            "lambda_clash": 0.1,
+            "lambda_valence_excess": 0.1, 
+            "lambda_hydrogen_valence": 0.1,
+            "clash_threshold": 0.7,
+            "bond_temperature": 0.1,
         }
 
         self.generator_cfg = {**default_generator_cfg, **(generator_cfg or {})}
@@ -65,6 +70,7 @@ class MoleculeGenerator(LightningModule):
         self.n_gen_molecules = self.drift_cfg.get("n_gen_molecules", 64)
         self.chem_refinement = self.drift_cfg.get("chem_refinement", False)
         self.max_epochs = self.drift_cfg.get("max_epochs", 100)
+        self.start_frac_epoch = self.drift_cfg.get("start_frac_epoch", 0.8)
 
         self.eps = self.drift_cfg.get("eps", 1e-8)
 
@@ -167,7 +173,7 @@ class MoleculeGenerator(LightningModule):
         real_pos, real_types = batch.pos, batch.real_atom_types
 
         try:
-            if self.chem_refinement and (self.current_epoch > 0.8 * self.max_epochs):
+            if self.chem_refinement and (self.current_epoch > self.start_frac_epoch * self.max_epochs):
                 loss, stats = compute_drift_loss(
                     gen_pos, real_pos, gen_types_sphere, real_types, num_atoms, chem_refinement=True, cfg=self.drift_cfg
                 )
@@ -227,7 +233,7 @@ class MoleculeGenerator(LightningModule):
 
         real_pos, real_types = batch.pos, batch.real_atom_types
 
-        if self.chem_refinement and (self.current_epoch > 0.8 * self.max_epochs):
+        if self.chem_refinement and (self.current_epoch > self.start_frac_epoch * self.max_epochs):
             val_loss, stats = compute_drift_loss(
                 gen_pos, real_pos, gen_types_sphere, real_types, num_atoms, chem_refinement=True, cfg=self.drift_cfg
             )
@@ -310,7 +316,7 @@ class MoleculeGenerator(LightningModule):
         gen_pos, gen_types_sphere, gen_batch_vec = self._forward(batch, num_atoms)
         real_pos, real_types = batch.pos, batch.real_atom_types
 
-        if self.chem_refinement and (self.current_epoch > 0.8 * self.max_epochs):
+        if self.chem_refinement and (self.current_epoch > self.start_frac_epoch * self.max_epochs):
             test_loss, stats = compute_drift_loss(
                 gen_pos, real_pos, gen_types_sphere, real_types, num_atoms, chem_refinement=True, cfg=self.drift_cfg
             )

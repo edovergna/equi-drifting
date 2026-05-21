@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 
-from .spherical_utils import product_tangent_norm, sphere_exp, geodesic_distance, sphere_normalize, sphere_project_tangent
+from .spherical_utils import product_tangent_norm, sphere_exp, geodesic_distance, sphere_normalize, sphere_project_tangent, sphere_to_probs
 from .align import find_rotation_and_permutation, permute_generated_to_real_order, apply_pairwise_rotation, unpermute_real_order_to_gen_order
 from .chem_loss import compute_chem_loss
 
@@ -92,7 +92,8 @@ def compute_drift_loss(
 
     #TODO: add inputs
     if chem_refinement:
-        loss = loss + compute_chem_loss()
+        chem_loss, chem_stats = compute_chem_loss(gen_pos, sphere_to_probs(gen_types_sphere, eps), cfg)
+        loss = loss + chem_loss
 
     if not torch.isfinite(loss):
         raise TrainingDivergedException()
@@ -110,6 +111,8 @@ def compute_drift_loss(
         stats["mean_V_types_pos"] = product_tangent_norm(V_types_pos, eps).mean().item()
         stats["mean_V_types_neg"] = product_tangent_norm(V_types_neg, eps).mean().item()
     
+    stats.update(chem_stats)
+
     return loss, stats
 
 

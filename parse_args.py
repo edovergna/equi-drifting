@@ -162,6 +162,46 @@ def parse_args():
         help="When activated, towards end of training, chemical losses will be used for refinement."
     )
 
+    # -------------------------
+    # Chemical Refinement Args
+    # -------------------------
+    parser.add_argument(
+        "--start_frac_epoch",
+        type=float,
+        default=0.8,
+        help="From which fraction of epochs onwards, chemical refinement will be used."
+    )
+    parser.add_argument(
+        "--lambda_clash",
+        type=float,
+        default=0.1,
+        help="Scale for loss of clash loss."
+    )
+    parser.add_argument(
+        "--lambda_valence_excess",
+        type=float,
+        default=0.1,
+        help="Scale for loss of excess valence."
+    )
+    parser.add_argument(
+        "--lambda_hydrogen_valence",
+        type=float,
+        default=0.1,
+        help="Scale for loss of hydrogen valence"
+    )
+    parser.add_argument(
+        "--clash_threshold",
+        type=float,
+        default=0.7,
+        help="Threshold to be used in clash loss."
+    )
+    parser.add_argument(
+        "--bond_temperature",
+        type=float,
+        default=0.1,
+        help="Temperature used in bond loss."
+    )
+
     # --------------------
     # Aligning Args
     # --------------------
