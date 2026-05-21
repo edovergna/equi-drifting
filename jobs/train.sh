@@ -21,13 +21,14 @@ python train.py \
   --n_gen_molecules 128 \
   --num_workers 4 \
   --max_epochs 500 \
-  --min_num_atoms 4 \
-  --max_num_atoms 4 \
+  --min_num_atoms 3 \
+  --max_num_atoms 7 \
   --check_val_every_n_epoch 1 \
   --hidden_dim 128 \
   --num_layers 5 \
-  --max_iter 5 \
+  --max_iter 3 \
   --sample_frac 1.0 \
-  --position_sigma 2.0 \
-  --position_eta 0.2 \
-  --types_eta 0.4 
+  --position_sigma 2.5 \
+  --position_eta 1.0 \
+  --types_eta 1.0 \
+  --chem_refinement
