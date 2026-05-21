@@ -219,6 +219,7 @@ __marimo__/
 settings.json
 
 checkpoints/
+notebooks/*.pt
 
 
 *.out
