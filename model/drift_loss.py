@@ -3,6 +3,7 @@ import torch.nn.functional as F
 
 from .spherical_utils import product_tangent_norm, sphere_exp, geodesic_distance, sphere_normalize, sphere_project_tangent
 from .align import find_rotation_and_permutation, permute_generated_to_real_order, apply_pairwise_rotation, unpermute_real_order_to_gen_order
+from .chem_loss import compute_chem_loss
 
 class TrainingDivergedException(Exception):
     """Raised when the drift loss becomes non-finite. Triggers a clean training stop."""
@@ -13,6 +14,7 @@ def compute_drift_loss(
     gen_types_sphere: torch.Tensor,
     real_types: torch.Tensor,
     num_atoms: int,
+    chem_refinement: bool,
     cfg
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """
@@ -87,6 +89,10 @@ def compute_drift_loss(
     molecule_types_dist = (geodesic_distance(gen_types_sphere, target_types, eps) ** 2).sum(dim=-1) # shape: [N_gen]
 
     loss = (scale_eucl * molecule_position_dist + scale_spher * molecule_types_dist).mean()
+
+    #TODO: add inputs
+    if chem_refinement:
+        loss = loss + compute_chem_loss()
 
     if not torch.isfinite(loss):
         raise TrainingDivergedException()

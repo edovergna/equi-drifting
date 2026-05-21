@@ -63,6 +63,9 @@ class MoleculeGenerator(LightningModule):
         self.generator = self._init_generator(self.generator_cfg)
 
         self.n_gen_molecules = self.drift_cfg.get("n_gen_molecules", 64)
+        self.chem_refinement = self.drift_cfg.get("chem_refinement", False)
+        self.max_epochs = self.drift_cfg.get("max_epochs", 100)
+
         self.eps = self.drift_cfg.get("eps", 1e-8)
 
         self._size_values: np.ndarray | None = None
@@ -164,9 +167,14 @@ class MoleculeGenerator(LightningModule):
         real_pos, real_types = batch.pos, batch.real_atom_types
 
         try:
-            loss, stats = compute_drift_loss(
-                gen_pos, real_pos, gen_types_sphere, real_types, num_atoms, self.drift_cfg
-            )
+            if self.chem_refinement and (self.current_epoch > 0.8 * self.max_epochs):
+                loss, stats = compute_drift_loss(
+                    gen_pos, real_pos, gen_types_sphere, real_types, num_atoms, chem_refinement=True, cfg=self.drift_cfg
+                )
+            else:
+                loss, stats = compute_drift_loss(
+                    gen_pos, real_pos, gen_types_sphere, real_types, num_atoms, chem_refinement=False, cfg=self.drift_cfg
+                )
         except TrainingDivergedException as e:
             self.print(f"\n[Step {self.global_step}] {e}\nStopping training.")
             self.trainer.should_stop = True
@@ -219,8 +227,13 @@ class MoleculeGenerator(LightningModule):
 
         real_pos, real_types = batch.pos, batch.real_atom_types
 
-        val_loss, stats = compute_drift_loss(
-                gen_pos, real_pos, gen_types_sphere, real_types, num_atoms, self.drift_cfg
+        if self.chem_refinement and (self.current_epoch > 0.8 * self.max_epochs):
+            val_loss, stats = compute_drift_loss(
+                gen_pos, real_pos, gen_types_sphere, real_types, num_atoms, chem_refinement=True, cfg=self.drift_cfg
+            )
+        else:
+            val_loss, stats = compute_drift_loss(
+                gen_pos, real_pos, gen_types_sphere, real_types, num_atoms, chem_refinement=False, cfg=self.drift_cfg
             )
 
         bs = self.n_gen_molecules
@@ -297,8 +310,13 @@ class MoleculeGenerator(LightningModule):
         gen_pos, gen_types_sphere, gen_batch_vec = self._forward(batch, num_atoms)
         real_pos, real_types = batch.pos, batch.real_atom_types
 
-        test_loss, _ = compute_drift_loss(
-                gen_pos, real_pos, gen_types_sphere, real_types, num_atoms, self.drift_cfg
+        if self.chem_refinement and (self.current_epoch > 0.8 * self.max_epochs):
+            test_loss, stats = compute_drift_loss(
+                gen_pos, real_pos, gen_types_sphere, real_types, num_atoms, chem_refinement=True, cfg=self.drift_cfg
+            )
+        else:
+            test_loss, stats = compute_drift_loss(
+                gen_pos, real_pos, gen_types_sphere, real_types, num_atoms, chem_refinement=False, cfg=self.drift_cfg
             )
 
         bs = self.n_gen_molecules

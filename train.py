@@ -75,6 +75,8 @@ def main(args: argparse.Namespace):
             "t_weight": args.types_weight,
             "n_gen_molecules": args.n_gen_molecules,
             "num_atom_types": args.num_atom_types,
+            "chem_refinement": args.chem_refinement,
+            "max_epochs": args.max_epochs,
         }
 
         model = MoleculeGenerator(generator_cfg, drift_cfg)

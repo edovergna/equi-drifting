@@ -59,7 +59,7 @@ def parse_args():
     # Optimization Args
     # --------------------
     parser.add_argument(
-        "--max_epochs", type=int, default=120, help="Maximum number of training epochs."
+        "--max_epochs", type=int, default=100, help="Maximum number of training epochs."
     )
     parser.add_argument(
         "--lr", type=float, default=2e-4, help="Learning rate for the optimizer."
@@ -155,6 +155,11 @@ def parse_args():
         "--epsilon",
         type=float,
         default=1e-8,
+    )
+    parser.add_argument(
+        "--chem_refinement",
+        action="store_true",
+        help="When activated, towards end of training, chemical losses will be used for refinement."
     )
 
     # --------------------
