@@ -28,17 +28,22 @@ from model import (
 from model.wandb_utils import load_pretrained_generator
 from parse_args import parse_args
 
+
+def format_param_count(param_count: int) -> str:
+    if param_count >= 1_000_000:
+        return f"{param_count / 1_000_000:.1f}M"
+    if param_count >= 1_000:
+        return f"{param_count / 1_000:.1f}K"
+    return str(param_count)
+
+
 def main(args: argparse.Namespace):
 
     device, precision, deterministic, benchmark = initialize_training_config(args)
-    run_name = None
-    if args.auto_wandb_size_name:
-        run_name = f"layers_{args.num_layers}_hidden_{args.hidden_dim}"
 
     run = wandb.init(
         entity="equivariant-drifting",
         project="aligned-drifting",
-        name=run_name,
         group=args.group_tag,
         mode="offline" if args.offline else "online",
         config=vars(args),
@@ -90,6 +95,13 @@ def main(args: argparse.Namespace):
         }
 
         model = MoleculeGenerator(generator_cfg, drift_cfg)
+        param_count = sum(p.numel() for p in model.parameters())
+        run.config.update({"model_param_count": param_count}, allow_val_change=True)
+        if args.auto_wandb_size_name:
+            run.name = (
+                f"layers_{args.num_layers}_hidden_{args.hidden_dim}_"
+                f"params_{format_param_count(param_count)}"
+            )
 
         if args.wandb_run_id:
             print(f"Loading pretrained generator from wandb run: {args.wandb_run_id}")
