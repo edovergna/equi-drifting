@@ -4,7 +4,7 @@ name: model_size_sweep_atoms8_sigma2_type1
 method: grid
 
 entity: equivariant-drifting
-project: model_size_sweep
+project: model_size_sweep_variety
 
 metric:
   name: val_loss
@@ -25,8 +25,8 @@ command:
   - --n_gen_molecules=128
   - --num_workers=8
   - --max_epochs=750
-  - --min_num_atoms=8
-  - --max_num_atoms=8
+  - --min_num_atoms=3
+  - --max_num_atoms=11
   - --check_val_every_n_epoch=1
   - --max_iter=1
   - --sample_frac=1.0
