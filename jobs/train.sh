@@ -17,21 +17,26 @@ conda activate equi
 cd "$HOME/drifting-experiments"
 
 python train.py \
-  --n_real_molecules 64 \
-  --n_gen_molecules 64 \
+  --n_real_molecules 128 \
+  --n_gen_molecules 128 \
   --num_workers 4 \
-  --max_epochs 200 \
-  --min_num_atoms 8 \
-  --max_num_atoms 12 \
+  --max_epochs 1000 \
+  --min_num_atoms 10 \
+  --max_num_atoms 18 \
   --check_val_every_n_epoch 1 \
   --hidden_dim 256 \
-  --num_layers 7 \
+  --num_layers 8 \
   --max_iter 1 \
   --sample_frac 1.0 \
-  --position_sigma 4.0 \
+  --position_sigma 2.0 \
   --types_sigma 1.0 \
   --position_eta 0.4 \
   --types_eta 0.7 \
   --lr 2e-4 \
   --position_weight 0.5 \
+  --start_frac_epoch 0.7 \
+  --lambda_valence_excess 1.0 \
+  --lambda_hydrogen_valence 1.0 \
+  --lambda_clash 1.0 \
+  --clash_threshold 1.0 \
   --chem_refinement
