@@ -4,7 +4,7 @@ name: model_size_sweep_atoms8_sigma2_type1
 method: grid
 
 entity: equivariant-drifting
-project: aligned-drifting
+project: model_size_sweep
 
 metric:
   name: val_loss

@@ -5,7 +5,7 @@
 #SBATCH --job-name=sweep
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
-#SBATCH --time=10:00:00
+#SBATCH --time=4:00:00
 #SBATCH --output=slurm_output_%A.out
 
 module purge
@@ -15,4 +15,4 @@ source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate equi
 
 cd "$HOME/drifting-experiments"
-wandb agent equivariant-drifting/temperature/d8aae74x
+wandb agent equivariant-drifting/model_size_sweep/h3he5rcm
