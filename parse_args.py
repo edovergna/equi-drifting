@@ -257,6 +257,11 @@ def parse_args():
         default="default_group",
         help="Group tag for Weights & Biases logging.",
     )
+    parser.add_argument(
+        "--auto_wandb_size_name",
+        action="store_true",
+        help="Name W&B runs as layers_X_hidden_Y based on model size.",
+    )
 
     # -------------------
     # Lightning args

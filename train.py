@@ -31,10 +31,14 @@ from parse_args import parse_args
 def main(args: argparse.Namespace):
 
     device, precision, deterministic, benchmark = initialize_training_config(args)
+    run_name = None
+    if args.auto_wandb_size_name:
+        run_name = f"layers_{args.num_layers}_hidden_{args.hidden_dim}"
 
     run = wandb.init(
         entity="equivariant-drifting",
         project="aligned-drifting",
+        name=run_name,
         group=args.group_tag,
         mode="offline" if args.offline else "online",
         config=vars(args),
