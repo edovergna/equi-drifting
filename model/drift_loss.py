@@ -41,6 +41,9 @@ def compute_drift_loss(
     N_gen = gen_pos.shape[0]
     N_real = real_pos.shape[0]
 
+    N_atoms = gen_pos.shape[1]
+    sqrt_N_a = N_atoms ** 0.5
+
     with torch.no_grad():
         permutation_pos, R_pos, _, _ = find_rotation_and_permutation(gen_pos, real_pos, gen_types_sphere, real_types, cfg)
         permutation_neg, R_neg, _, _ = find_rotation_and_permutation(gen_pos, gen_pos, gen_types_sphere, gen_types_sphere, cfg)
@@ -60,7 +63,11 @@ def compute_drift_loss(
         types_dist_pos, types_diff_pos = _pairwise_geodesic_distance_and_log(aligned_types_pos, real_types, "spherical", eps)
         types_dist_neg, types_diff_neg = _pairwise_geodesic_distance_and_log(aligned_types_neg, gen_types_sphere, "spherical", eps)
 
-        # PERHAPS DIVIDE DIST BY SQRT N_ATOMS
+        posit_dist_pos = posit_dist_pos / sqrt_N_a
+        posit_dist_neg = posit_dist_neg / sqrt_N_a
+
+        types_dist_pos = types_dist_pos / sqrt_N_a
+        types_dist_neg = types_dist_neg / sqrt_N_a
 
         # Ignore self if y_neg is x
         eye = torch.eye(N_gen, device=gen_pos.device, dtype=torch.bool)
