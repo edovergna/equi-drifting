@@ -30,8 +30,8 @@ python train.py \
   --sample_frac 1.0 \
   --position_sigma 2.0 \
   --types_sigma 1.0 \
-  --position_eta 1.0 \
-  --types_eta 1.0 \
+  --position_eta 0.5 \
+  --types_eta 0.5 \
   --lr 1e-5 \
   --position_weight 0.5 \
   --lambda_valence_excess 1.0 \
