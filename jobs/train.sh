@@ -28,7 +28,6 @@ python train.py \
   --sample_frac 1.0 \
   --position_sigma 2.0 \
   --types_sigma 1.0 \
-  --end_sigma 0.3 \
   --position_eta 1.0 \
   --types_eta 1.0 \
   --lr 1e-5 \
