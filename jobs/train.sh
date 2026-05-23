@@ -20,7 +20,7 @@ python train.py \
   --n_real_molecules 128 \
   --n_gen_molecules 128 \
   --num_workers 4 \
-  --max_epochs 2000 \
+  --max_epochs 1000 \
   --min_num_atoms 3 \
   --max_num_atoms 12 \
   --check_val_every_n_epoch 1 \
@@ -30,9 +30,9 @@ python train.py \
   --sample_frac 1.0 \
   --position_sigma 2.0 \
   --types_sigma 1.0 \
-  --position_eta 0.1 \
-  --types_eta 0.3 \
-  --lr 2e-4 \
+  --position_eta 1.0 \
+  --types_eta 1.0 \
+  --lr 1e-5 \
   --position_weight 0.5 \
   --lambda_valence_excess 1.0 \
   --lambda_hydrogen_valence 1.0 \
