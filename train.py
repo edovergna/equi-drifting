@@ -83,6 +83,7 @@ def main(args: argparse.Namespace):
             "lambda_hydrogen_valence": args.lambda_hydrogen_valence,
             "clash_threshold": args.clash_threshold,
             "bond_temperature": args.bond_temperature,
+            "end_sigma": args.end_sigma,
         }
 
         model = MoleculeGenerator(generator_cfg, drift_cfg)

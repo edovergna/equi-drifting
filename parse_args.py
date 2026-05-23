@@ -128,6 +128,12 @@ def parse_args():
         help="Sigma value for the drifting field of types."
     )
     parser.add_argument(
+        "--end_sigma",
+        type=float,
+        default=None,
+        help="If set, then sigma values will be annealed to the specified end value using cosine annealing."
+    )
+    parser.add_argument(
         "--position_eta",
         type=float,
         default=1.0,

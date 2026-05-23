@@ -65,6 +65,14 @@ class MoleculeGenerator(LightningModule):
             {"generator_cfg": self.generator_cfg, "drift_cfg": self.drift_cfg}
         )
 
+        if self.drift_cfg.get("end_sigma", None) is not None:
+            self.end_sigma = self.drift_cfg["end_sigma"]
+            self.p_sigma_start = self.drift_cfg.get("p_sigma", 1.0)
+            self.t_sigma_start = self.drift_cfg.get("t_sigma", 1.0)
+            self.anneal_sigma = True
+        else:
+            self.anneal_sigma = False
+
         self.generator = self._init_generator(self.generator_cfg)
 
         self.n_gen_molecules = self.drift_cfg.get("n_gen_molecules", 64)
@@ -165,6 +173,28 @@ class MoleculeGenerator(LightningModule):
 
     def _batch_num_atoms(self, batch) -> int:
         return int((batch.ptr[1] - batch.ptr[0]).item())
+    
+    def on_train_epoch_start(self):
+        if self.anneal_sigma:
+            progress = self.current_epoch / max(1, self.trainer.max_epochs - 1)
+
+            self.drift_cfg["p_sigma"] = (
+                self.end_sigma
+                + 0.5
+                * (self.p_sigma_start - self.end_sigma)
+                * (1 + torch.cos(torch.tensor(torch.pi * progress)))
+            )
+
+            self.drift_cfg["t_sigma"] = (
+                self.end_sigma
+                + 0.5
+                * (self.t_sigma_start - self.end_sigma)
+                * (1 + torch.cos(torch.tensor(torch.pi * progress)))
+            )
+
+            self.log("drift/p_sigma", self.drift_cfg["p_sigma"])
+            self.log("drift/t_sigma", self.drift_cfg["t_sigma"])
+
 
     def training_step(self, batch, batch_idx):
         num_atoms = self._batch_num_atoms(batch)
