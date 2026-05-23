@@ -5,7 +5,7 @@
 #SBATCH --job-name=sweep
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
-#SBATCH --time=24:00:00
+#SBATCH --time=4:00:00
 #SBATCH --output=slurm_output_%A.out
 
 module purge
@@ -18,5 +18,4 @@ REPO_DIR="${SLURM_SUBMIT_DIR:-$HOME/drifting-experiments}"
 cd "$REPO_DIR"
 
 python -c "from parse_args import parse_args; import sys; sys.argv=['train.py', '--auto_wandb_size_name']; assert parse_args().auto_wandb_size_name"
-
-wandb agent equivariant-drifting/model_size_sweep_better/mhj7uasg
+wandb agent equivariant-drifting/model_size_sweep_better/lmnn9fvj
