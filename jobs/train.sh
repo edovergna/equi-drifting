@@ -5,7 +5,7 @@
 #SBATCH --job-name=aligned
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
-#SBATCH --time=04:00:00
+#SBATCH --time=07:00:00
 #SBATCH --output=slurm_output_%A.out
 
 module purge
@@ -20,22 +20,16 @@ python train.py \
   --n_real_molecules 128 \
   --n_gen_molecules 128 \
   --num_workers 4 \
-  --max_epochs 1000 \
-  --min_num_atoms 3 \
-  --max_num_atoms 16 \
+  --max_epochs 500 \
   --check_val_every_n_epoch 1 \
-  --hidden_dim 128 \
-  --num_layers 8 \
+  --hidden_dim 256 \
+  --num_layers 9 \
   --max_iter 1 \
   --sample_frac 1.0 \
   --position_sigma 2.0 \
   --types_sigma 1.0 \
+  --end_sigma 0.3 \
   --position_eta 1.0 \
   --types_eta 1.0 \
   --lr 1e-5 \
   --position_weight 0.5 \
-  --lambda_valence_excess 1.0 \
-  --lambda_hydrogen_valence 1.0 \
-  --lambda_clash 1.0 \
-  --clash_threshold 1.0 \
-  --chem_refinement
