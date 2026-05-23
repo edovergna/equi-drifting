@@ -22,16 +22,16 @@ python train.py \
   --num_workers 4 \
   --max_epochs 1000 \
   --min_num_atoms 3 \
-  --max_num_atoms 12 \
+  --max_num_atoms 16 \
   --check_val_every_n_epoch 1 \
-  --hidden_dim 256 \
+  --hidden_dim 128 \
   --num_layers 8 \
   --max_iter 1 \
   --sample_frac 1.0 \
   --position_sigma 2.0 \
   --types_sigma 1.0 \
-  --position_eta 0.5 \
-  --types_eta 0.5 \
+  --position_eta 1.0 \
+  --types_eta 1.0 \
   --lr 1e-5 \
   --position_weight 0.5 \
   --lambda_valence_excess 1.0 \
