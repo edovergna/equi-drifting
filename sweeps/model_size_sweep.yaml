@@ -1,10 +1,10 @@
 program: train.py
 
-name: model_size_sweep_atoms8_sigma2_type1
+name: model_size_sweep_better
 method: grid
 
 entity: equivariant-drifting
-project: model_size_sweep_full_data
+project: model_size_sweep_better
 
 metric:
   name: val_loss
@@ -12,10 +12,10 @@ metric:
 
 parameters:
   num_layers:
-    values: [5, 7, 9, 11]
+    values: [1, 3, 5, 7, 9, 11]
 
   hidden_dim:
-    values: [128, 256, 512]
+    values: [64, 128, 256, 512]
 
 command:
   - ${env}
@@ -25,8 +25,8 @@ command:
   - --n_gen_molecules=128
   - --num_workers=8
   - --max_epochs=750
-  - --min_num_atoms=1
-  - --max_num_atoms=29
+  - --min_num_atoms=3
+  - --max_num_atoms=12
   - --check_val_every_n_epoch=1
   - --max_iter=1
   - --sample_frac=1.0
@@ -34,9 +34,9 @@ command:
   - --types_sigma=1.0
   - --position_eta=0.7
   - --types_eta=0.4
-  - --lr=2e-4
+  - --lr=1e-5
   - --position_weight=0.5
   - --chem_refinement
-  - --group_tag=model_size_sweep_atoms8_sigma2_type1
+  - --group_tag=model_size_sweep_better
   - --auto_wandb_size_name
   - ${args}
