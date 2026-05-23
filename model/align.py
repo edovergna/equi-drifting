@@ -60,14 +60,6 @@ def _kabsch_rotations(gen_pos, real_pos):
 
         R = V @ Ut
 
-        det = torch.det(R)
-        mask = det < 0
-
-        if mask.any():
-            V = V.clone()
-            V[mask, :, -1] *= -1
-            R = V @ Ut
-
         return R.reshape(H.shape[0], H.shape[1], 3, 3).to(out_dtype)
 
 
