@@ -15,4 +15,4 @@ source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate equi
 
 cd "$HOME/drifting-experiments"
-wandb agent equivariant-drifting/model_size_sweep_variety/y4ylirvx
+wandb agent equivariant-drifting/model_size_sweep_variety/x972dm9l
