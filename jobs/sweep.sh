@@ -14,5 +14,9 @@ module load Anaconda3/2025.06-1
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate equi
 
-cd "$HOME/drifting-experiments"
+REPO_DIR="${SLURM_SUBMIT_DIR:-$HOME/drifting-experiments}"
+cd "$REPO_DIR"
+
+python -c "from parse_args import parse_args; import sys; sys.argv=['train.py', '--auto_wandb_size_name']; assert parse_args().auto_wandb_size_name"
+
 wandb agent equivariant-drifting/model_size_sweep_better/mhj7uasg
