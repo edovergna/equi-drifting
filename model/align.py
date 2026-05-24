@@ -1,3 +1,10 @@
+"""Molecular alignment using Kabsch algorithm and Hungarian matching.
+
+Aligns generated molecules to real molecules by finding optimal atom permutations
+and rotations through iterative refinement using the Kabsch algorithm for rigid
+registration and Hungarian algorithm for atom matching.
+"""
+
 # Adding Kabsch algorithm and Hungarian method
 import torch
 from torch_linear_assignment import batch_linear_assignment
@@ -6,6 +13,18 @@ from contextlib import nullcontext
 
 
 def _kabsch_rotations(gen_pos, real_pos):
+    """Compute optimal rotation matrices aligning generated to real molecules.
+
+    Uses Singular Value Decomposition (SVD) to find rotation matrices minimizing
+    squared distance between centered point clouds.
+
+    Args:
+        gen_pos: Generated positions, either [N_gen, N_atoms, 3] or [N_gen, N_real, N_atoms, 3].
+        real_pos: Real positions [N_real, N_atoms, 3].
+
+    Returns:
+        Rotation matrices [N_gen, N_real, 3, 3] (or [N_gen, N_gen, 3, 3] if pairwise).
+    """
     out_dtype = gen_pos.dtype
     device_type = gen_pos.device.type
     autocast_ctx = (
@@ -72,6 +91,21 @@ def _hungarian_method_batched(
     t_weight=1.0,
     p_weight=1.0,
 ):
+    """Find optimal atom permutations using the Hungarian (linear assignment) algorithm.
+
+    Args:
+        gen_types: Generated atom type embeddings, either [N_gen, N_atoms, D] or [N_gen, N_real, N_atoms, D].
+        real_types: Real atom types [N_real, N_atoms, D].
+        gen_pos: Generated positions, either [N_gen, N_atoms, 3] or [N_gen, N_real, N_atoms, 3].
+        real_pos: Real positions [N_real, N_atoms, 3].
+        eps: Small constant for numerical stability.
+        t_weight: Weight for type distance in cost matrix.
+        p_weight: Weight for position distance in cost matrix.
+
+    Returns:
+        Assignment tensor [N_gen, N_real, N_atoms] where assignment[g, r, j] = i means
+        generated atom i is matched to real atom j.
+    """
     cost_matrix = _build_cost_matrix(
         gen_types=gen_types,
         real_types=real_types,
@@ -105,22 +139,26 @@ def _build_cost_matrix(
     t_weight=1.0,
     p_weight=1.0,
 ):
-    """
-    Supports:
-        gen_types: [N_gen, N_atoms, D]
-        gen_types: [N_gen, N_real, N_atoms, D]
-        real_types: [N_real, N_atoms, D]
+    """Build cost matrix for Hungarian algorithm based on type and position differences.
 
-        gen_pos: [N_gen, N_atoms, 3]
-        gen_pos: [N_gen, N_real, N_atoms, 3]
-        real_pos: [N_real, N_atoms, 3]
-
-    returns:
-        cost_matrix: [N_gen, N_real, N_atoms_real, N_atoms_gen]
+    Cost combines spherical distance on atom type embeddings and Euclidean distance
+    on atomic positions, weighted by t_weight and p_weight respectively.
 
     cost[g, r, j_real, i_gen] =
         type_weight * spherical_distance(type_real_j, type_gen_i)^2
         + pos_weight * euclidean_distance(pos_real_j, pos_gen_i)^2
+
+    Args:
+        gen_types: Generated types [N_gen, N_atoms, D] or [N_gen, N_real, N_atoms, D].
+        real_types: Real types [N_real, N_atoms, D].
+        gen_pos: Generated positions [N_gen, N_atoms, 3] or [N_gen, N_real, N_atoms, 3].
+        real_pos: Real positions [N_real, N_atoms, 3].
+        eps: Numerical stability constant.
+        t_weight: Weight for type cost.
+        p_weight: Weight for position cost.
+
+    Returns:
+        Cost matrix [N_gen, N_real, N_atoms, N_atoms_gen] for assignment.
     """
     assert real_types.ndim == 3
     assert real_pos.ndim == 3
@@ -156,6 +194,15 @@ def _build_cost_matrix(
 
 
 def _to_pairwise(gen, n_real):
+    """Expand tensor to pairwise form for all real molecules.
+
+    Args:
+        gen: Tensor [N_gen, N_atoms, D] to expand.
+        n_real: Number of real molecules.
+
+    Returns:
+        Pairwise tensor [N_gen, N_real, N_atoms, D].
+    """
     if gen.ndim == 3:
         return gen[:, None, :, :].expand(-1, n_real, -1, -1)
     if gen.ndim == 4:
@@ -164,28 +211,29 @@ def _to_pairwise(gen, n_real):
 
 
 def _pairwise_position_rmse(gen_pos_pairwise, real_pos):
-    """
-    gen_pos_pairwise: [N_gen, N_real, N_atoms, 3]
-    real_pos:         [N_real, N_atoms, 3]
+    """Compute RMSE for pairwise position alignment.
 
-    returns:
-        rmse: [N_gen, N_real]
+    Args:
+        gen_pos_pairwise: [N_gen, N_real, N_atoms, 3]
+        real_pos: [N_real, N_atoms, 3]
+
+    Returns:
+        RMSE values [N_gen, N_real].
     """
     diff = gen_pos_pairwise - real_pos[None, :, :, :]
     return diff.pow(2).sum(dim=-1).mean(dim=-1).sqrt()
 
 
 def permute_generated_to_real_order(gen, assignment):
-    """
-    Supports:
-        gen: [N_gen, N_atoms, D]
-        gen: [N_gen, N_real, N_atoms, D]
+    """Reorder generated atoms according to assignment to real atoms.
 
-    assignment: [N_gen, N_real, N_atoms]
-        assignment[g, r, j_real] = i_gen
+    Args:
+        gen: Generated tensor [N_gen, N_atoms, D] or [N_gen, N_real, N_atoms, D].
+        assignment: Assignment indices [N_gen, N_real, N_atoms] where
+            assignment[g, r, j] = i means gen atom i -> real atom j.
 
-    returns:
-        gen_perm: [N_gen, N_real, N_atoms, D]
+    Returns:
+        Permuted tensor [N_gen, N_real, N_atoms, D].
     """
     D = gen.shape[-1]
 
@@ -206,15 +254,14 @@ def permute_generated_to_real_order(gen, assignment):
 
 
 def apply_pairwise_rotation(gen_pos, R):
-    """
-    Supports:
-        gen_pos: [N_gen, N_atoms, 3]
-        gen_pos: [N_gen, N_real, N_atoms, 3]
+    """Apply rotation matrices to generated positions.
 
-    R: [N_gen, N_real, 3, 3]
+    Args:
+        gen_pos: Positions [N_gen, N_atoms, 3] or [N_gen, N_real, N_atoms, 3].
+        R: Rotation matrices [N_gen, N_real, 3, 3].
 
     Returns:
-        rotated: [N_gen, N_real, N_atoms, 3]
+        Rotated positions [N_gen, N_real, N_atoms, 3].
     """
     if gen_pos.ndim == 3:
         gen_pairwise = gen_pos[:, None, :, :].expand(-1, R.shape[1], -1, -1)
@@ -227,16 +274,15 @@ def apply_pairwise_rotation(gen_pos, R):
 
 
 def unpermute_real_order_to_gen_order(x_perm, assignment):
-    """
-    x_perm: [N_gen, N_real, N_atoms, D]
-        tensor currently ordered by real atom index
+    """Reverse permutation to restore generation atom order.
 
-    assignment: [N_gen, N_real, N_atoms]
-        assignment[g, r, j_real] = i_gen
+    Args:
+        x_perm: Permuted tensor [N_gen, N_real, N_atoms, D] in real atom order.
+        assignment: Assignment [N_gen, N_real, N_atoms] where
+            assignment[g, r, j_real] = i_gen.
 
-    returns:
-        x: [N_gen, N_real, N_atoms, D]
-        tensor ordered by original generated atom index
+    Returns:
+        Tensor in original generated atom order [N_gen, N_real, N_atoms, D].
     """
     x = torch.empty_like(x_perm)
 
@@ -248,13 +294,22 @@ def unpermute_real_order_to_gen_order(x_perm, assignment):
 
 
 @torch.no_grad()
-def find_rotation_and_permutation(
-    gen_pos,
-    real_pos,
-    gen_types,
-    real_types,
-    cfg
-):
+def find_rotation_and_permutation(gen_pos, real_pos, gen_types, real_types, cfg):
+    """Iteratively find optimal rotation and atom permutation via Kabsch + Hungarian.
+
+    Alternates between finding optimal atom assignment via Hungarian algorithm and
+    optimal rotation via Kabsch algorithm until convergence (position tolerance).
+
+    Args:
+        gen_pos: Generated positions [N_gen, N_atoms, 3].
+        real_pos: Real positions [N_real, N_atoms, 3].
+        gen_types: Generated atom types [N_gen, N_atoms, D].
+        real_types: Real atom types [N_real, N_atoms, D].
+        cfg: Config dict with eps, max_iter, p_tol, p_weight, t_weight.
+
+    Returns:
+        Tuple of (assignment, total_R, final_pos, final_types).
+    """
 
     eps = cfg["eps"]
     max_iter = cfg["max_iter"]
@@ -271,16 +326,26 @@ def find_rotation_and_permutation(
 
     active = torch.ones(N_gen, N_real, device=gen_pos.device, dtype=torch.bool)
 
-    total_assignment = torch.arange(
-        N_atoms,
-        device=gen_pos.device,
-    ).view(1, 1, N_atoms).expand(N_gen, N_real, N_atoms).clone()
+    total_assignment = (
+        torch.arange(
+            N_atoms,
+            device=gen_pos.device,
+        )
+        .view(1, 1, N_atoms)
+        .expand(N_gen, N_real, N_atoms)
+        .clone()
+    )
 
-    total_R = torch.eye(
-        3,
-        device=gen_pos.device,
-        dtype=gen_pos.dtype,
-    ).view(1, 1, 3, 3).expand(N_gen, N_real, 3, 3).clone()
+    total_R = (
+        torch.eye(
+            3,
+            device=gen_pos.device,
+            dtype=gen_pos.dtype,
+        )
+        .view(1, 1, 3, 3)
+        .expand(N_gen, N_real, 3, 3)
+        .clone()
+    )
 
     for step in range(max_iter):
         pos_weight = 0.0 if step == 0 else p_weight
@@ -296,7 +361,7 @@ def find_rotation_and_permutation(
             t_weight=t_weight,
             p_weight=pos_weight,
         )
-        
+
         cand_g_pos = permute_generated_to_real_order(g_pos, step_assignment)
         cand_g_types = permute_generated_to_real_order(g_types, step_assignment)
 

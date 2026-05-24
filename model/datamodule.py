@@ -1,3 +1,9 @@
+"""PyTorch Lightning DataModule for QM9 molecular dataset.
+
+Provides train/val/test dataloaders with atom-count-balanced batching and
+transforms for encoding atom types and building fully-connected graphs.
+"""
+
 import random
 import sys
 from collections import defaultdict
@@ -23,6 +29,14 @@ class EncodeAtomTypesTransform:
     """A PyG transform that converts atomic numbers to one-hot vectors."""
 
     def __call__(self, data):
+        """Convert atomic numbers in data.z to one-hot atom type vectors.
+
+        Args:
+            data: PyTorch Geometric Data object with z (atomic numbers) attribute.
+
+        Returns:
+            Modified Data object with real_atom_types added as one-hot encoding.
+        """
         z_to_index = {1: 0, 6: 1, 7: 2, 8: 3, 9: 4}
 
         real_indices = torch.tensor(
@@ -38,6 +52,14 @@ class FullyConnectedTransform:
     """A PyG transform that adds a fully connected dense_edge_index to the data."""
 
     def __call__(self, data: Data) -> Data:
+        """Create a fully-connected graph edge index for a molecule.
+
+        Args:
+            data: PyTorch Geometric Data object.
+
+        Returns:
+            Modified Data object with dense_edge_index added.
+        """
         device = (
             data.edge_index.device
             if data.edge_index is not None
@@ -58,6 +80,15 @@ class AtomCountBatchSampler(Sampler[list[int]]):
         replacement: bool,
         drop_last: bool = False,
     ):
+        """Initialize the sampler with atom count groups.
+
+        Args:
+            indices_by_num_atoms: Dict mapping atom count to list of dataset indices.
+            batch_size: Size of each batch.
+            shuffle: Whether to shuffle molecule order within batches.
+            replacement: Whether to allow sampling with replacement across batches.
+            drop_last: If True, skip incomplete batches.
+        """
         self.groups = {
             n_atoms: list(indices)
             for n_atoms, indices in indices_by_num_atoms.items()
@@ -85,6 +116,10 @@ class AtomCountBatchSampler(Sampler[list[int]]):
             )
 
     def __iter__(self) -> Iterator[list[int]]:
+        """Yield batches of indices, one group at a time.
+
+        Each batch contains molecules with the same number of atoms.
+        """
         if self.replacement:
             atom_counts = list(self.groups)
             for _ in range(self.num_batches):
@@ -107,10 +142,13 @@ class AtomCountBatchSampler(Sampler[list[int]]):
                 yield batch
 
     def __len__(self) -> int:
+        """Return the total number of batches."""
         return self.num_batches
 
 
 class QM9DataModule(pl.LightningDataModule):
+    """PyTorch Lightning DataModule for the QM9 molecular dataset."""
+
     def __init__(
         self,
         root: str = "data/QM9",
@@ -121,6 +159,17 @@ class QM9DataModule(pl.LightningDataModule):
         max_num_atoms: int | None = None,
         min_num_atoms: int | None = None,
     ):
+        """Initialize the QM9 DataModule.
+
+        Args:
+            root: Root directory to cache the QM9 dataset.
+            n_real_molecules: Batch size for dataloaders.
+            num_workers: Number of worker processes for loading.
+            force_reload: Force re-download and processing of the dataset.
+            sample_frac: Fraction of data to use (for quick iteration).
+            max_num_atoms: Filter molecules with more than this many atoms.
+            min_num_atoms: Filter molecules with fewer than this many atoms.
+        """
         super().__init__()
         self.root = root
         self.n_real_molecules = n_real_molecules
@@ -132,6 +181,11 @@ class QM9DataModule(pl.LightningDataModule):
         self.pin_memory = torch.cuda.is_available()
 
     def setup(self, stage=None):
+        """Load and prepare train/val/test splits from QM9 dataset.
+
+        Applies atom count filtering and splits data proportionally by atom count
+        to ensure balanced representation in all splits.
+        """
         dataset = self._load_dataset()
 
         keep = [
@@ -205,6 +259,11 @@ class QM9DataModule(pl.LightningDataModule):
         self.available_test_num_atoms = sorted(self.test_indices_by_num_atoms)
 
     def _load_dataset(self):
+        """Load QM9 dataset with transforms, handling rdkit module issues.
+
+        Returns:
+            PyTorch Geometric Dataset with atom type encoding and fully-connected edges.
+        """
         _rdkit_saved = {
             k: v
             for k, v in sys.modules.items()
@@ -229,6 +288,14 @@ class QM9DataModule(pl.LightningDataModule):
             sys.modules.update(_rdkit_saved)
 
     def _passes_atom_filter(self, num_atoms: int) -> bool:
+        """Check if a molecule's atom count passes the filtering criteria.
+
+        Args:
+            num_atoms: Number of atoms in the molecule.
+
+        Returns:
+            True if the molecule should be kept, False otherwise.
+        """
         if self.min_num_atoms is not None and num_atoms < self.min_num_atoms:
             return False
         if self.max_num_atoms is not None and num_atoms > self.max_num_atoms:
@@ -236,6 +303,14 @@ class QM9DataModule(pl.LightningDataModule):
         return True
 
     def _split_sizes(self, n: int) -> tuple[int, int, int]:
+        """Compute train/val/test split sizes for n total samples.
+
+        Args:
+            n: Total number of samples.
+
+        Returns:
+            Tuple of (n_train, n_val, n_test).
+        """
         if n >= _N_TRAIN + _N_VAL:
             n_train = min(_N_TRAIN, n)
             n_val = min(_N_VAL, n - n_train)
@@ -257,6 +332,15 @@ class QM9DataModule(pl.LightningDataModule):
         dataset,
         indices: np.ndarray,
     ) -> dict[int, list[int]]:
+        """Group dataset indices by the number of atoms in each molecule.
+
+        Args:
+            dataset: PyTorch Geometric Dataset.
+            indices: Array of indices to group.
+
+        Returns:
+            Dict mapping atom count to list of indices.
+        """
         groups = defaultdict(list)
         for idx in indices:
             idx = int(idx)
@@ -268,12 +352,26 @@ class QM9DataModule(pl.LightningDataModule):
         rng: np.random.Generator,
         indices: np.ndarray,
     ) -> np.ndarray:
+        """Randomly subsample a split to sample_frac of its original size.
+
+        Args:
+            rng: NumPy random generator.
+            indices: Array of indices to subsample.
+
+        Returns:
+            Subsampled indices array.
+        """
         if len(indices) == 0:
             return indices
         size = max(1, int(self.sample_frac * len(indices)))
         return rng.choice(indices, size=size, replace=False)
 
     def train_dataloader(self) -> DataLoader:
+        """Create the training dataloader with atom-count-balanced batches.
+
+        Returns:
+            DataLoader with AtomCountBatchSampler.
+        """
         return DataLoader(
             self.dataset,
             batch_sampler=AtomCountBatchSampler(
@@ -288,6 +386,11 @@ class QM9DataModule(pl.LightningDataModule):
         )
 
     def val_dataloader(self) -> DataLoader:
+        """Create the validation dataloader with atom-count-balanced batches.
+
+        Returns:
+            DataLoader with AtomCountBatchSampler.
+        """
         return DataLoader(
             self.dataset,
             batch_sampler=AtomCountBatchSampler(
@@ -302,6 +405,11 @@ class QM9DataModule(pl.LightningDataModule):
         )
 
     def test_dataloader(self) -> DataLoader:
+        """Create the test dataloader with atom-count-balanced batches.
+
+        Returns:
+            DataLoader with AtomCountBatchSampler.
+        """
         return DataLoader(
             self.dataset,
             batch_sampler=AtomCountBatchSampler(

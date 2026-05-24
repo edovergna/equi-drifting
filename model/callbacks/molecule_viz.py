@@ -47,6 +47,13 @@ class MoleculeVisualizationCallback(Callback):
         bond_threshold: float = 2.0,
         every_n_epochs: int = 1,
     ):
+        """Initialize the molecule visualization callback.
+
+        Args:
+            n_molecules: Number of molecules to visualize in each category.
+            bond_threshold: Distance threshold for drawing bonds in 3D renders (Ångströms).
+            every_n_epochs: Log visualizations every n validation epochs.
+        """
         self.n_molecules = n_molecules
         self.bond_threshold = bond_threshold
         self.every_n_epochs = every_n_epochs
@@ -63,6 +70,16 @@ class MoleculeVisualizationCallback(Callback):
         batch_idx: int,
         dataloader_idx: int = 0,
     ) -> None:
+        """Accumulate outputs from first validation batch and all atom types.
+
+        Args:
+            trainer: PyTorch Lightning Trainer.
+            pl_module: Lightning module being trained.
+            outputs: Output from the validation step (expects dict with required keys).
+            batch: Current batch data.
+            batch_idx: Index of current batch.
+            dataloader_idx: Index if using multiple dataloaders.
+        """
         if not isinstance(outputs, dict) or not self._REQUIRED_KEYS.issubset(outputs):
             return
         if batch_idx == 0:
@@ -76,6 +93,12 @@ class MoleculeVisualizationCallback(Callback):
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: LightningModule
     ) -> None:
+        """Render 3D visualizations and log to wandb at validation epoch end.
+
+        Args:
+            trainer: PyTorch Lightning Trainer.
+            pl_module: Lightning module being trained.
+        """
         gen_types = torch.cat(self._gen_atom_types) if self._gen_atom_types else None
         real_types = torch.cat(self._real_atom_types) if self._real_atom_types else None
         self._gen_atom_types.clear()
@@ -162,7 +185,18 @@ class MoleculeVisualizationCallback(Callback):
         graph_idx: int,
         title: str = "",
     ) -> "wandb.Image":
+        """Render a single molecule to a 3D matplotlib figure.
 
+        Args:
+            pos: Atomic positions [total_nodes, 3].
+            atom_types: Atom type indices [total_nodes] or None.
+            batch_vec: Batch indices [total_nodes].
+            graph_idx: Index of the molecule to render.
+            title: Title text for the plot.
+
+        Returns:
+            WandB Image object.
+        """
         mask = batch_vec == graph_idx
         p = pos[mask].numpy()
         if atom_types is not None:
@@ -233,7 +267,15 @@ class MoleculeVisualizationCallback(Callback):
     def _atom_dist_chart(
         self, gen_types: torch.Tensor, real_types: torch.Tensor
     ) -> "wandb.Image":
+        """Create bar chart comparing atom-type distributions.
 
+        Args:
+            gen_types: Generated atom type indices [total_nodes].
+            real_types: Real atom type indices [total_nodes].
+
+        Returns:
+            WandB Image object with side-by-side bar chart.
+        """
         n = len(_ATOM_NAMES)
         gen_frac = np.array(
             [(gen_types == t).sum().item() for t in range(n)], dtype=float

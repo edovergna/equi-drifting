@@ -1,3 +1,5 @@
+"""Training utilities for device setup, seed management, and precision configuration."""
+
 import random
 
 import lightning.pytorch as pl
@@ -8,6 +10,16 @@ import torch.nn.functional as F
 
 
 def initialize_training_config(args):
+    """Initialize global training configuration from parsed arguments.
+
+    Sets random seeds, precision, and device settings for reproducible training.
+
+    Args:
+        args: Parsed command-line arguments with seed, precision, and device config.
+
+    Returns:
+        Tuple of (device, precision, deterministic, benchmark).
+    """
     set_seed(args.seed)
     torch.set_float32_matmul_precision("medium")
     precision = set_precision(args.precision)
@@ -20,6 +32,11 @@ def initialize_training_config(args):
 
 
 def set_seed(seed: int):
+    """Set random seed for all libraries (random, numpy, torch) for reproducibility.
+
+    Args:
+        seed: Seed value to set.
+    """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -45,7 +62,17 @@ def get_device() -> torch.device:
 
 
 def set_precision(precision: str) -> str:
-    """Determine the appropriate precision setting based on user input and hardware capabilities."""
+    """Determine the appropriate precision setting based on user input and hardware capabilities.
+
+    Automatically selects bf16-mixed for CUDA GPUs with BF16 support, 16-mixed for other
+    CUDA GPUs, and 32-true for CPU.
+
+    Args:
+        precision: User-requested precision ("auto", "32-true", "16-mixed", or "bf16-mixed").
+
+    Returns:
+        The resolved precision string.
+    """
     if precision == "auto":
         if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
             return "bf16-mixed"

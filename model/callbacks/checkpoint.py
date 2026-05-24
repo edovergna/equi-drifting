@@ -1,3 +1,5 @@
+"""Callback for saving best and final model checkpoints to Weights & Biases."""
+
 import copy
 import os
 
@@ -8,17 +10,23 @@ import wandb
 
 
 class GeneratorCheckpointCallback(Callback):
-    """
-    Logs the best and final generator weights
-    to wandb at the end of training.
+    """Logs the best and final generator weights to wandb at the end of training.
 
     Monitors a metric each validation epoch and keeps an in-memory copy of the
     state dicts whenever the metric improves. On training end (or interruption),
-    both _best and _final variants are saved under the run's
-    individual_components/ directory and uploaded to wandb.
+    both _best and _final variants are saved and uploaded to wandb.
     """
 
     def __init__(self, monitor: str = "val_loss", mode: str = "min"):
+        """Initialize the checkpoint callback.
+
+        Args:
+            monitor: Metric name to monitor for best checkpoint.
+            mode: "min" or "max" — whether lower or higher values are better.
+
+        Raises:
+            ValueError: If mode is not "min" or "max".
+        """
         if mode not in ("min", "max"):
             raise ValueError(f"mode must be 'min' or 'max', got '{mode}'")
         self.monitor = monitor
@@ -27,6 +35,14 @@ class GeneratorCheckpointCallback(Callback):
         self._best_state_dict: dict | None = None
 
     def _is_better(self, current: float) -> bool:
+        """Check if the current metric value is better than the best seen.
+
+        Args:
+            current: Current metric value.
+
+        Returns:
+            True if the current value is better according to the mode.
+        """
         return (
             current < self._best_score
             if self.mode == "min"
@@ -36,6 +52,12 @@ class GeneratorCheckpointCallback(Callback):
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: LightningModule
     ) -> None:
+        """Update best checkpoint if current metric is best.
+
+        Args:
+            trainer: PyTorch Lightning Trainer.
+            pl_module: Lightning module being trained.
+        """
         current = trainer.callback_metrics.get(self.monitor)
         if current is None:
             return
@@ -45,6 +67,12 @@ class GeneratorCheckpointCallback(Callback):
             self._best_state_dict = copy.deepcopy(pl_module.generator.state_dict())
 
     def _save_and_log(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        """Save best and final checkpoints to wandb.
+
+        Args:
+            trainer: PyTorch Lightning Trainer.
+            pl_module: Lightning module being trained.
+        """
         logger = trainer.logger
         if logger is None or not hasattr(logger, "experiment"):
             return
@@ -79,11 +107,24 @@ class GeneratorCheckpointCallback(Callback):
         return True
 
     def on_train_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        """Save checkpoints when training ends normally.
+
+        Args:
+            trainer: PyTorch Lightning Trainer.
+            pl_module: Lightning module being trained.
+        """
         self._save_and_log(trainer, pl_module)
 
     def on_exception(
         self, trainer: Trainer, pl_module: LightningModule, exception: BaseException
     ) -> None:
+        """Save checkpoints if an exception occurs during training.
+
+        Args:
+            trainer: PyTorch Lightning Trainer.
+            pl_module: Lightning module being trained.
+            exception: The exception that was raised.
+        """
         print(
             f"\n[GeneratorCheckpointCallback] {type(exception).__name__} — saving weights."
         )

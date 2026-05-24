@@ -1,3 +1,5 @@
+"""Callback for monitoring atom-count distribution of sampled molecules."""
+
 import io
 
 import matplotlib.pyplot as plt
@@ -9,15 +11,18 @@ import wandb
 
 
 class SizeDistributionCallback(Callback):
-    """
-    Compares the empirical atom-count distribution of sampled molecules against
-    the true QM9 distribution each epoch.
+    """Compares empirical atom-count distribution against true QM9 distribution.
 
     Reads `pl_module._last_sampled_counts` (set by _sample_prior_batch) every
-    training step and logs a side-by-side bar chart to WandB at epoch end.
+    training step and logs a side-by-side bar chart to WandB at each validation epoch.
     """
 
     def __init__(self, log_every_n_epochs: int = 1):
+        """Initialize the size distribution callback.
+
+        Args:
+            log_every_n_epochs: Log every n validation epochs.
+        """
         self.log_every_n_epochs = log_every_n_epochs
         self._accumulated: list[np.ndarray] = []
 
@@ -29,6 +34,15 @@ class SizeDistributionCallback(Callback):
         batch,
         batch_idx: int,
     ) -> None:
+        """Accumulate atom counts from training batches.
+
+        Args:
+            trainer: PyTorch Lightning Trainer.
+            pl_module: Lightning module being trained.
+            outputs: Output from the training step.
+            batch: Current batch data.
+            batch_idx: Index of current batch.
+        """
         counts = getattr(pl_module, "_last_sampled_counts", None)
         if counts is not None:
             self._accumulated.append(counts.copy())
@@ -36,6 +50,12 @@ class SizeDistributionCallback(Callback):
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: LightningModule
     ) -> None:
+        """Log atom-count distribution comparison at validation epoch end.
+
+        Args:
+            trainer: PyTorch Lightning Trainer.
+            pl_module: Lightning module being trained.
+        """
         if (
             trainer.current_epoch % self.log_every_n_epochs != 0
             or not self._accumulated

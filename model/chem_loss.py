@@ -1,3 +1,9 @@
+"""Chemical validity loss functions for molecular generation refinement.
+
+Includes clash detection, valence checking, and bond-order inference for enforcing
+chemical constraints during training.
+"""
+
 import torch
 
 # HARD-CODED FOR QM9
@@ -26,6 +32,16 @@ BOND_ORDER_3_THRESHOLDS = torch.tensor([
 ATOM_TYPICAL_VALENCE = torch.tensor([1.0, 4.0, 3.0, 2.0, 1.0])
 
 def compute_chem_loss(pred_pos, pred_type_probs, cfg):
+    """Compute chemical validity loss combining clash, valence, and hydrogen constraints.
+
+    Args:
+        pred_pos: Predicted atomic positions [batch, n_atoms, 3].
+        pred_type_probs: Predicted atom type probabilities [batch, n_atoms, num_types].
+        cfg: Configuration dict with loss scales and thresholds.
+
+    Returns:
+        Tuple of (total_loss, dict_of_component_losses).
+    """
     batch_size, n_atoms, _ = pred_pos.shape
     eye = torch.eye(n_atoms, device=pred_pos.device, dtype=torch.bool).unsqueeze(0)
 
@@ -66,6 +82,18 @@ def compute_chem_loss(pred_pos, pred_type_probs, cfg):
 
 
 def _soft_bond_order_components(pred_pos, pred_type_probs, cfg):
+    """Compute soft bond order probabilities for single, double, and triple bonds.
+
+    Uses soft thresholds on distances and atom type probabilities.
+
+    Args:
+        pred_pos: Predicted positions [batch, n_atoms, 3].
+        pred_type_probs: Atom type probabilities [batch, n_atoms, num_types].
+        cfg: Config with bond_temperature parameter.
+
+    Returns:
+        Tuple of (p1, p2, p3) soft bond order tensors.
+    """
     d = torch.cdist(pred_pos, pred_pos)
     temp = cfg["bond_temperature"]
     p1 = _soft_pair_compatibility(pred_type_probs, BOND_ORDER_1_THRESHOLDS) * torch.sigmoid(
@@ -80,10 +108,28 @@ def _soft_bond_order_components(pred_pos, pred_type_probs, cfg):
     return p1, p2, p3
 
 def _soft_pair_threshold(pred_type_probs, thresholds):
+    """Compute expected bond distance thresholds using atom type probabilities.
+
+    Args:
+        pred_type_probs: Atom type probabilities [batch, n_atoms, num_types].
+        thresholds: Bond distance thresholds [num_types, num_types].
+
+    Returns:
+        Expected thresholds for each atom pair [batch, n_atoms, n_atoms].
+    """
     thresholds = thresholds.to(pred_type_probs.device, dtype=pred_type_probs.dtype)
     return torch.einsum("bik,kl,bjl->bij", pred_type_probs, thresholds, pred_type_probs)
 
 
 def _soft_pair_compatibility(pred_type_probs, thresholds):
+    """Compute soft compatibility mask for valid atom pairs given thresholds.
+
+    Args:
+        pred_type_probs: Atom type probabilities [batch, n_atoms, num_types].
+        thresholds: Valid distance thresholds [num_types, num_types].
+
+    Returns:
+        Soft compatibility scores for each atom pair [batch, n_atoms, n_atoms].
+    """
     mask = (thresholds > 0).to(pred_type_probs.device, dtype=pred_type_probs.dtype)
     return torch.einsum("bik,kl,bjl->bij", pred_type_probs, mask, pred_type_probs)

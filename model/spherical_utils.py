@@ -1,18 +1,36 @@
+"""Spherical geometry utilities for manifold operations.
+
+Implements operations on the positive orthant of the sphere S^3, including
+normalization, exponential/logarithmic maps, and geodesic distances for
+atom type embeddings.
+"""
+
 import torch
 
+
 def sphere_normalize(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-    """
-    Normalize each position independently onto S^3.
+    """Normalize vectors onto the unit sphere S^D.
+
+    Args:
+        x: Input tensor with any shape ending in dimension D.
+        eps: Small constant for numerical stability.
+
+    Returns:
+        Normalized vectors with unit norm along last dimension.
     """
     return x / x.norm(dim=-1, keepdim=True).clamp_min(eps)
 
 
 def probs_to_sphere(p: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-    """
-    Map simplex probabilities to positive orthant of the sphere:
+    """Map probability simplex to positive orthant of sphere via square-root map.
         phi(p) = sqrt(p)
-    p: [N_atoms, 5], sum=1 along last dim
-    Returns x in S^3_+ at each position: [N_atoms, 5]
+
+    Args:
+        p: Probability vectors [N_atoms, D] summing to 1 along last dimension.
+        eps: Numerical stability constant.
+
+    Returns:
+        Sphere vectors [N_atoms, D] on S^D_+.
     """
     p = p.clamp_min(eps)
     p = p / p.sum(dim=-1, keepdim=True).clamp_min(eps)
@@ -21,11 +39,15 @@ def probs_to_sphere(p: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
 
 
 def sphere_to_probs(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-    """
-    Inverse map of phi on S^3_+:
+    """Map sphere vectors to probability simplex via squaring map.
         p_i = x_i^2
-    x: [N_atoms, 5]
-    returns probs: [N_atoms, 5]
+
+    Args:
+        x: Sphere vectors [N_atoms, D] on S^D_+.
+        eps: Numerical stability constant.
+
+    Returns:
+        Probability vectors [N_atoms, D] summing to 1 along last dimension.
     """
     x = sphere_normalize(x, eps).clamp_min(0.0)
     p = x.pow(2)
@@ -33,29 +55,44 @@ def sphere_to_probs(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
 
 
 def sphere_project_tangent(x: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-    """
-    Project v onto tangent space at x, positionwise.
-    x, v: [N_atoms, 5]
+    """Project vector v onto the tangent space of the sphere at point x positionwise.
+
+    Args:
+        x: Point on the sphere, shape [N_atoms, D].
+        v: Vector to project, shape [N_atoms, D].
+
+    Returns:
+        Tangent vector at x, shape [N_atoms, D].
     """
     return v - (x * v).sum(dim=-1, keepdim=True) * x
 
 
 def product_tangent_norm(v: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-    """
-    Product metric norm:
+    """Compute product metric norm of tangent vectors.
         ||v||_g^2 = sum_l ||v_l||_2^2
-    v: [N_atoms, 5]
-    returns: [N_atoms, 1]
+
+    Args:
+        v: Tangent vectors [N_atoms, D].
+        eps: Numerical stability constant.
+
+    Returns:
+        Norms with shape [N_atoms, 1].
     """
     return torch.clamp(torch.norm(v, dim=-1, keepdim=True), min=1e-8)
 
 
 def sphere_log(x: torch.Tensor, y: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-    """
-    Positionwise sphere log map on S^3.
+    """Logarithmic map on the sphere S^D (inverse of exponential map).
 
-    x, y: [N_atoms, 5], each position normalized.
-    returns: [N_atoms, 5], tangent at x
+    Computes the tangent vector at x that points toward y.
+
+    Args:
+        x: Base point on sphere [N_atoms, D].
+        y: Target point on sphere [N_atoms, D].
+        eps: Numerical stability constant.
+
+    Returns:
+        Tangent vector at x [N_atoms, D].
     """
     x = sphere_normalize(x, eps)
     y = sphere_normalize(y, eps)
@@ -76,12 +113,17 @@ def sphere_log(x: torch.Tensor, y: torch.Tensor, eps: float = 1e-8) -> torch.Ten
 
 
 def sphere_exp(x: torch.Tensor, v: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-    """
-    Positionwise sphere exp map on S^3.
+    """Exponential map on the sphere S^D.
 
-    x: [N_atoms, 5] normalized
-    v: [N_atoms, 5] tangent at x
-    returns: [N_atoms, 5] on sphere
+    Moves from point x in direction v (tangent vector) a distance ||v||.
+
+    Args:
+        x: Base point on sphere [N_atoms, D], normalized.
+        v: Tangent vector at x [N_atoms, D].
+        eps: Numerical stability constant.
+
+    Returns:
+        Point on sphere [N_atoms, D].
     """
     x = sphere_normalize(x, eps)
     v = sphere_project_tangent(x, v)
@@ -97,12 +139,22 @@ def sphere_exp(x: torch.Tensor, v: torch.Tensor, eps: float = 1e-8) -> torch.Ten
 
 
 def geodesic_distance(
-    x: torch.Tensor,  # [N_x, N_atoms, 5]
-    y: torch.Tensor,  # [N_y, N_atoms, 5]
+    x: torch.Tensor,
+    y: torch.Tensor,
     eps: float = 1e-8,
 ) -> torch.Tensor:
+    """Compute geodesic distance between points on the sphere.
+
+    Args:
+        x: Points on sphere [*, D].
+        y: Points on sphere [*, D].
+        eps: Numerical stability constant.
+
+    Returns:
+        Distances along great circles [N_atoms].
+    """
     x = sphere_normalize(x, eps)
     y = sphere_normalize(y, eps)
 
-    dot = (x * y).sum(dim=-1).clamp(-1.0 + 1e-7, 1.0 - 1e-7) 
+    dot = (x * y).sum(dim=-1).clamp(-1.0 + 1e-7, 1.0 - 1e-7)
     return torch.acos(dot)  # [N_mol, max_atoms]

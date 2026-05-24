@@ -1,3 +1,5 @@
+"""Callback for monitoring chemical validity and uniqueness of generated molecules."""
+
 from collections import Counter
 
 import numpy as np
@@ -6,24 +8,23 @@ from lightning.pytorch import Callback, LightningModule, Trainer
 
 import wandb
 
-from ..mol_utils import (batch_to_stability, batch_to_validity,
-                        heavy_atom_counts)
+from ..mol_utils import batch_to_stability, batch_to_validity, heavy_atom_counts
 
 
 class ChemicalValidityCallback(Callback):
-    """
-    Computes chemical validity and uniqueness of generated molecules each validation epoch.
+    """Computes chemical validity and uniqueness of generated molecules each validation epoch.
 
     Collects up to MAX_MOLS generated molecules, then logs:
     - chem/validity        — fraction of structurally valid molecules
-    - chem/uniqueness      — fraction of unique valid molecules (unique SMILES / formulas)
-    - chem/heavy_atom_mean — mean number of heavy (non-H) atoms per generated molecule
-    - chem/valid_smiles    — WandB table of unique valid identifiers and their counts
+    - chem/uniqueness      — fraction of unique valid molecules
+    - chem/heavy_atom_mean — mean number of heavy (non-H) atoms per molecule
+    - chem/valid_smiles    — WandB table of unique valid identifiers
     """
 
     MAX_MOLS = 512
 
     def __init__(self):
+        """Initialize the chemical validity callback."""
         self._pos: list[torch.Tensor] = []
         self._ahard: list[torch.Tensor] = []
         self._batch: list[torch.Tensor] = []
@@ -32,6 +33,12 @@ class ChemicalValidityCallback(Callback):
     def on_validation_epoch_start(
         self, trainer: Trainer, pl_module: LightningModule
     ) -> None:
+        """Reset accumulators at the start of validation.
+
+        Args:
+            trainer: PyTorch Lightning Trainer.
+            pl_module: Lightning module being trained.
+        """
         self._pos.clear()
         self._ahard.clear()
         self._batch.clear()
@@ -46,6 +53,16 @@ class ChemicalValidityCallback(Callback):
         batch_idx: int,
         dataloader_idx: int = 0,
     ) -> None:
+        """Accumulate generated molecules from validation batches.
+
+        Args:
+            trainer: PyTorch Lightning Trainer.
+            pl_module: Lightning module being trained.
+            outputs: Output from the validation step (expects dict with positions/types).
+            batch: Current batch data.
+            batch_idx: Index of current batch.
+            dataloader_idx: Index if using multiple dataloaders.
+        """
         if not isinstance(outputs, dict):
             return
         pos = outputs.get("pos_gen")
@@ -64,6 +81,12 @@ class ChemicalValidityCallback(Callback):
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: LightningModule
     ) -> None:
+        """Compute and log chemical validity metrics.
+
+        Args:
+            trainer: PyTorch Lightning Trainer.
+            pl_module: Lightning module being trained.
+        """
         if not self._pos:
             return
 
@@ -104,8 +127,6 @@ class ChemicalValidityCallback(Callback):
             table = wandb.Table(columns=["identifier", "count"])
             for ident, cnt in Counter(valid_ids).most_common(50):
                 table.add_data(ident, cnt)
-            logger.experiment.log(
-                {"chem/valid_smiles": table}, commit=False
-            )
+            logger.experiment.log({"chem/valid_smiles": table}, commit=False)
         except Exception:
             pass

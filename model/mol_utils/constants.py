@@ -16,7 +16,7 @@ _STABLE_VALENCE = {1: 1, 6: 4, 7: 3, 8: 2, 9: 1}
 _GENERIC_BOND_THRESHOLD = 2.0
 
 # Bond-length thresholds (Å) for the QM9-specific heuristic inference
-_H_BOND_MAX = 1.20      # terminal bond shorter than this → H (C-H ~1.09)
+_H_BOND_MAX = 1.20  # terminal bond shorter than this → H (C-H ~1.09)
 _CARBONYL_O_MAX = 1.30  # terminal bond in [H_BOND_MAX, this) to deg≥3 nbr → carbonyl O
 _O_AVG_BOND_MAX = 1.45  # avg bond for deg-2 atoms below this → O (C-O ~1.43)
 _N_AVG_BOND_MAX = 1.52  # avg bond below this (but above O threshold) → N (C-N ~1.47)
@@ -24,20 +24,20 @@ _N_AVG_BOND_MAX = 1.52  # avg bond below this (but above O threshold) → N (C-N
 # Bond length tables (pm) for QM9 atoms — ported from the EDM/E-NF reference.
 # Source: http://www.wiredchemist.com/chemistry/data/bond_energies_lengths.html
 _BONDS1 = {
-    'H': {'H': 74, 'C': 109, 'N': 101, 'O': 96, 'F': 92},
-    'C': {'H': 109, 'C': 154, 'N': 147, 'O': 143, 'F': 135},
-    'N': {'H': 101, 'C': 147, 'N': 145, 'O': 140, 'F': 136},
-    'O': {'H': 96,  'C': 143, 'N': 140, 'O': 148, 'F': 142},
-    'F': {'H': 92,  'C': 135, 'N': 136, 'O': 142, 'F': 142},
+    "H": {"H": 74, "C": 109, "N": 101, "O": 96, "F": 92},
+    "C": {"H": 109, "C": 154, "N": 147, "O": 143, "F": 135},
+    "N": {"H": 101, "C": 147, "N": 145, "O": 140, "F": 136},
+    "O": {"H": 96, "C": 143, "N": 140, "O": 148, "F": 142},
+    "F": {"H": 92, "C": 135, "N": 136, "O": 142, "F": 142},
 }
 _BONDS2 = {
-    'C': {'C': 134, 'N': 129, 'O': 120},
-    'N': {'C': 129, 'N': 125, 'O': 121},
-    'O': {'C': 120, 'N': 121, 'O': 121},
+    "C": {"C": 134, "N": 129, "O": 120},
+    "N": {"C": 129, "N": 125, "O": 121},
+    "O": {"C": 120, "N": 121, "O": 121},
 }
 _BONDS3 = {
-    'C': {'C': 120, 'N': 116, 'O': 113},
-    'N': {'C': 116, 'N': 110},
-    'O': {'C': 113},
+    "C": {"C": 120, "N": 116, "O": 113},
+    "N": {"C": 116, "N": 110},
+    "O": {"C": 113},
 }
 _MARGIN1, _MARGIN2, _MARGIN3 = 10, 5, 3

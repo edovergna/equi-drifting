@@ -1,3 +1,5 @@
+"""Atom type inference from molecular positions."""
+
 import numpy as np
 import torch
 
@@ -28,13 +30,18 @@ def infer_types_from_pos_batch(
     num_atom_types: int = 5,
     method: str = "heuristic",
 ) -> torch.Tensor:
-    """
-    Infer QM9 atom types from generated positions.
-
-    method:
+    """Infer QM9 atom types from generated positions using various methods.
+    methods:
       "degree"    — simple connectivity-degree mapping (fast, less accurate)
       "heuristic" — QM9-specific rules: bond lengths + neighborhood chemistry
       "stability" — heuristic seed refined by greedy bond-order stability maximisation
+
+    Args:
+        pos: Atomic positions [total_nodes, 3].
+        batch_vec: Batch indices [total_nodes].
+        device: Device to place output tensor on.
+        num_atom_types: Number of atom type classes.
+        method: Inference method ("degree", "heuristic", or "stability").
 
     Returns:
         atom_types: [N, num_atom_types] one-hot float tensor on `device`
@@ -56,16 +63,35 @@ def infer_types_from_pos_batch(
 
 
 def infer_types_single(positions: np.ndarray, method: str = "heuristic") -> np.ndarray:
-    """Per-molecule wrapper for use outside the batched training loop (e.g. visualisation)."""
+    """Infer atom types for a single molecule for use outside the batched training loop (e.g. visualisation).
+
+    Args:
+        positions: Atomic positions [n_atoms, 3].
+        method: Inference method ("degree", "heuristic", or "stability").
+
+    Returns:
+        Atom type indices [n_atoms].
+    """
     return _INFER_FNS[method](positions)
 
 
 def _infer_types_from_degree(positions: np.ndarray) -> np.ndarray:
-    """Assign QM9 atom type indices from pairwise-distance connectivity degrees.
+    """Fast degree-based atom type inference from pairwise-distance connectivity degrees.
 
-    Heavy atoms: C (≥4 neighbors), N (3), O (2).
-    Terminal atoms (degree 1): F if bond length > _H_F_BOND_THRESHOLD, else H.
-    Isolated atoms (degree 0): default to H.
+    Assignment rules (by connectivity degree):
+    - Heavy atoms:
+        - Degree ≥ 4: Carbon (C)
+        - Degree 3: Nitrogen (N)
+        - Degree 2: Oxygen (O)
+    - Terminal atoms:
+        - Degree 1: Fluorine (F) if bond > (_H_F_BOND_THRESHOLD) to neighbor, else Hydrogen (H)
+    - Degree 0: Hydrogen (H)
+
+    Args:
+        positions: Atomic positions [n_atoms, 3].
+
+    Returns:
+        Atom type indices [n_atoms].
     """
     n = len(positions)
     if n == 0:
@@ -75,10 +101,9 @@ def _infer_types_from_degree(positions: np.ndarray) -> np.ndarray:
     degrees = adj.sum(axis=1)
 
     type_indices = np.where(
-        degrees >= 4, 1,
-        np.where(degrees == 3, 2,
-        np.where(degrees == 2, 3,
-        0)),
+        degrees >= 4,
+        1,
+        np.where(degrees == 3, 2, np.where(degrees == 2, 3, 0)),
     )
 
     terminal_mask = degrees == 1
@@ -93,18 +118,20 @@ def _infer_types_from_degree(positions: np.ndarray) -> np.ndarray:
 
 
 def _infer_types_heuristic(positions: np.ndarray) -> np.ndarray:
-    """QM9-specific heuristic: bond lengths + local chemistry priors.
+    """QM9-specific heuristic atom type inference using bond lengths and chemical rules.
 
-    Priority order:
-      isolated (deg 0)                              → H
-      terminal (deg 1), bond < 1.20 Å              → H
-      terminal (deg 1), bond in [1.20,1.30) & deg≥3 neighbour → O (carbonyl)
-      terminal (deg 1), otherwise                  → F
-      deg 2: avg bond < 1.45 Å                     → O
-             avg bond < 1.52 Å                     → N
-             else                                  → C
-      deg 3: avg bond < 1.52 Å                     → N; else C
-      deg ≥ 4                                      → C
+    Uses bond length thresholds and local neighborhood information to assign atom types:
+    - Isolated atoms (degree 0) → H
+    - Terminal (degree 1): bond < 1.20Å → H; bond 1.20-1.30Å & degree neighbor ≥ 3 → O (carbonyl); else → F
+    - Degree 2: avg bond < 1.45Å → O; avg < 1.52Å → N; else → C
+    - Degree 3: avg bond < 1.52Å → N; else → C
+    - Degree ≥ 4 → C
+
+    Args:
+        positions: Atomic positions [n_atoms, 3].
+
+    Returns:
+        Atom type indices [n_atoms].
     """
     n = len(positions)
     if n == 0:
@@ -190,7 +217,9 @@ def _infer_types_stability_guided(positions: np.ndarray) -> np.ndarray:
     idx = np.arange(n)
 
     # counts[i] = sum_j bo_table[i, j, types[i], types[j]]
-    counts = bo_table[idx[:, None], idx[None, :], types[:, None], types[None, :]].sum(axis=1)
+    counts = bo_table[idx[:, None], idx[None, :], types[:, None], types[None, :]].sum(
+        axis=1
+    )
 
     for _ in range(n):
         targets = stable_vals[types]
@@ -206,7 +235,9 @@ def _infer_types_stability_guided(positions: np.ndarray) -> np.ndarray:
                 if c == types[i]:
                     continue
                 # O(n) vectorised delta: bond count changes when atom i flips to type c
-                delta = (bo_table[i, idx, c, types] - bo_table[i, idx, types[i], types]).astype(int)
+                delta = (
+                    bo_table[i, idx, c, types] - bo_table[i, idx, types[i], types]
+                ).astype(int)
                 delta[i] = 0  # no self-bond
                 trial_counts = counts + delta
                 trial_counts[i] += delta.sum()
@@ -220,7 +251,10 @@ def _infer_types_stability_guided(positions: np.ndarray) -> np.ndarray:
             break
 
         # Apply the best flip and update counts incrementally
-        delta = (bo_table[best_i, idx, best_c, types] - bo_table[best_i, idx, types[best_i], types]).astype(int)
+        delta = (
+            bo_table[best_i, idx, best_c, types]
+            - bo_table[best_i, idx, types[best_i], types]
+        ).astype(int)
         delta[best_i] = 0
         counts += delta
         counts[best_i] += delta.sum()

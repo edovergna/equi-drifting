@@ -1,3 +1,5 @@
+"""Utilities for loading and saving model components to Weights & Biases."""
+
 import os
 import tempfile
 from pathlib import Path
@@ -12,6 +14,14 @@ WANDB_PATH = f"{WANDB_ENTITY}/{WANDB_PROJECT}"
 
 
 def load_config(wandb_run_id: str):
+    """Fetch a wandb run configuration given a run ID.
+
+    Args:
+        wandb_run_id: Unique run ID from wandb.
+
+    Returns:
+        The configuration dictionary stored with the wandb run.
+    """
     api = wandb.Api()
     run = api.run(f"{WANDB_PATH}/{wandb_run_id}")
     return run.config

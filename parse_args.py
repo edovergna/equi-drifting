@@ -1,7 +1,14 @@
+"""Command line argument parser for QM9 drift model training."""
+
 import argparse
 
 
 def parse_args():
+    """Create and parse the command line arguments used by training scripts.
+
+    Returns:
+        A populated argparse.Namespace with training, dataset, and logging options.
+    """
     parser = argparse.ArgumentParser(description="Train a flow matching model on QM9.")
 
     # --------------------------

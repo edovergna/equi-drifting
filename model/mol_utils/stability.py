@@ -1,3 +1,5 @@
+"""Molecular stability assessment utilities."""
+
 import numpy as np
 import torch
 
@@ -6,7 +8,15 @@ from .constants import _ATOM_NAMES, _ATOMIC_NUMS, _STABLE_VALENCE
 
 
 def heavy_atom_counts(atom_types: torch.Tensor, batch_vec: torch.Tensor) -> list[int]:
-    """Returns the number of non-hydrogen atoms per graph in the batch."""
+    """Count non-hydrogen atoms per molecule in a batch.
+
+    Args:
+        atom_types: Atom type indices [total_nodes].
+        batch_vec: Batch indices [total_nodes].
+
+    Returns:
+        List of heavy atom counts, one per molecule.
+    """
     n_graphs = int(batch_vec.max().item()) + 1
     counts = []
     for g in range(n_graphs):
@@ -21,15 +31,18 @@ def batch_to_stability(
     atom_types: torch.Tensor,
     batch_vec: torch.Tensor,
 ) -> tuple[float, float]:
-    """
-    Compute atom-level and molecule-level stability.
+    """Compute atom and molecule stability based on valence rules.
 
-    An atom is stable iff its bond count equals _STABLE_VALENCE for its element.
-    A molecule is stable iff every atom in it is stable.
+    An atom is stable iff its bond count equals the expected valence (_STABLE_VALENCE) for its element.
+    A molecule is stable iff all its atoms are stable.
+
+    Args:
+        pos: Atomic positions [total_nodes, 3].
+        atom_types: Atom type indices [total_nodes].
+        batch_vec: Batch indices [total_nodes].
 
     Returns:
-        atom_stable_frac  — fraction of all atoms that are stable
-        mol_stable_frac   — fraction of molecules where all atoms are stable
+        Tuple of (atom_stability_fraction, molecule_stability_fraction).
     """
     n_graphs = int(batch_vec.max().item()) + 1
     total_atoms = 0

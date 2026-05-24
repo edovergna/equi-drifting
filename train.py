@@ -1,3 +1,9 @@
+"""Training entrypoint and experiment orchestration for QM9 drifting models.
+
+This module configures the dataset, model, callbacks, and PyTorch Lightning trainer
+for end-to-end model training, validation, and optional testing.
+"""
+
 import sys
 import traceback
 from pathlib import Path
@@ -29,6 +35,12 @@ from model.wandb_utils import load_pretrained_generator
 from parse_args import parse_args
 
 def main(args: argparse.Namespace):
+    """Run training for the QM9 drift model using the provided CLI args.
+
+    Args:
+        args: Parsed command line arguments describing data paths, model
+            hyperparameters, trainer settings, and logging options.
+    """
 
     device, precision, deterministic, benchmark = initialize_training_config(args)
 

@@ -1,3 +1,5 @@
+"""Molecular validity assessment utilities."""
+
 from collections import Counter
 
 import numpy as np
@@ -5,7 +7,8 @@ import torch
 from rdkit import Chem
 from rdkit.Chem import RWMol
 from rdkit import RDLogger
-RDLogger.DisableLog('rdApp.*')
+
+RDLogger.DisableLog("rdApp.*")
 
 from .bonds import get_bond_order, _RDKIT_BOND_TYPES
 from .constants import (
@@ -22,11 +25,16 @@ def batch_to_validity(
     atom_types: torch.Tensor,
     batch_vec: torch.Tensor,
 ) -> list[tuple[bool, str | None]]:
-    """
-    Convert a batched PyG tensor to per-molecule (is_valid, identifier) pairs.
+    """Assess validity and get identifiers for molecules in a batch.
 
-    `identifier` is a canonical SMILES string when RDKit is available, or a
-    molecular formula string otherwise (useful for uniqueness tracking).
+    Args:
+        pos: Atomic positions [total_nodes, 3].
+        atom_types: Atom type indices [total_nodes].
+        batch_vec: Batch indices [total_nodes] mapping atoms to molecules.
+
+    Returns:
+        List of (is_valid, identifier) tuples where identifier is a canonical
+        SMILES string (if RDKit available) or molecular formula.
     """
     n_graphs = int(batch_vec.max().item()) + 1
     results: list[tuple[bool, str | None]] = []
@@ -41,7 +49,17 @@ def batch_to_validity(
 def _assess_molecule(
     positions: np.ndarray, atom_type_indices: np.ndarray
 ) -> tuple[bool, str | None]:
-    """Try RDKit first, fall back to pure-numpy valence check."""
+    """Assess molecular validity and extract canonical identifier.
+
+    Try RDKit first, fall back to pure-numpy valence check.
+
+    Args:
+        positions: Atomic positions [n_atoms, 3] in Angstroms.
+        atom_type_indices: Atom type indices [n_atoms] into QM9 atom list.
+
+    Returns:
+        Tuple of (is_valid, identifier) where identifier is SMILES or formula.
+    """
     try:
         return _rdkit_assess(positions, atom_type_indices)
     except ImportError:
@@ -51,7 +69,15 @@ def _assess_molecule(
 def _rdkit_assess(
     positions: np.ndarray, atom_type_indices: np.ndarray
 ) -> tuple[bool, str | None]:
-    """Build molecule with get_bond_order, matching the EDM/E-NF reference exactly."""
+    """Use RDKit to assess validity and extract SMILES for identified molecule.
+
+    Args:
+        positions: Atomic positions [n_atoms, 3].
+        atom_type_indices: Atom type indices [n_atoms].
+
+    Returns:
+        Tuple of (is_valid, smiles).
+    """
     atom_names = [_ATOM_NAMES[int(i)] for i in atom_type_indices]
     atomic_nums = [_ATOMIC_NUMS[int(i)] for i in atom_type_indices]
     n = len(atom_names)
@@ -83,7 +109,15 @@ def _rdkit_assess(
 def _numpy_assess(
     positions: np.ndarray, atom_type_indices: np.ndarray
 ) -> tuple[bool, str | None]:
-    """Fallback: distance-based bond assignment + max-valence check."""
+    """Fallback validity check using distance-based bonding and max-valence rules.
+
+    Args:
+        positions: Atomic positions [n_atoms, 3].
+        atom_type_indices: Atom type indices [n_atoms].
+
+    Returns:
+        Tuple of (is_valid, formula).
+    """
     atomic_nums = [_ATOMIC_NUMS[int(i)] for i in atom_type_indices]
     n = len(atomic_nums)
     degrees = np.zeros(n, dtype=int)

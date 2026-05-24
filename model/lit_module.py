@@ -1,3 +1,9 @@
+"""PyTorch Lightning module for molecular generation using drift-based training.
+
+This module implements MoleculeGenerator, a LightningModule that combines an EGNN
+architecture with drift loss for generative modeling of molecular geometries and types.
+"""
+
 from pathlib import Path
 
 import numpy as np
@@ -19,10 +25,21 @@ from .spherical_utils import (probs_to_sphere, sphere_to_probs)
 
 
 class MoleculeGenerator(LightningModule):
+    """PyTorch Lightning module for training and inference of molecule generators.
+
+    Uses an EGNN backbone with drift loss to learn the distribution over molecular
+    geometries and atom types.
+    """
     _SAVE_COMPONENTS = ["generator"]
     _LOAD_COMPONENTS = ["generator"]
 
     def __init__(self, generator_cfg=None, drift_cfg=None):
+        """Initialize the molecule generator with configuration dictionaries.
+
+        Args:
+            generator_cfg: Dict with EGNN hyperparameters (hidden_nf, n_layers, etc.)
+            drift_cfg: Dict with training hyperparameters (lr, weight_decay, sigma, eta, etc.)
+        """
         super().__init__()
 
         default_generator_cfg = {
@@ -87,6 +104,14 @@ class MoleculeGenerator(LightningModule):
         self._norm_rescale_grad: float | None = None
 
     def _init_generator(self, cfg) -> EGNN:
+        """Instantiate the EGNN model from generator configuration.
+
+        Args:
+            cfg: Generator configuration dictionary.
+
+        Returns:
+            An initialized EGNN model.
+        """
         return EGNN(
             hidden_nf=cfg["hidden_nf"],
             num_blocks=cfg["n_layers"],
@@ -97,10 +122,21 @@ class MoleculeGenerator(LightningModule):
         )
 
     def set_size_distribution(self, sizes: np.ndarray, probs: np.ndarray) -> None:
+        """Set the molecule size distribution for prior sampling.
+
+        Args:
+            sizes: Array of possible molecule sizes (number of atoms).
+            probs: Probability distribution over sizes.
+        """
         self._size_values = sizes
         self._size_probs = probs
 
     def _init_size_distribution(self) -> None:
+        """Compute molecule size distribution from the training dataset.
+
+        Raises:
+            RuntimeError: If size distribution cannot be computed from trainer/datamodule.
+        """
         if self.trainer is not None and self.trainer.datamodule is not None:
             dm = self.trainer.datamodule
             if hasattr(dm, "train_set") and dm.train_set is not None:
@@ -115,6 +151,15 @@ class MoleculeGenerator(LightningModule):
     def _sample_prior_batch(
         self, n_molecules: int, num_atoms: int | None = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Sample a batch of molecules from the prior distribution.
+
+        Args:
+            n_molecules: Number of molecules to sample.
+            num_atoms: If set, override the size distribution to sample this many atoms.
+
+        Returns:
+            Tuple of (atom_types, positions, batch_indices, dense_edge_index).
+        """
         if num_atoms is None:
             if self._size_values is None or self._size_probs is None:
                 self._init_size_distribution()
@@ -163,6 +208,7 @@ class MoleculeGenerator(LightningModule):
         )
 
     def on_after_backward(self):
+        """Log gradient-related metrics after backpropagation."""
         if self._norm_rescale_grad is not None:
             self.log(
                 "geom/norm_rescale_grad",
@@ -172,9 +218,18 @@ class MoleculeGenerator(LightningModule):
             )
 
     def _batch_num_atoms(self, batch) -> int:
+        """Extract the number of atoms in the first molecule of a batch.
+
+        Args:
+            batch: PyTorch Geometric data batch with ptr attribute.
+
+        Returns:
+            Number of atoms in the first molecule.
+        """
         return int((batch.ptr[1] - batch.ptr[0]).item())
     
     def on_train_epoch_start(self):
+        """Apply cosine annealing to sigma values at the start of each training epoch."""
         if self.anneal_sigma:
             progress = self.current_epoch / max(1, self.trainer.max_epochs - 1)
 
@@ -197,6 +252,15 @@ class MoleculeGenerator(LightningModule):
 
 
     def training_step(self, batch, batch_idx):
+        """Perform a single training step.
+
+        Args:
+            batch: PyTorch Geometric data batch from the dataloader.
+            batch_idx: Index of the batch.
+
+        Returns:
+            Scalar loss tensor for backpropagation.
+        """
         num_atoms = self._batch_num_atoms(batch)
         gen_pos, gen_types_sphere, gen_batch_vec = self._forward(batch, num_atoms)
 
@@ -258,6 +322,15 @@ class MoleculeGenerator(LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        """Perform a single validation step.
+
+        Args:
+            batch: PyTorch Geometric data batch from the dataloader.
+            batch_idx: Index of the batch.
+
+        Returns:
+            Dictionary of generated and real positions/types for downstream callbacks.
+        """
         num_atoms = self._batch_num_atoms(batch)
         gen_pos, gen_types_sphere, gen_batch_vec = self._forward(batch, num_atoms)
 
@@ -329,6 +402,7 @@ class MoleculeGenerator(LightningModule):
         }
 
     def on_validation_epoch_end(self):
+        """Log histogram statistics to wandb at the end of validation."""
         hist_stats = getattr(self, "_val_hist_stats", {})
         if (
             hist_stats
@@ -342,6 +416,15 @@ class MoleculeGenerator(LightningModule):
         self._val_hist_stats = {}
 
     def test_step(self, batch, batch_idx):
+        """Perform a single test step.
+
+        Args:
+            batch: PyTorch Geometric data batch from the dataloader.
+            batch_idx: Index of the batch.
+
+        Returns:
+            Scalar test loss tensor.
+        """
         num_atoms = self._batch_num_atoms(batch)
         gen_pos, gen_types_sphere, gen_batch_vec = self._forward(batch, num_atoms)
         real_pos, real_types = batch.pos, batch.real_atom_types
@@ -367,15 +450,30 @@ class MoleculeGenerator(LightningModule):
         return test_loss
 
     def save_individual_components(self, save_path: str) -> None:
+        """Save generator model weights to disk.
+
+        Args:
+            save_path: Directory path where the generator.pth file will be saved.
+        """
         torch.save(self.generator.state_dict(), f"{save_path}/generator.pth")
 
     def load_individual_components(self, folder_path) -> None:
+        """Load generator model weights from disk.
+
+        Args:
+            folder_path: Directory path containing the generator.pth file.
+        """
         folder_path = Path(folder_path)
         self.generator.load_state_dict(
             torch.load(folder_path / "generator.pth", map_location=self.device)
         )
 
     def configure_optimizers(self):
+        """Configure the optimizer and learning rate scheduler.
+
+        Returns:
+            Dictionary with optimizer and lr_scheduler configuration for PyTorch Lightning.
+        """
         optimizer = torch.optim.AdamW(
             self.generator.parameters(),
             lr=self.drift_cfg["lr"],

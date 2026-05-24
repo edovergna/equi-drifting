@@ -1,3 +1,5 @@
+"""Callback for monitoring atom-type distribution of sampled molecules."""
+
 import io
 
 import matplotlib.pyplot as plt
@@ -11,8 +13,7 @@ ATOM_TYPE_NAMES = ["H", "C", "N", "O", "F"]
 
 
 class AtomTypeDistributionCallback(Callback):
-    """
-    Visualizes the Dirichlet prior atom-type sampling distribution each epoch.
+    """Visualizes Dirichlet prior atom-type sampling distribution each epoch.
 
     Reads `pl_module._last_sampled_atom_probs` (set by _sample_prior_batch) every
     training step — a [total_nodes, num_atom_types] array of Dirichlet samples —
@@ -20,6 +21,11 @@ class AtomTypeDistributionCallback(Callback):
     """
 
     def __init__(self, log_every_n_epochs: int = 1):
+        """Initialize the atom type distribution callback.
+
+        Args:
+            log_every_n_epochs: Log every n validation epochs.
+        """
         self.log_every_n_epochs = log_every_n_epochs
         self._accumulated: list[np.ndarray] = []
 
@@ -31,6 +37,15 @@ class AtomTypeDistributionCallback(Callback):
         batch,
         batch_idx: int,
     ) -> None:
+        """Accumulate atom type probabilities from training batches.
+
+        Args:
+            trainer: PyTorch Lightning Trainer.
+            pl_module: Lightning module being trained.
+            outputs: Output from the training step.
+            batch: Current batch data.
+            batch_idx: Index of current batch.
+        """
         probs = getattr(pl_module, "_last_sampled_atom_probs", None)
         if probs is not None:
             self._accumulated.append(probs.copy())
@@ -38,6 +53,12 @@ class AtomTypeDistributionCallback(Callback):
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: LightningModule
     ) -> None:
+        """Log atom type distribution at validation epoch end.
+
+        Args:
+            trainer: PyTorch Lightning Trainer.
+            pl_module: Lightning module being trained.
+        """
         if (
             trainer.current_epoch % self.log_every_n_epochs != 0
             or not self._accumulated

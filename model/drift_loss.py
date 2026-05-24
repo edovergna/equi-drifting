@@ -1,12 +1,34 @@
+"""Drift-based loss for generative molecular modeling.
+
+Implements the core training objective based on computing drift vectors that
+align generated molecules to real molecules on both Euclidean and spherical manifolds.
+"""
+
 import torch
 import torch.nn.functional as F
 
-from .spherical_utils import product_tangent_norm, sphere_exp, geodesic_distance, sphere_normalize, sphere_project_tangent, sphere_to_probs
-from .align import find_rotation_and_permutation, permute_generated_to_real_order, apply_pairwise_rotation, unpermute_real_order_to_gen_order
+from .spherical_utils import (
+    product_tangent_norm,
+    sphere_exp,
+    geodesic_distance,
+    sphere_normalize,
+    sphere_project_tangent,
+    sphere_to_probs,
+)
+from .align import (
+    find_rotation_and_permutation,
+    permute_generated_to_real_order,
+    apply_pairwise_rotation,
+    unpermute_real_order_to_gen_order,
+)
 from .chem_loss import compute_chem_loss
+
 
 class TrainingDivergedException(Exception):
     """Raised when the drift loss becomes non-finite. Triggers a clean training stop."""
+
+    pass
+
 
 def compute_drift_loss(
     gen_pos: torch.Tensor,
@@ -15,14 +37,27 @@ def compute_drift_loss(
     real_types: torch.Tensor,
     num_atoms: int,
     chem_refinement: bool,
-    cfg
+    cfg,
 ) -> tuple[torch.Tensor, dict[str, float]]:
-    """
-    Drifting field loss directly on 3D molecules by aligning the generated molecules with the real ones.
-    Assumes that x_gen_sphere is already mapped to the spherical space
+    """Compute drift loss aligning generated to real molecules on both manifolds.
 
-    Returns (loss, stats) where stats is a flat dict of float diagnostics safe to
-    pass directly to self.log(). Raises TrainingDivergedException on non-finite loss.
+    Finds optimal permutation and rotation, computes drift vectors on position and
+    type manifolds, then measures distance between generated and target positions/types.
+
+    Args:
+        gen_pos: Generated positions [batch, num_atoms, 3].
+        real_pos: Real positions [batch, num_atoms, 3].
+        gen_types_sphere: Generated types on sphere [batch, num_atoms, D].
+        real_types: Real types one-hot [batch, num_atoms, num_types].
+        num_atoms: Number of atoms (for reshaping).
+        chem_refinement: Whether to include chemical loss.
+        cfg: Config dict with all hyperparameters.
+
+    Returns:
+        Tuple of (loss, dict of diagnostic statistics), where stats is a flat dict of float diagnostics safe to pass directly to self.log().
+
+    Raises:
+        TrainingDivergedException: If loss becomes non-finite.
     """
     real_types = real_types.float()
 
@@ -42,26 +77,42 @@ def compute_drift_loss(
     N_real = real_pos.shape[0]
 
     N_atoms = gen_pos.shape[1]
-    sqrt_N_a = N_atoms ** 0.5
+    sqrt_N_a = N_atoms**0.5
 
     with torch.no_grad():
-        permutation_pos, R_pos, _, _ = find_rotation_and_permutation(gen_pos, real_pos, gen_types_sphere, real_types, cfg)
-        permutation_neg, R_neg, _, _ = find_rotation_and_permutation(gen_pos, gen_pos, gen_types_sphere, gen_types_sphere, cfg)
+        permutation_pos, R_pos, _, _ = find_rotation_and_permutation(
+            gen_pos, real_pos, gen_types_sphere, real_types, cfg
+        )
+        permutation_neg, R_neg, _, _ = find_rotation_and_permutation(
+            gen_pos, gen_pos, gen_types_sphere, gen_types_sphere, cfg
+        )
 
         aligned_posit_pos = permute_generated_to_real_order(gen_pos, permutation_pos)
-        aligned_types_pos = permute_generated_to_real_order(gen_types_sphere, permutation_pos)
+        aligned_types_pos = permute_generated_to_real_order(
+            gen_types_sphere, permutation_pos
+        )
         aligned_posit_neg = permute_generated_to_real_order(gen_pos, permutation_neg)
-        aligned_types_neg = permute_generated_to_real_order(gen_types_sphere, permutation_neg)
+        aligned_types_neg = permute_generated_to_real_order(
+            gen_types_sphere, permutation_neg
+        )
 
         aligned_posit_pos = apply_pairwise_rotation(aligned_posit_pos, R_pos)
         aligned_posit_neg = apply_pairwise_rotation(aligned_posit_neg, R_neg)
 
         # Distances of shape [N_gen, N_real/N_gen] and Differences of shape [N_gen, N_real/N_gen, N_atoms, 3/5]
-        posit_dist_pos, posit_diff_pos = _pairwise_geodesic_distance_and_log(aligned_posit_pos, real_pos, "euclidean", eps)
-        posit_dist_neg, posit_diff_neg = _pairwise_geodesic_distance_and_log(aligned_posit_neg, gen_pos, "euclidean", eps)
+        posit_dist_pos, posit_diff_pos = _pairwise_geodesic_distance_and_log(
+            aligned_posit_pos, real_pos, "euclidean", eps
+        )
+        posit_dist_neg, posit_diff_neg = _pairwise_geodesic_distance_and_log(
+            aligned_posit_neg, gen_pos, "euclidean", eps
+        )
 
-        types_dist_pos, types_diff_pos = _pairwise_geodesic_distance_and_log(aligned_types_pos, real_types, "spherical", eps)
-        types_dist_neg, types_diff_neg = _pairwise_geodesic_distance_and_log(aligned_types_neg, gen_types_sphere, "spherical", eps)
+        types_dist_pos, types_diff_pos = _pairwise_geodesic_distance_and_log(
+            aligned_types_pos, real_types, "spherical", eps
+        )
+        types_dist_neg, types_diff_neg = _pairwise_geodesic_distance_and_log(
+            aligned_types_neg, gen_types_sphere, "spherical", eps
+        )
 
         posit_dist_pos = posit_dist_pos / sqrt_N_a
         posit_dist_neg = posit_dist_neg / sqrt_N_a
@@ -73,12 +124,42 @@ def compute_drift_loss(
         eye = torch.eye(N_gen, device=gen_pos.device, dtype=torch.bool)
         posit_dist_neg = posit_dist_neg.masked_fill(eye, 1e6)
         types_dist_neg = types_dist_neg.masked_fill(eye, 1e6)
-        
-        V_posit_pos = _calc_drift_direction(posit_dist_pos, posit_diff_pos, permutation_pos, R_pos, sigma=cfg["p_sigma"], eps=eps)
-        V_posit_neg = _calc_drift_direction(posit_dist_neg, posit_diff_neg, permutation_neg, R_neg, sigma=cfg["p_sigma"], eps=eps)
 
-        V_types_pos = _calc_drift_direction(types_dist_pos, types_diff_pos, permutation_pos, R_pos, sigma=cfg["t_sigma"], eps=eps, euclidean=False)
-        V_types_neg = _calc_drift_direction(types_dist_neg, types_diff_neg, permutation_neg, R_neg, sigma=cfg["t_sigma"], eps=eps, euclidean=False)
+        V_posit_pos = _calc_drift_direction(
+            posit_dist_pos,
+            posit_diff_pos,
+            permutation_pos,
+            R_pos,
+            sigma=cfg["p_sigma"],
+            eps=eps,
+        )
+        V_posit_neg = _calc_drift_direction(
+            posit_dist_neg,
+            posit_diff_neg,
+            permutation_neg,
+            R_neg,
+            sigma=cfg["p_sigma"],
+            eps=eps,
+        )
+
+        V_types_pos = _calc_drift_direction(
+            types_dist_pos,
+            types_diff_pos,
+            permutation_pos,
+            R_pos,
+            sigma=cfg["t_sigma"],
+            eps=eps,
+            euclidean=False,
+        )
+        V_types_neg = _calc_drift_direction(
+            types_dist_neg,
+            types_diff_neg,
+            permutation_neg,
+            R_neg,
+            sigma=cfg["t_sigma"],
+            eps=eps,
+            euclidean=False,
+        )
 
         V_posit = V_posit_pos - V_posit_neg
         V_types = V_types_pos - V_types_neg
@@ -87,18 +168,28 @@ def compute_drift_loss(
         V_posit = p_eta * V_posit
         V_types = t_eta * V_types
 
-        # Calculate targets for each 
-        target_posit = (gen_pos + V_posit)
+        # Calculate targets for each
+        target_posit = gen_pos + V_posit
         target_types = sphere_exp(gen_types_sphere, V_types, eps)
 
     # Calculate distances per molecule on each manifold
-    molecule_position_dist = ((gen_pos - target_posit) ** 2).sum(dim=-1).sum(dim=-1)    # shape: [N_gen]
-    molecule_types_dist = (geodesic_distance(gen_types_sphere, target_types, eps) ** 2).sum(dim=-1) # shape: [N_gen]
+    molecule_position_dist = (
+        ((gen_pos - target_posit) ** 2).sum(dim=-1).sum(dim=-1)
+    )  # shape: [N_gen]
+    molecule_types_dist = (
+        geodesic_distance(gen_types_sphere, target_types, eps) ** 2
+    ).sum(
+        dim=-1
+    )  # shape: [N_gen]
 
-    loss = (scale_eucl * molecule_position_dist + scale_spher * molecule_types_dist).mean()
+    loss = (
+        scale_eucl * molecule_position_dist + scale_spher * molecule_types_dist
+    ).mean()
 
     if chem_refinement:
-        chem_loss, chem_stats = compute_chem_loss(gen_pos, sphere_to_probs(gen_types_sphere, eps), cfg)
+        chem_loss, chem_stats = compute_chem_loss(
+            gen_pos, sphere_to_probs(gen_types_sphere, eps), cfg
+        )
         loss = loss + chem_loss
 
     if not torch.isfinite(loss):
@@ -116,7 +207,7 @@ def compute_drift_loss(
         stats["mean_V_posit_neg"] = V_posit_neg.abs().mean().item()
         stats["mean_V_types_pos"] = product_tangent_norm(V_types_pos, eps).mean().item()
         stats["mean_V_types_neg"] = product_tangent_norm(V_types_neg, eps).mean().item()
-    
+
     if chem_refinement:
         stats.update(chem_stats)
 
@@ -124,24 +215,31 @@ def compute_drift_loss(
 
 
 def _pairwise_geodesic_distance_and_log(
-        x: torch.Tensor,
-        y: torch.Tensor,
-        manifold: str = "euclidean",
-        eps: float = 1e-8,
+    x: torch.Tensor,
+    y: torch.Tensor,
+    manifold: str = "euclidean",
+    eps: float = 1e-8,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Calculates the pairwise distance between atoms for the molecule attributes depending on 
-    the specified geodesic distance. Assumed that molecules are aligned.
+    """Compute pairwise geodesic distances and log-space differences between molecules.       Assumed that molecules are aligned.
+
+    For Euclidean: Uses standard L2 distance.
+    For Spherical: Uses arccos to compute angles on sphere.
+
     Args:
-        x: [N_x, N_y, N_atoms, z]
-        y: [N_y, N_atoms, z]
+        x: [N_x, N_y, N_atoms, D] pairwise tensor or [N_x, N_atoms, D] batch tensor.
+        y: [N_y, N_atoms, D] reference tensor.
+        manifold: "euclidean" or "spherical".
+        eps: Small constant for numerical stability.
+
+    Returns:
+        Tuple of (distances, tangent_differences).
     """
 
     if manifold == "euclidean":
-        diff = x - y[None, :, :, :]                              # shape: (N_x, N_y, N_atoms, z)
-        sq_dist_per_atom = (diff ** 2).sum(dim=-1)                              # shape: (N_x, N_y, N_atoms)
+        diff = x - y[None, :, :, :]  # shape: (N_x, N_y, N_atoms, z)
+        sq_dist_per_atom = (diff**2).sum(dim=-1)  # shape: (N_x, N_y, N_atoms)
 
-        sq_distances = sq_dist_per_atom.sum(dim=-1)   # shape: (N_x, N_y)
+        sq_distances = sq_dist_per_atom.sum(dim=-1)  # shape: (N_x, N_y)
     elif manifold == "spherical":
         x = sphere_normalize(x, eps)
         y = sphere_normalize(y.unsqueeze(0), eps)
@@ -168,20 +266,36 @@ def _pairwise_geodesic_distance_and_log(
 
 
 def _calc_drift_direction(dist, diff, permutation, R, sigma, eps=1e-8, euclidean=True):
-    """"
-    Calculates the kernel and gradient for given distances and differences. 
-    Also unaligns the gradient already!
+    """Calculate drift vector direction from distances and differences.
+
+    Computes kernel-weighted gradient and unaligns the gradient already!.
+
+    Args:
+        dist: Distance matrix [N_gen, N_real].
+        diff: Difference vectors [N_gen, N_real, N_atoms, D].
+        permutation: Atom assignment [N_gen, N_real, N_atoms].
+        R: Rotation matrix [N_gen, N_real, 3, 3].
+        sigma: Kernel bandwidth.
+        eps: Numerical stability constant.
+        euclidean: Whether to apply rotation correction (True for Euclidean, False for spherical).
+
+    Returns:
+        Drift vectors [N_gen, N_atoms, D].
     """
-    kernel = torch.exp(-dist / (2 * sigma**2))      # shape [N_gen, N_real]
-    grad_kernel = (diff * kernel.unsqueeze(-1).unsqueeze(-1)) / (sigma ** 2)    # shape [N_gen, N_real, N_atoms, D]
-   
+    kernel = torch.exp(-dist / (2 * sigma**2))  # shape [N_gen, N_real]
+    grad_kernel = (diff * kernel.unsqueeze(-1).unsqueeze(-1)) / (
+        sigma**2
+    )  # shape [N_gen, N_real, N_atoms, D]
+
     if euclidean:
-        grad_kernel = - grad_kernel
+        grad_kernel = -grad_kernel
         inv_R = R.transpose(-2, -1)
         grad_kernel = grad_kernel @ inv_R
 
     grad_kernel = unpermute_real_order_to_gen_order(grad_kernel, permutation)
 
-    V_dir = grad_kernel.sum(dim=1) / (kernel.sum(dim=1).clamp_min(eps).unsqueeze(-1).unsqueeze(-1)) # shape [N_gen, N_atoms, D]
+    V_dir = grad_kernel.sum(dim=1) / (
+        kernel.sum(dim=1).clamp_min(eps).unsqueeze(-1).unsqueeze(-1)
+    )  # shape [N_gen, N_atoms, D]
 
     return V_dir

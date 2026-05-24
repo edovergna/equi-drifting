@@ -1,3 +1,9 @@
+"""Geometry utilities for batched molecular graph data.
+
+This module provides helpers to center coordinates and compute per-graph norms
+for batched PyTorch Geometric data objects.
+"""
+
 import torch
 from torch_geometric.nn import global_mean_pool
 
@@ -19,6 +25,10 @@ def per_graph_center_norms(pos: torch.Tensor, batch_vec: torch.Tensor) -> torch.
 
 
 def batch_size_for_logging(batch) -> int:
+    """Return the effective batch size for display and logging.
+
+    Handles both PyTorch Geometric batch objects and single graph inputs.
+    """
     if hasattr(batch, "num_graphs") and batch.num_graphs is not None:
         return int(batch.num_graphs)
     if hasattr(batch, "batch") and batch.batch is not None:

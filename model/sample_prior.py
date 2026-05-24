@@ -1,3 +1,9 @@
+"""Prior distribution sampling for molecular generation.
+
+Provides utilities for sampling molecules from the prior distribution, including
+atom-count distributions estimated from QM9 and Dirichlet sampling for atom types.
+"""
+
 import numpy as np
 import torch
 
@@ -50,11 +56,20 @@ def sample_atom_dirichlet_noise(
     dtype: torch.dtype = torch.float32,
     device=None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Sample flat simplex-valued atom probabilities and their square-root map.
+    """Sample uniform Dirichlet-distributed atom type probabilities.
+
+    Also returns the square-root map (used for sphere embeddings).
+
+    Args:
+        total_nodes: Number of atoms to sample types for.
+        num_atom_types: Number of atom type classes.
+        dtype: Data type for output tensors.
+        device: Device to place tensors on.
 
     Returns:
-        A_prob: [total_nodes, num_atom_types]
-        S_sqrt: [total_nodes, num_atom_types]
+        Tuple of (A_prob, S_sqrt) where:
+        - A_prob: [total_nodes, num_atom_types] probability vectors
+        - S_sqrt: [total_nodes, num_atom_types] square-root map
     """
     sample_device = device
     if device is not None and getattr(device, "type", None) == "mps":

@@ -1,3 +1,9 @@
+"""Model package API exports for the drifting experiments repository.
+
+Exports common training utilities, callbacks, data loaders, and the generator
+module so users can import them from the model package namespace.
+"""
+
 from .callbacks import (AtomTypeDistributionCallback, ChemicalValidityCallback,
                         GeneratorCheckpointCallback,
                         GradientMonitorCallback, MoleculeVisualizationCallback,

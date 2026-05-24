@@ -1,3 +1,5 @@
+"""Lightning callbacks for training monitoring and checkpointing."""
+
 from .atom_distribution import AtomTypeDistributionCallback
 from .checkpoint import GeneratorCheckpointCallback
 from .chemical_validity import ChemicalValidityCallback

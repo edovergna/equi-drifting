@@ -1,3 +1,5 @@
+"""Bond-order estimation utilities used to infer molecular connectivity."""
+
 from rdkit.Chem.rdchem import BondType
 
 from .constants import _BONDS1, _BONDS2, _BONDS3, _MARGIN1, _MARGIN2, _MARGIN3
