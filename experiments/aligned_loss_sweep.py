@@ -1809,7 +1809,7 @@ def main() -> None:
     """Entry point: parse arguments, load QM9, run the gamma sweep, and save summary results."""
     args = parse_args()
     if args.smoke:
-        args.atom_counts = [4]
+        args.atom_counts = [5]
         args.num_iters = 2
         args.eval_gen = 8
         args.monitor_gen = 4
