@@ -235,7 +235,7 @@ def main() -> None:
 
         for step in range(1, args.steps + 1):
             optimizer.zero_grad(set_to_none=True)
-            _, _, pos_gen = model(x_prior, pos_prior, edge_index)
+            pos_gen, _ = model(pos_prior, x_prior, edge_index)
             pos_gen = center_positions_per_graph(pos_gen, batch_vec)
 
             loss = F.mse_loss(pos_gen, target_pos)

@@ -312,8 +312,8 @@ def main() -> None:
 
         for step in range(1, args.steps + 1):
             optimizer.zero_grad(set_to_none=True)
-            _, _, pos_gen = model(
-                batch["x_prior"], batch["pos_prior"], batch["edge_index"]
+            pos_gen, _ = model(
+                batch["pos_prior"], batch["x_prior"], batch["edge_index"]
             )
             pos_gen = center_positions_per_graph(pos_gen, batch["batch_vec"])
 
