@@ -17,4 +17,4 @@ conda activate equi
 
 cd "$HOME/drifting-experiments"
 
-python aligned_loss_sweep.py
+python experiments/aligned_loss_sweep.py
