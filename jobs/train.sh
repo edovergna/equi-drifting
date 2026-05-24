@@ -29,6 +29,7 @@ python train.py \
   --position_sigma 2.0 \
   --types_sigma 1.0 \
   --position_eta 1.0 \
+  --end_sigma 0.8 \
   --types_eta 1.0 \
   --lr 1e-5 \
   --position_weight 0.5 \
