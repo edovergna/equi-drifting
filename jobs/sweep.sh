@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
 #SBATCH --time=04:00:00
-#SBATCH --output=slurm_output_%A.out
+#SBATCH --output=sweep_%A.out
 #SBATCH --mail-type=BEGIN,END
 #SBATCH --mail-user=your.email@university.nl
 module purge
