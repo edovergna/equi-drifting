@@ -8,7 +8,7 @@
 #SBATCH --time=04:00:00
 #SBATCH --output=slurm_output_%A.out
 #SBATCH --mail-type=BEGIN,END
-#SBATCH --mail-user=olivier.stam@student.uva.nl
+#SBATCH --mail-user=your.email@university.nl
 module purge
 module load 2025
 module load Anaconda3/2025.06-1
