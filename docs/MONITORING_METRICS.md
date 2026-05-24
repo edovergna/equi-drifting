@@ -17,22 +17,23 @@
 
 ### Drift internals (`drift_train/*`, `drift_val/*`)
 
-Per-temperature stats from the normalized drift loss function. Both splits share the same keys, under `drift_train/` (per step) and `drift_val/` (per epoch).
+Per-step stats from the drift loss function. Both splits share the same keys, under `drift_train/` (per step) and `drift_val/` (per epoch).
 
 | Key | What it means |
 | --- | --- |
-| `*/scale_S` | Normalization scale. Should be stable once training settles. |
-| `*/phi_gen_norm_mean/std` | L2 norm of generated embeddings. |
-| `*/phi_real_norm_mean` | L2 norm of real embeddings (fixed EPT encoder). |
-| `*/cosine_sim_to_nn` | Cosine similarity of each φ_gen to its nearest φ_real. **Primary signal.** |
-| `*/nn_l2_distance` | L2 distance to nearest real embedding. |
-| `*/attn_entropy_{τ}` | Entropy of attention weights at temperature τ. |
-| `*/lambda_{τ}` | Per-temperature loss contribution. |
-| `*/v_norm_{τ}` | Norm of the drift direction vector. |
-| `*/attn_pos_mass_frac_{τ}` | Fraction of attention mass on molecules closer than the generator. Higher = generator is already near real data. |
+| `*/mean_euclidean_distance` | Mean Euclidean distance between each generated molecule and its nearest real match (after alignment). **Primary position signal.** |
+| `*/std_euclidean_distance` | Spread of the Euclidean distances — high std means some molecules are much further from real than others. |
+| `*/mean_spherical_distance` | Mean geodesic distance on the atom-type sphere between generated and real. **Primary type signal.** |
+| `*/std_spherical_distance` | Spread of the spherical distances. |
+| `*/norm_V_posit` | Mean norm of the net position drift vector (attractive minus repulsive). Near-zero means drift is balanced/dead. |
+| `*/norm_V_types` | Mean tangent-space norm of the net type drift vector. |
+| `*/mean_V_posit_pos` | Mean magnitude of the attractive position drift (pulling toward real molecules). |
+| `*/mean_V_posit_neg` | Mean magnitude of the repulsive position drift (pushing away from outliers). |
+| `*/mean_V_types_pos` | Mean tangent norm of the attractive type drift. |
+| `*/mean_V_types_neg` | Mean tangent norm of the repulsive type drift. |
 
-**Healthy:** `cosine_sim_to_nn` increases toward 1. `nn_l2_distance` decreases. `attn_entropy` starts high (uniform attention, generator far from everything) and sharpens over time. `attn_pos_mass_frac` increases — means the generator is catching up to real data.
-**Red flags:** `v_norm` collapses to 0 (dead drift field); `scale_S` blows up; `phi_gen_norm` diverges far from `phi_real_norm`.
+**Healthy:** `mean_euclidean_distance` and `mean_spherical_distance` decrease over training. `norm_V_posit` and `norm_V_types` are non-zero and stable — the drift field is active. Attractive components (`_pos`) should dominate over repulsive (`_neg`) once the generator is near real data.
+**Red flags:** `norm_V_posit` or `norm_V_types` collapses to 0 (dead drift field); distances plateau and stop decreasing (generator stuck); `mean_V_posit_neg` ≫ `mean_V_posit_pos` (repulsion dominating, generator is far from real data).
 
 ---
 
@@ -76,21 +77,6 @@ Center-of-mass norms per graph. These should be close to 0 because both generate
 
 ---
 
-### Embedding space (`embed/*`, histograms, each val epoch)
-
-Logged as WandB histograms — look at the distribution shape, not just scalars.
-
-| Key | What it means |
-| --- | --- |
-| `embed/cosine_sim_to_nn_hist` | Distribution of nearest-neighbor cosine sims. Starts near 0, should shift right toward 1. |
-| `embed/phi_gen_norm_hist` | Distribution of generated embedding norms. |
-| `embed/phi_real_norm_hist` | Distribution of real embedding norms (reference — should be stable). |
-
-**Healthy:** `embed/cosine_sim_to_nn_hist` becomes more concentrated near 1 over epochs. Gen and real norm distributions converge.
-**Red flags:** Bimodal cosine sim distribution (some modes collapsing, others not); gen norms far outside the real norm range.
-
----
-
 ### Molecule visualizations (`mol/*`, each val epoch)
 
 | Panel | What it shows |
@@ -131,7 +117,7 @@ If something looks wrong, check in this order:
 1. **`debug/gen_center_norm_mean`** — is centering broken?
 2. **`grad/total_norm`** — is the network actually learning?
 3. **`geom/pos_gen_norm_mean`** — is geometry exploding or collapsing?
-4. **`drift/train/cosine_sim_to_nn`** — is the generator moving toward real data?
-5. **`embed/cosine_sim_to_nn_hist`** — is it uniform (stuck) or concentrated (learning)?
+4. **`drift_train/mean_euclidean_distance`** — are positions getting closer to real?
+5. **`drift_train/mean_spherical_distance`** — are atom types getting closer to real?
 6. **`mol/random_gen`** — does it look like a molecule at all?
 7. **`chem/validity`** — is anything chemically sensible coming out?

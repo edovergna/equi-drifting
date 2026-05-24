@@ -7,7 +7,6 @@ import csv
 import sys
 from pathlib import Path
 
-import numpy as np
 import torch
 from torch_geometric.datasets import QM9
 
@@ -318,9 +317,7 @@ def main() -> None:
             )
             pos_gen = center_positions_per_graph(pos_gen, batch["batch_vec"])
 
-            loss = per_molecule_loss(
-                pos_gen, batch["target_pos"], batch["batch_vec"]
-            )
+            loss = per_molecule_loss(pos_gen, batch["target_pos"], batch["batch_vec"])
             loss.backward()
             optimizer.step()
 
@@ -394,4 +391,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

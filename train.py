@@ -16,7 +16,6 @@ if str(PROJECT_ROOT) not in sys.path:
 import argparse
 
 import lightning.pytorch as pl
-from lightning.pytorch.callbacks import EarlyStopping
 from lightning.pytorch.loggers import WandbLogger
 
 import wandb
@@ -33,6 +32,7 @@ from model import (
 )
 from model.wandb_utils import load_pretrained_generator
 from parse_args import parse_args
+
 
 def main(args: argparse.Namespace):
     """Run training for the QM9 drift model using the provided CLI args.
