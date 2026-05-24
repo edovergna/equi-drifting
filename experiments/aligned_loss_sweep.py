@@ -54,6 +54,7 @@ NUM_ATOM_TYPES = 5
 
 @dataclass(frozen=True)
 class SweepConfig:
+    """Frozen configuration for one sweep plan (architecture, lr, eta, and gamma grids)."""
     num_blocks: int
     hidden_nf: int
     lr: float
@@ -112,6 +113,14 @@ class EncodeAtomTypesTransform:
     """Add one-hot QM9 atom types in notebook order: H, C, N, O, F."""
 
     def __call__(self, data: Data) -> Data:
+        """Encode QM9 atom types as one-hot vectors and attach them as real_atom_types.
+
+        Args:
+            data: PyG Data object with a z attribute containing atomic numbers.
+
+        Returns:
+            The same Data object with data.real_atom_types set to a [N, 5] float tensor.
+        """
         z_to_index = {1: 0, 6: 1, 7: 2, 8: 3, 9: 4}
         real_indices = torch.tensor(
             [z_to_index[int(v.item())] for v in data.z], device=data.z.device
@@ -124,15 +133,32 @@ class FullyConnectedTransform:
     """Add dense fully-connected no-self-loop edge index."""
 
     def __call__(self, data: Data) -> Data:
+        """Add a dense fully-connected (no self-loops) edge index to the graph.
+
+        Args:
+            data: PyG Data object whose num_nodes is used to build the edge index.
+
+        Returns:
+            The same Data object with data.dense_edge_index set.
+        """
         device = data.edge_index.device if data.edge_index is not None else torch.device("cpu")
         data.dense_edge_index = get_dense_edge_index(data.num_nodes, device)
         return data
 
 
 class TypeGCN(MessagePassing):
+    """Graph convolutional layer that updates node type features via message passing."""
+
     propagate_type = {"type_feat": torch.Tensor, "edge_attr": torch.Tensor}
 
     def __init__(self, hidden_nf: int, attention: bool = True, aggr_type: str = "sum"):
+        """Initialise TypeGCN with MLPs for message computation, node update, and optional attention.
+
+        Args:
+            hidden_nf: Hidden feature dimensionality used throughout all MLPs.
+            attention: If True, applies a learned sigmoid attention gate to each message.
+            aggr_type: Aggregation scheme passed to MessagePassing (e.g. "sum").
+        """
         super().__init__(aggr=aggr_type)
         in_message_dim = hidden_nf * 2 + 2
         self.message_mlp = nn.Sequential(
@@ -155,19 +181,50 @@ class TypeGCN(MessagePassing):
         type_feat_j: torch.Tensor,
         edge_attr: torch.Tensor,
     ) -> torch.Tensor:
+        """Compute an attention-gated message from neighbour j to node i.
+
+        Args:
+            type_feat_i: Type features of destination nodes, shape [E, hidden_nf].
+            type_feat_j: Type features of source nodes, shape [E, hidden_nf].
+            edge_attr: Edge attributes (squared distances), shape [E, 2].
+
+        Returns:
+            Message tensor of shape [E, hidden_nf].
+        """
         out = self.message_mlp(torch.cat([type_feat_i, type_feat_j, edge_attr], dim=-1))
         return out * self.att_mlp(out) if self.attention else out
 
     def update(self, aggr_out: torch.Tensor, type_feat: torch.Tensor) -> torch.Tensor:
+        """Update each node's type feature with a residual MLP applied to the aggregated messages.
+
+        Args:
+            aggr_out: Aggregated messages for each node, shape [N, hidden_nf].
+            type_feat: Current node type features, shape [N, hidden_nf].
+
+        Returns:
+            Updated node type features of shape [N, hidden_nf].
+        """
         return type_feat + self.update_mlp(torch.cat([aggr_out, type_feat], dim=-1))
 
     def forward(
         self, type_feat: torch.Tensor, edge_index: torch.Tensor, edge_attr: torch.Tensor
     ) -> torch.Tensor:
+        """Run one TypeGCN message-passing step and return updated node features.
+
+        Args:
+            type_feat: Node type features, shape [N, hidden_nf].
+            edge_index: Graph connectivity, shape [2, E].
+            edge_attr: Edge attributes (squared distances), shape [E, 2].
+
+        Returns:
+            Updated node type features of shape [N, hidden_nf].
+        """
         return self.propagate(edge_index, type_feat=type_feat, edge_attr=edge_attr)
 
 
 class PosGCN(MessagePassing):
+    """Graph convolutional layer that updates atom positions via equivariant message passing."""
+
     propagate_type = {
         "type_feat": torch.Tensor,
         "scaled_dir_vector": torch.Tensor,
@@ -181,6 +238,14 @@ class PosGCN(MessagePassing):
         coords_range: float = 15.0,
         aggr_type: str = "sum",
     ):
+        """Initialise PosGCN with a coordinate MLP and optional tanh clamping.
+
+        Args:
+            hidden_nf: Hidden feature dimensionality used in the coordinate MLP.
+            tanh_coord_updates: If True, clamps raw MLP output with tanh scaled by coords_range.
+            coords_range: Scale factor applied after tanh to bound positional updates.
+            aggr_type: Aggregation scheme passed to MessagePassing (e.g. "sum").
+        """
         super().__init__(aggr=aggr_type)
         in_message_dim = hidden_nf * 2 + 2
         layer = nn.Linear(hidden_nf, 1, bias=False)
@@ -202,6 +267,17 @@ class PosGCN(MessagePassing):
         edge_attr: torch.Tensor,
         scaled_dir_vector: torch.Tensor,
     ) -> torch.Tensor:
+        """Compute a weighted directional message for updating atom positions.
+
+        Args:
+            type_feat_i: Type features of destination nodes, shape [E, hidden_nf].
+            type_feat_j: Type features of source nodes, shape [E, hidden_nf].
+            edge_attr: Edge attributes (squared distances), shape [E, 2].
+            scaled_dir_vector: Unit-scaled displacement vectors from j to i, shape [E, 3].
+
+        Returns:
+            Weighted displacement message of shape [E, 3].
+        """
         weight = self.coord_mlp(torch.cat([type_feat_i, type_feat_j, edge_attr], dim=-1))
         if self.tanh_coord_updates:
             weight = torch.tanh(weight) * self.coords_range
@@ -215,6 +291,18 @@ class PosGCN(MessagePassing):
         edge_attr: torch.Tensor,
         scaled_dir_vector: torch.Tensor,
     ) -> torch.Tensor:
+        """Run one PosGCN step and return updated atom positions.
+
+        Args:
+            pos: Current atom positions, shape [N, 3].
+            type_feat: Node type features, shape [N, hidden_nf].
+            edge_index: Graph connectivity, shape [2, E].
+            edge_attr: Edge attributes (squared distances), shape [E, 2].
+            scaled_dir_vector: Unit-scaled displacement vectors, shape [E, 3].
+
+        Returns:
+            Updated atom positions of shape [N, 3].
+        """
         delta = self.propagate(
             edge_index,
             type_feat=type_feat,
@@ -225,6 +313,8 @@ class PosGCN(MessagePassing):
 
 
 class EquivariantBlock(nn.Module):
+    """One EGNN block: a stack of TypeGCN layers followed by a single PosGCN update."""
+
     def __init__(
         self,
         hidden_nf: int,
@@ -234,6 +324,16 @@ class EquivariantBlock(nn.Module):
         coords_range: float = 15.0,
         aggr_type: str = "sum",
     ):
+        """Initialise the equivariant block with n_layers TypeGCN modules and one PosGCN.
+
+        Args:
+            hidden_nf: Hidden feature dimensionality shared across all sub-layers.
+            n_layers: Number of sequential TypeGCN layers applied before the PosGCN.
+            attention: If True, enables attention gating in every TypeGCN.
+            tanh_coord_updates: If True, enables tanh clamping in PosGCN.
+            coords_range: Tanh scale factor for PosGCN coordinate updates.
+            aggr_type: Aggregation scheme for all MessagePassing layers (e.g. "sum").
+        """
         super().__init__()
         self.type_update = nn.ModuleList(
             [
@@ -256,6 +356,18 @@ class EquivariantBlock(nn.Module):
         edge_attr: torch.Tensor,
         scaled_dir_vector: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Apply the equivariant block, returning updated type features and positions.
+
+        Args:
+            type_feat: Node type features, shape [N, hidden_nf].
+            pos: Atom positions, shape [N, 3].
+            edge_index: Graph connectivity, shape [2, E].
+            edge_attr: Edge attributes (squared distances), shape [E, 2].
+            scaled_dir_vector: Unit-scaled displacement vectors, shape [E, 3].
+
+        Returns:
+            Tuple of (updated type features [N, hidden_nf], updated positions [N, 3]).
+        """
         for type_gcn in self.type_update:
             type_feat = type_gcn(type_feat=type_feat, edge_index=edge_index, edge_attr=edge_attr)
         pos = self.coord_update(
@@ -271,6 +383,16 @@ class EquivariantBlock(nn.Module):
 def compute_edge_properties(
     pos: torch.Tensor, edge_index: torch.Tensor, norm_constant: float = 1.0
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    """Compute squared inter-atom distances and normalised direction vectors for all edges.
+
+    Args:
+        pos: Atom positions, shape [N, 3].
+        edge_index: Graph connectivity, shape [2, E].
+        norm_constant: Small constant added to the norm before dividing to avoid division by zero.
+
+    Returns:
+        Tuple of (squared_norm [E], scaled_dir_vector [E, 3]).
+    """
     src, dst = edge_index
     dist = pos[src] - pos[dst]
     squared_norm = dist.pow(2).sum(dim=-1)
@@ -280,6 +402,8 @@ def compute_edge_properties(
 
 
 class EGNN(nn.Module):
+    """E(3)-equivariant graph neural network that jointly refines atom positions and type logits."""
+
     def __init__(
         self,
         num_atom_types: int,
@@ -291,6 +415,18 @@ class EGNN(nn.Module):
         coords_range: float = 15.0,
         aggr_type: str = "sum",
     ):
+        """Initialise EGNN with an input embedding, a stack of equivariant blocks, and an output head.
+
+        Args:
+            num_atom_types: Number of atom type classes (input/output dimensionality).
+            num_blocks: Number of EquivariantBlock layers to stack.
+            hidden_nf: Hidden feature dimensionality used throughout the network.
+            num_layers_per_block: Number of TypeGCN layers inside each EquivariantBlock.
+            attention: If True, enables attention gating in TypeGCN layers.
+            tanh_coord_updates: If True, enables tanh clamping in PosGCN layers.
+            coords_range: Tanh scale factor for positional updates.
+            aggr_type: Message aggregation scheme (e.g. "sum").
+        """
         super().__init__()
         self.type_embedding = nn.Linear(num_atom_types, hidden_nf)
         self.type_embedding_out = nn.Linear(hidden_nf, num_atom_types)
@@ -315,6 +451,19 @@ class EGNN(nn.Module):
         edge_index: torch.Tensor,
         return_change_in_pos: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor] | tuple[torch.Tensor, torch.Tensor, list[torch.Tensor]]:
+        """Run the EGNN forward pass and return refined positions and type logits.
+
+        Args:
+            pos_noise: Noisy input positions, shape [N, 3].
+            type_noise: Noisy input type features, shape [N, num_atom_types].
+            edge_index: Graph connectivity, shape [2, E].
+            return_change_in_pos: If True, also return the list of intermediate positions.
+
+        Returns:
+            (gen_pos, gen_types) or (gen_pos, gen_types, pos_list) when return_change_in_pos=True.
+            gen_pos has shape [N, 3], gen_types has shape [N, num_atom_types], and pos_list
+            contains one [N, 3] tensor per block (plus the initial positions).
+        """
         gen_feats = self.type_embedding(type_noise)
         gen_pos = pos_noise
         initial_squared_norm, _ = compute_edge_properties(gen_pos, edge_index)
@@ -344,6 +493,11 @@ class EGNN(nn.Module):
 
 
 def set_seed(seed: int) -> None:
+    """Set random seeds for Python, NumPy, and PyTorch (including all CUDA devices).
+
+    Args:
+        seed: Integer seed value to apply to all RNG sources.
+    """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -352,6 +506,14 @@ def set_seed(seed: int) -> None:
 
 
 def choose_device(name: str) -> torch.device:
+    """Resolve a device name string to a torch.device, with auto-detection when name is "auto".
+
+    Args:
+        name: Device string such as "auto", "cpu", "cuda", "cuda:0", or "mps".
+
+    Returns:
+        The resolved torch.device.
+    """
     if name != "auto":
         return torch.device(name)
     if torch.cuda.is_available():
@@ -362,6 +524,11 @@ def choose_device(name: str) -> torch.device:
 
 
 def maybe_disable_rdkit_for_qm9() -> dict[str, Any]:
+    """Temporarily shadow rdkit in sys.modules so QM9 dataset loading skips RDKit processing.
+
+    Returns:
+        A dict of previously loaded rdkit modules that must be restored afterwards.
+    """
     saved = {
         k: v for k, v in sys.modules.items() if k == "rdkit" or k.startswith("rdkit.")
     }
@@ -372,6 +539,11 @@ def maybe_disable_rdkit_for_qm9() -> dict[str, Any]:
 
 
 def restore_rdkit_modules(saved: dict[str, Any]) -> None:
+    """Re-insert rdkit modules into sys.modules after QM9 dataset loading is complete.
+
+    Args:
+        saved: Dict returned by maybe_disable_rdkit_for_qm9 containing the original modules.
+    """
     for key in list(sys.modules):
         if sys.modules[key] is None and (key == "rdkit" or key.startswith("rdkit.")):
             del sys.modules[key]
@@ -379,6 +551,17 @@ def restore_rdkit_modules(saved: dict[str, Any]) -> None:
 
 
 def load_qm9(root: Path, force_reload: bool) -> QM9:
+    """Load the QM9 dataset with centring, fully-connected edges, and atom-type encoding.
+
+    RDKit is temporarily hidden from sys.modules during loading to prevent conflicts.
+
+    Args:
+        root: Path to the directory where the QM9 dataset is stored or will be downloaded.
+        force_reload: If True, forces re-processing of the raw dataset files.
+
+    Returns:
+        The processed QM9 dataset object.
+    """
     saved = maybe_disable_rdkit_for_qm9()
     try:
         return QM9(
@@ -391,10 +574,31 @@ def load_qm9(root: Path, force_reload: bool) -> QM9:
 
 
 def dense_edge_index(base_edge_index: torch.Tensor, num_gen: int, num_atoms: int) -> torch.Tensor:
+    """Build a batched fully-connected edge index by tiling and offsetting a single-molecule index.
+
+    Args:
+        base_edge_index: Dense edge index for one molecule, shape [2, E_single].
+        num_gen: Number of molecules in the batch.
+        num_atoms: Number of atoms per molecule.
+
+    Returns:
+        Batched edge index of shape [2, E_single * num_gen].
+    """
     return torch.cat([base_edge_index + offset * num_atoms for offset in range(num_gen)], dim=1)
 
 
 def linear_assignment_batched(cost: torch.Tensor) -> torch.Tensor:
+    """Solve a batch of linear assignment problems, using torch-linear-assignment when available.
+
+    Falls back to SciPy's linear_sum_assignment when the fast library is not installed.
+
+    Args:
+        cost: Cost matrices, shape [B, N, N].
+
+    Returns:
+        Assignment tensors of shape [B, N] where entry [b, i] is the column assigned to row i
+        in problem b.
+    """
     cost_cpu = cost.detach().cpu().contiguous()
     if _batch_assignment is not None:
         return _batch_assignment(cost_cpu)
@@ -415,6 +619,18 @@ def linear_assignment_batched(cost: torch.Tensor) -> torch.Tensor:
 
 @torch.no_grad()
 def kabsch_rotations(gen_pos: torch.Tensor, real_pos: torch.Tensor) -> torch.Tensor:
+    """Compute optimal Kabsch rotation matrices aligning generated molecules to real ones.
+
+    Supports a 3-D generated tensor (one set of generated molecules) or a 4-D tensor
+    (already expanded to pairwise form).  SVD is run on CPU when the input is on MPS.
+
+    Args:
+        gen_pos: Generated positions, shape [G, N, 3] or [G, R, N, 3].
+        real_pos: Real positions, shape [R, N, 3].
+
+    Returns:
+        Rotation matrices of shape [G, R, 3, 3].
+    """
     if real_pos.ndim != 3:
         raise ValueError(f"real_pos must be [N_real, N_atoms, 3], got {real_pos.shape}")
 
@@ -458,6 +674,20 @@ def build_cost_matrix(
     type_weight: float = 1.0,
     pos_weight: float = 0.0,
 ) -> torch.Tensor:
+    """Build a pairwise atom-assignment cost matrix combining type and position costs.
+
+    Args:
+        gen_types: Generated type features on the sphere, shape [G, N, D] or [G, R, N, D].
+        real_types: Real type features, shape [R, N, D].
+        gen_pos: Generated positions, shape [G, N, 3] or [G, R, N, 3].
+        real_pos: Real positions, shape [R, N, 3].
+        eps: Small epsilon for sphere normalisation.
+        type_weight: Weight applied to the geodesic type cost.
+        pos_weight: Weight applied to the squared positional cost.
+
+    Returns:
+        Cost matrix of shape [G, R, N, N].
+    """
     gen_types = sphere_normalize(gen_types, eps)
     real_types = sphere_normalize(real_types, eps)
 
@@ -487,6 +717,20 @@ def hungarian_method_batched(
     type_weight: float = 1.0,
     pos_weight: float = 0.0,
 ) -> torch.Tensor:
+    """Solve the batched Hungarian assignment for generated-to-real atom matching.
+
+    Args:
+        gen_types: Generated type features, shape [G, N, D] or [G, R, N, D].
+        real_types: Real type features, shape [R, N, D].
+        gen_pos: Generated positions, shape [G, N, 3] or [G, R, N, 3].
+        real_pos: Real positions, shape [R, N, 3].
+        eps: Small epsilon for sphere normalisation.
+        type_weight: Weight applied to the geodesic type cost.
+        pos_weight: Weight applied to the squared positional cost.
+
+    Returns:
+        Assignment indices of shape [G, R, N].
+    """
     cost_matrix = build_cost_matrix(
         gen_types=gen_types,
         real_types=real_types,
@@ -503,6 +747,15 @@ def hungarian_method_batched(
 
 
 def to_pairwise(gen: torch.Tensor, n_real: int) -> torch.Tensor:
+    """Expand a generated tensor to pairwise form by repeating along the real-molecule dimension.
+
+    Args:
+        gen: Generated tensor, shape [G, N, D] or already [G, R, N, D].
+        n_real: Number of real molecules R to expand to.
+
+    Returns:
+        Tensor of shape [G, R, N, D].
+    """
     if gen.ndim == 3:
         return gen[:, None, :, :].expand(-1, n_real, -1, -1)
     if gen.ndim == 4:
@@ -511,11 +764,29 @@ def to_pairwise(gen: torch.Tensor, n_real: int) -> torch.Tensor:
 
 
 def pairwise_position_rmse(gen_pos_pairwise: torch.Tensor, real_pos: torch.Tensor) -> torch.Tensor:
+    """Compute per-pair RMSE between generated and real atom positions.
+
+    Args:
+        gen_pos_pairwise: Generated positions in pairwise form, shape [G, R, N, 3].
+        real_pos: Real positions, shape [R, N, 3].
+
+    Returns:
+        RMSE values of shape [G, R].
+    """
     diff = gen_pos_pairwise - real_pos[None, :, :, :]
     return diff.pow(2).sum(dim=-1).mean(dim=-1).sqrt()
 
 
 def permute_generated_to_real_order(gen: torch.Tensor, assignment: torch.Tensor) -> torch.Tensor:
+    """Reorder generated atoms according to an assignment that maps them to real-molecule order.
+
+    Args:
+        gen: Generated features, shape [G, N, D] or [G, R, N, D].
+        assignment: Assignment indices from hungarian_method_batched, shape [G, R, N].
+
+    Returns:
+        Permuted tensor of shape [G, R, N, D].
+    """
     d = gen.shape[-1]
     if gen.ndim == 3:
         gen_pairwise = gen[:, None, :, :].expand(-1, assignment.shape[1], -1, -1)
@@ -528,6 +799,15 @@ def permute_generated_to_real_order(gen: torch.Tensor, assignment: torch.Tensor)
 
 
 def apply_pairwise_rotation(gen_pos: torch.Tensor, r: torch.Tensor) -> torch.Tensor:
+    """Apply Kabsch rotation matrices to generated positions in pairwise form.
+
+    Args:
+        gen_pos: Generated positions, shape [G, N, 3] or [G, R, N, 3].
+        r: Rotation matrices, shape [G, R, 3, 3].
+
+    Returns:
+        Rotated positions of shape [G, R, N, 3].
+    """
     if gen_pos.ndim == 3:
         gen_pairwise = gen_pos[:, None, :, :].expand(-1, r.shape[1], -1, -1)
     elif gen_pos.ndim == 4:
@@ -540,6 +820,15 @@ def apply_pairwise_rotation(gen_pos: torch.Tensor, r: torch.Tensor) -> torch.Ten
 def unpermute_real_order_to_gen_order(
     x_perm: torch.Tensor, assignment: torch.Tensor
 ) -> torch.Tensor:
+    """Invert a permutation applied by permute_generated_to_real_order, restoring generated order.
+
+    Args:
+        x_perm: Permuted tensor in real-molecule order, shape [G, R, N, D].
+        assignment: Assignment indices used for the original permutation, shape [G, R, N].
+
+    Returns:
+        Tensor restored to generated-molecule atom order, shape [G, R, N, D].
+    """
     x = torch.empty_like(x_perm)
     idx = assignment[..., None].expand_as(x_perm)
     x.scatter_(dim=2, index=idx, src=x_perm)
@@ -557,6 +846,26 @@ def find_rotation_and_permutation(
     pos_tol: float = 1e-4,
     min_iter: int = 1,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Iteratively find optimal atom permutations and Kabsch rotations aligning generated to real.
+
+    Alternates between Hungarian assignment and Kabsch rotation until convergence or max_iter.
+    MPS tensors are moved to CPU for SVD and returned on the original device.
+
+    Args:
+        gen_pos: Generated positions, shape [G, N, 3].
+        real_pos: Real positions, shape [R, N, 3].
+        gen_types: Generated type features, shape [G, N, D].
+        real_types: Real type features, shape [R, N, D].
+        sigma: Bandwidth parameter (unused directly here but passed for consistency).
+        eps: Small epsilon for sphere normalisation.
+        max_iter: Maximum number of alternating optimisation iterations.
+        pos_tol: RMSE threshold below which a pair is considered converged.
+        min_iter: Minimum number of iterations before early stopping is allowed.
+
+    Returns:
+        Tuple of (assignment [G, R, N], rotation [G, R, 3, 3],
+        aligned_gen_pos [G, R, N, 3], aligned_gen_types [G, R, N, D]).
+    """
     out_device = gen_pos.device
     out_pos_dtype = gen_pos.dtype
     out_type_dtype = gen_types.dtype
@@ -629,6 +938,19 @@ def pairwise_geodesic_distance_and_log(
     manifold: str = "euclidean",
     eps: float = 1e-8,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    """Compute pairwise geodesic squared distances and logarithmic map vectors from x towards y.
+
+    Supports Euclidean space (plain squared distances) and the product sphere (geodesic arcs).
+
+    Args:
+        x: Source tensor in pairwise form, shape [G, R, N, D].
+        y: Target tensor, shape [R, N, D].
+        manifold: "euclidean" or "spherical".
+        eps: Small epsilon for numerical stability on the sphere.
+
+    Returns:
+        Tuple of (sq_distances [G, R], diff [G, R, N, D]) where diff is the log-map direction.
+    """
     if manifold == "euclidean":
         diff = x - y[None, :, :, :]
         sq_distances = diff.pow(2).sum(dim=-1).sum(dim=-1)
@@ -659,6 +981,24 @@ def calc_drift_direction(
     eps: float = 1e-8,
     euclidean: bool = True,
 ) -> torch.Tensor:
+    """Compute a kernel-weighted drift direction from aligned pairwise distances and log-maps.
+
+    Weights log-map directions by a Gaussian kernel over pairwise distances, un-rotates and
+    un-permutes back to the original generated-molecule atom ordering, then averages over real
+    molecules.
+
+    Args:
+        dist: Pairwise squared distances, shape [G, R].
+        diff: Log-map vectors from generated to target, shape [G, R, N, D].
+        permutation: Assignment indices mapping generated to real order, shape [G, R, N].
+        r: Kabsch rotation matrices, shape [G, R, 3, 3].
+        sigma: Gaussian kernel bandwidth.
+        eps: Small epsilon to avoid division by zero when normalising.
+        euclidean: If True, negates the gradient and un-rotates with the transpose rotation.
+
+    Returns:
+        Drift direction tensor of shape [G, N, D].
+    """
     kernel = torch.exp(-dist / (2 * sigma**2))
     grad_kernel = (diff * kernel.unsqueeze(-1).unsqueeze(-1)) / (sigma**2)
     if euclidean:
@@ -680,6 +1020,27 @@ def compute_aligning_drift_loss(
     t_eta: float = 1.0,
     p_eta: float = 1.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
+    """Compute the contrastive aligning drift loss for positions and atom types.
+
+    Aligns generated molecules to real molecules (positive pairs) and to other generated
+    molecules (negative pairs), then computes a loss that pushes generated samples towards
+    real molecules on both the Euclidean position manifold and the product sphere for types.
+
+    Args:
+        gen_pos: Generated positions, shape [G, N, 3].
+        real_pos: Real positions, shape [R, N, 3].
+        gen_types_sphere: Generated type features on the sphere, shape [G, N, D].
+        real_types: Real type features, shape [R, N, D].
+        posit_sigma: Gaussian kernel bandwidth for position alignment.
+        types_sigma: Gaussian kernel bandwidth for type alignment.
+        eps: Small epsilon for numerical stability.
+        scale_loss: Scalar multiplier applied to the type distance term in the loss.
+        t_eta: Step-size multiplier for the type drift direction.
+        p_eta: Step-size multiplier for the position drift direction.
+
+    Returns:
+        Tuple of (scalar loss tensor, stats dict with distance and drift-norm diagnostics).
+    """
     real_types = real_types.float()
     n_gen = gen_pos.shape[0]
 
@@ -768,6 +1129,16 @@ def compute_aligning_drift_loss(
 def select_real_molecules(
     dataset: QM9, atom_count: int, real_limit: int | None
 ) -> tuple[list[Any], torch.Tensor, torch.Tensor]:
+    """Filter QM9 for molecules with a specific atom count and return their positions and types.
+
+    Args:
+        dataset: The loaded QM9 dataset.
+        atom_count: Number of atoms each selected molecule must have.
+        real_limit: Maximum number of molecules to return; None means no limit.
+
+    Returns:
+        Tuple of (list of Data objects, real_positions [R, N, 3], real_types [R, N, D]).
+    """
     indices = [i for i, mol in enumerate(dataset) if int(mol.num_nodes) == atom_count]
     if real_limit is not None:
         indices = indices[:real_limit]
@@ -787,6 +1158,18 @@ def noise_banks(
     seed: int,
     device: torch.device,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    """Pre-generate fixed Gaussian noise banks for positions and atom types.
+
+    Args:
+        bank_size: Number of noise samples to pre-generate.
+        num_atoms: Number of atoms per sample.
+        num_atom_types: Number of atom type dimensions.
+        seed: Random seed for reproducible noise generation.
+        device: Device on which the noise tensors are placed.
+
+    Returns:
+        Tuple of (pos_bank [bank_size, num_atoms, 3], type_bank [bank_size, num_atoms, num_atom_types]).
+    """
     generator = torch.Generator(device="cpu").manual_seed(seed)
     pos_bank = torch.randn((bank_size, num_atoms, 3), generator=generator)
     pos_bank = pos_bank - pos_bank.mean(dim=1, keepdim=True)
@@ -803,6 +1186,20 @@ def build_model(
     tanh_coord_updates: bool,
     aggr_type: str,
 ) -> nn.Module:
+    """Construct and return an EGNN model initialised with a fixed seed on the given device.
+
+    Args:
+        cfg: Sweep configuration specifying num_blocks and hidden_nf.
+        num_atom_types: Number of atom type classes.
+        seed: Random seed for weight initialisation reproducibility.
+        device: Device on which the model is placed.
+        attention: If True, enables attention gating in TypeGCN layers.
+        tanh_coord_updates: If True, enables tanh clamping in PosGCN layers.
+        aggr_type: Message aggregation scheme (e.g. "sum").
+
+    Returns:
+        Initialised EGNN model on the specified device.
+    """
     set_seed(seed)
     return EGNN(
         num_atom_types=num_atom_types,
@@ -817,6 +1214,16 @@ def build_model(
 def summarize_generated_molecules(
     gen_pos: torch.Tensor, gen_type_probs: torch.Tensor
 ) -> dict[str, float]:
+    """Compute validity, uniqueness, heavy-atom count, and stability metrics for a batch of molecules.
+
+    Args:
+        gen_pos: Generated atom positions, shape [M, N, 3].
+        gen_type_probs: Softmax type probabilities, shape [M, N, num_atom_types].
+
+    Returns:
+        Dict with keys "validity", "uniqueness", "heavy_atom_mean", "atom_stability",
+        and "mol_stability", each holding a float in [0, 1] or a mean count.
+    """
     num_mol, num_atoms, _ = gen_pos.shape
     batch_vec = torch.arange(num_mol, device=gen_pos.device).repeat_interleave(num_atoms)
     hard_types = gen_type_probs.argmax(dim=-1).float()
@@ -849,6 +1256,20 @@ def generate_eval_samples(
     base_edge_index: torch.Tensor,
     device: torch.device,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    """Generate a fixed set of molecules from Gaussian noise for evaluation.
+
+    Args:
+        model: Trained EGNN model in eval mode.
+        num_gen: Number of molecules to generate.
+        num_atoms: Number of atoms per molecule.
+        num_atom_types: Number of atom type classes.
+        seed: Random seed for reproducible noise sampling.
+        base_edge_index: Dense edge index for one molecule, shape [2, E_single].
+        device: Device on which inference is run.
+
+    Returns:
+        Tuple of (gen_pos [num_gen, num_atoms, 3], gen_type_probs [num_gen, num_atoms, num_atom_types]).
+    """
     generator = torch.Generator(device="cpu").manual_seed(seed)
     pos_noise = torch.randn((num_gen, num_atoms, 3), generator=generator)
     pos_noise = pos_noise - pos_noise.mean(dim=1, keepdim=True)
@@ -866,6 +1287,11 @@ def generate_eval_samples(
 
 
 def history_columns() -> list[str]:
+    """Return the ordered list of column names for the per-iteration history CSV.
+
+    Returns:
+        List of column name strings.
+    """
     return [
         "atom_count",
         "pos_gamma",
@@ -890,6 +1316,11 @@ def history_columns() -> list[str]:
 
 
 def result_columns() -> list[str]:
+    """Return the ordered list of column names for the per-gamma-pair results CSV.
+
+    Returns:
+        List of column name strings.
+    """
     return [
         "atom_count",
         "n_real_molecules",
@@ -913,6 +1344,13 @@ def result_columns() -> list[str]:
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
+    """Write a list of row dicts to a CSV file, creating parent directories as needed.
+
+    Args:
+        path: Destination file path.
+        rows: List of dicts mapping column names to values.
+        fieldnames: Ordered list of column names that determines column order in the output.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
@@ -921,6 +1359,14 @@ def write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> 
 
 
 def sort_results(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Sort result rows by descending validity, mol_stability, uniqueness, atom_stability, and loss.
+
+    Args:
+        rows: List of result dicts as produced by run_single_gamma_pair.
+
+    Returns:
+        New sorted list with the best result first.
+    """
     return sorted(
         rows,
         key=lambda r: (
@@ -955,6 +1401,35 @@ def run_single_gamma_pair(
     tanh_coord_updates: bool,
     aggr_type: str,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Train one EGNN model for a given (pos_gamma, types_gamma) pair and return results.
+
+    Builds a fresh model, runs the training loop with periodic monitoring, detects divergence,
+    and performs a final evaluation pass when training completes normally.
+
+    Args:
+        atom_count: Number of atoms in the target molecules.
+        n_real_molecules: Number of real molecules used as the target distribution.
+        pos_gamma: Gaussian bandwidth for the position alignment kernel.
+        types_gamma: Gaussian bandwidth for the type alignment kernel.
+        cfg: Sweep configuration (architecture, learning rate, etc.).
+        seed: Random seed for model initialisation and noise sampling.
+        num_iters: Total number of training iterations.
+        num_eval_gen: Number of molecules generated for the final evaluation.
+        monitor_gen: Number of molecules generated for periodic monitoring.
+        log_every: Log and monitor every this many iterations.
+        pos_bank: Pre-generated position noise bank, shape [bank_size, num_atoms, 3].
+        type_bank: Pre-generated type noise bank, shape [bank_size, num_atoms, num_atom_types].
+        base_edge_index: Dense edge index for one molecule, shape [2, E_single].
+        real_positions: Real molecule positions, shape [R, num_atoms, 3].
+        real_types: Real molecule type features, shape [R, num_atoms, D].
+        device: Device on which training is run.
+        attention: If True, enables attention gating in TypeGCN layers.
+        tanh_coord_updates: If True, enables tanh clamping in PosGCN layers.
+        aggr_type: Message aggregation scheme (e.g. "sum").
+
+    Returns:
+        Tuple of (result_row dict, history list of per-log-step dicts).
+    """
     num_atoms = real_positions.shape[1]
     num_atom_types = real_types.shape[-1]
     model = build_model(
@@ -1166,6 +1641,22 @@ def run_atom_count_sweep(
     args: argparse.Namespace,
     device: torch.device,
 ) -> dict[str, Any]:
+    """Run the full gamma grid sweep for one atom count and save incremental CSV results.
+
+    Iterates over all (pos_gamma, types_gamma) combinations in cfg, calls
+    run_single_gamma_pair for each, checkpoints results after every pair, and returns
+    the best result row.
+
+    Args:
+        atom_count: Number of atoms in the target molecules.
+        cfg: Sweep configuration including the gamma grids.
+        dataset: The loaded QM9 dataset.
+        args: Parsed command-line arguments.
+        device: Device on which training is run.
+
+    Returns:
+        The result dict corresponding to the best-performing gamma pair.
+    """
     real_mols, real_positions, real_types = select_real_molecules(
         dataset, atom_count, args.real_limit
     )
@@ -1232,12 +1723,29 @@ def run_atom_count_sweep(
 
 
 def parse_float_list(value: str | None) -> tuple[float, ...] | None:
+    """Parse a comma-separated string of floats into a tuple, or return None if input is None.
+
+    Args:
+        value: Comma-separated float string (e.g. "1.0,2.0,3.0") or None.
+
+    Returns:
+        Tuple of parsed floats, or None when value is None.
+    """
     if value is None:
         return None
     return tuple(float(part.strip()) for part in value.split(",") if part.strip())
 
 
 def apply_overrides(cfg: SweepConfig, args: argparse.Namespace) -> SweepConfig:
+    """Apply command-line overrides to a SweepConfig, returning a new frozen config.
+
+    Args:
+        cfg: Base SweepConfig taken from DEFAULT_PLANS.
+        args: Parsed command-line arguments; only non-None override fields are applied.
+
+    Returns:
+        A new SweepConfig with the specified fields replaced.
+    """
     updates: dict[str, Any] = {}
     for arg_name, field_name in [
         ("num_blocks", "num_blocks"),
@@ -1258,6 +1766,11 @@ def apply_overrides(cfg: SweepConfig, args: argparse.Namespace) -> SweepConfig:
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments for the aligned-loss gamma sweep.
+
+    Returns:
+        Namespace object containing all parsed argument values.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--atom-counts", type=int, nargs="+", default=[4, 5, 6, 7])
     parser.add_argument("--data-root", type=Path, default=REPO_ROOT / "data" / "QM9")
@@ -1293,6 +1806,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Entry point: parse arguments, load QM9, run the gamma sweep, and save summary results."""
     args = parse_args()
     if args.smoke:
         args.atom_counts = [4]

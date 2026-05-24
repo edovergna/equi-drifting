@@ -181,7 +181,15 @@ class MoleculeGenerator(LightningModule):
         return x, pos, batch_vec, dense_edge_index
 
     def _forward(self, batch, num_atoms):
-        """Shared forward pass: prior → EGNN → center → hard atoms → EPT embeddings."""
+        """Shared forward pass: sample prior → EGNN → center positions → sphere embeddings.
+
+        Args:
+            batch: Unused; kept for a uniform training-step signature.
+            num_atoms: Number of atoms per molecule.
+
+        Returns:
+            Tuple of (gen_pos, gen_types_sphere, gen_batch_vec).
+        """
         # Sample from the prior distribution
         x_prior, pos_prior, gen_batch_vec, gen_dense_edge_index = (
             self._sample_prior_batch(self.n_gen_molecules, num_atoms)

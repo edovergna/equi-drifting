@@ -46,7 +46,11 @@ def set_seed(seed: int):
 
 
 def get_device() -> torch.device:
-    """Return the best available torch.device (CUDA, then MPS, else CPU)."""
+    """Return the best available torch.device (CUDA, then MPS, else CPU).
+
+    Returns:
+        Best available torch.device.
+    """
 
     if torch.cuda.is_available():
         print("CUDA is available. Using GPU.")

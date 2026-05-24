@@ -1,3 +1,5 @@
+"""Visualize multi-molecule geometry overfit results from train_many.py."""
+
 from __future__ import annotations
 
 import argparse
@@ -10,6 +12,11 @@ from visualize_result import atom_colors, set_equal_axes
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command line arguments for the multi-molecule geometry visualization.
+
+    Returns:
+        argparse.Namespace with visualization settings.
+    """
     parser = argparse.ArgumentParser(
         description="Visualize multi-molecule geometry overfit outputs."
     )
@@ -25,6 +32,14 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_outputs(output_dir: Path) -> tuple[dict, dict]:
+    """Load target and final geometry tensors from a train_many.py output directory.
+
+    Args:
+        output_dir: Directory containing targets.pt and final.pt.
+
+    Returns:
+        A tuple of (targets dict, final dict) loaded from disk.
+    """
     targets_path = output_dir / "targets.pt"
     final_path = output_dir / "final.pt"
     if not targets_path.exists():
@@ -38,6 +53,15 @@ def load_outputs(output_dir: Path) -> tuple[dict, dict]:
 
 
 def per_molecule_rows(targets: dict, final: dict) -> list[dict[str, float | int]]:
+    """Compute per-molecule RMSD and error statistics.
+
+    Args:
+        targets: Dict from targets.pt with keys pos, z, batch_vec, dataset_indices.
+        final: Dict from final.pt with key pos.
+
+    Returns:
+        List of dicts with keys molecule, dataset_index, n_atoms, rmsd, max_abs_err.
+    """
     target_pos = targets["pos"].float()
     final_pos = final["pos"].float()
     batch_vec = targets["batch_vec"].long()
@@ -60,6 +84,12 @@ def per_molecule_rows(targets: dict, final: dict) -> list[dict[str, float | int]
 
 
 def write_rmsd_csv(path: Path, rows: list[dict[str, float | int]]) -> None:
+    """Write per-molecule RMSD statistics to a CSV file.
+
+    Args:
+        path: Output path for the CSV.
+        rows: List of row dicts from per_molecule_rows().
+    """
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(
             f, fieldnames=["molecule", "dataset_index", "n_atoms", "rmsd", "max_abs_err"]
@@ -69,6 +99,13 @@ def write_rmsd_csv(path: Path, rows: list[dict[str, float | int]]) -> None:
 
 
 def plot_grid(output_dir: Path, prefix: str, n_show: int) -> None:
+    """Render a grid of 3D overlay plots for the first n_show molecules.
+
+    Args:
+        output_dir: Directory containing train_many.py outputs.
+        prefix: Filename prefix for saved outputs.
+        n_show: Maximum number of molecules to include in the grid.
+    """
     import matplotlib.pyplot as plt
 
     targets, final = load_outputs(output_dir)
@@ -136,6 +173,7 @@ def plot_grid(output_dir: Path, prefix: str, n_show: int) -> None:
 
 
 def main() -> None:
+    """Run the multi-molecule geometry visualization."""
     args = parse_args()
     plot_grid(Path(args.output_dir), args.prefix, args.n_show)
 

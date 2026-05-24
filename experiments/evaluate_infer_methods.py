@@ -38,6 +38,11 @@ _ELEM_NAMES = ["H", "C", "N", "O", "F"]
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command line arguments for the inference method benchmark.
+
+    Returns:
+        argparse.Namespace with benchmark settings.
+    """
     parser = argparse.ArgumentParser(
         description="Evaluate atom-type inference methods on QM9 test molecules."
     )
@@ -78,6 +83,7 @@ def _trim_batch(data, n_remaining: int):
 
 
 def main() -> None:
+    """Run the atom-type inference benchmark and log results to W&B."""
     args = parse_args()
 
     run = wandb.init(

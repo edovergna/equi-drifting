@@ -39,6 +39,11 @@ _BATCH_SIZE = 256
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command line arguments for the QM9 real molecule statistics script.
+
+    Returns:
+        argparse.Namespace with evaluation settings.
+    """
     parser = argparse.ArgumentParser(
         description="Compute ChemicalValidityCallback metrics on real QM9 molecules."
     )
@@ -79,6 +84,7 @@ def _trim_batch(data, n_remaining: int):
 
 
 def main() -> None:
+    """Compute and log chemical validity and stability statistics for real QM9 molecules."""
     args = parse_args()
     n_limit = args.n_molecules if args.n_molecules > 0 else int(1e9)
 

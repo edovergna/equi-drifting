@@ -97,7 +97,14 @@ class GeneratorCheckpointCallback(Callback):
 
 
     def load_best_weights(self, pl_module: LightningModule) -> bool:
-        """Loads the best in-memory state dict(s) into pl_module. Returns True if applied."""
+        """Load the best in-memory state dict into pl_module.
+
+        Args:
+            pl_module: Lightning module to load weights into.
+
+        Returns:
+            True if best weights were applied, False if no checkpoint is available.
+        """
         if self._best_state_dict is None:
             return False
         pl_module.generator.load_state_dict(self._best_state_dict)

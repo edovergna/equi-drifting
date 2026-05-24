@@ -1,3 +1,5 @@
+"""Overfit a single EGNN to one QM9 molecule geometry from a fixed prior sample."""
+
 from __future__ import annotations
 
 import argparse
@@ -24,6 +26,11 @@ ATOM_SYMBOLS = {1: "H", 6: "C", 7: "N", 8: "O", 9: "F"}
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command line arguments for the single-molecule geometry overfit experiment.
+
+    Returns:
+        argparse.Namespace with experiment settings.
+    """
     parser = argparse.ArgumentParser(
         description="Overfit one fixed prior sample to one QM9 molecule geometry."
     )
@@ -50,6 +57,14 @@ def parse_args() -> argparse.Namespace:
 
 
 def choose_device(name: str) -> torch.device:
+    """Resolve a device name string to a torch.device.
+
+    Args:
+        name: One of "auto", "cpu", "cuda", or "mps".
+
+    Returns:
+        The selected torch.device.
+    """
     if name == "auto":
         if torch.cuda.is_available():
             return torch.device("cuda")
@@ -60,6 +75,11 @@ def choose_device(name: str) -> torch.device:
 
 
 def seed_everything(seed: int) -> None:
+    """Set random seeds for NumPy, PyTorch, and CUDA for reproducibility.
+
+    Args:
+        seed: Integer seed value.
+    """
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
@@ -67,6 +87,17 @@ def seed_everything(seed: int) -> None:
 
 
 def load_qm9(root: str, force_reload: bool) -> QM9:
+    """Load the QM9 dataset with fully-connected graph and atom-type transforms.
+
+    Temporarily disables RDKit to avoid dependency issues during graph construction.
+
+    Args:
+        root: Root directory for the QM9 dataset.
+        force_reload: Whether to ignore cached processed data and reprocess.
+
+    Returns:
+        QM9 dataset with Center, FullyConnectedTransform, and EncodeAtomTypesTransform applied.
+    """
     rdkit_saved = {
         k: v
         for k, v in sys.modules.items()
@@ -91,6 +122,16 @@ def load_qm9(root: str, force_reload: bool) -> QM9:
 
 
 def select_molecule(dataset: QM9, molecule_index: int, max_num_atoms: int | None):
+    """Select a single QM9 molecule by filtered index.
+
+    Args:
+        dataset: The full QM9 dataset.
+        molecule_index: Index into the filtered set of molecules passing the atom-count filter.
+        max_num_atoms: Maximum number of atoms per molecule; None means no filter.
+
+    Returns:
+        A tuple of (dataset_index, molecule_data).
+    """
     candidates = [
         i for i, data in enumerate(dataset)
         if max_num_atoms is None or data.num_nodes <= max_num_atoms
@@ -109,6 +150,14 @@ def select_molecule(dataset: QM9, molecule_index: int, max_num_atoms: int | None
 
 
 def write_xyz(path: Path, z: torch.Tensor, pos: torch.Tensor, comment: str) -> None:
+    """Write atomic positions to an XYZ file.
+
+    Args:
+        path: Output file path.
+        z: Atomic numbers tensor [n_atoms].
+        pos: Atomic positions tensor [n_atoms, 3].
+        comment: Comment line written as the second line of the file.
+    """
     z_cpu = z.detach().cpu().long()
     pos_cpu = pos.detach().cpu()
     with path.open("w", encoding="utf-8") as f:
@@ -120,6 +169,7 @@ def write_xyz(path: Path, z: torch.Tensor, pos: torch.Tensor, comment: str) -> N
 
 
 def main() -> None:
+    """Run the single-molecule geometry overfit experiment."""
     args = parse_args()
     seed_everything(args.seed)
 
@@ -167,12 +217,9 @@ def main() -> None:
     write_xyz(out_dir / "target.xyz", z, target_pos, "target QM9 geometry")
 
     model = EGNN(
-        hidden_nf=args.hidden_dim,
-        n_layers=args.num_layers,
         num_atom_types=5,
-        num_bond_types=5,
-        predict_bond_types=False,
-        predict_atom_types=False,
+        num_blocks=args.num_layers,
+        hidden_nf=args.hidden_dim,
     ).to(device)
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay

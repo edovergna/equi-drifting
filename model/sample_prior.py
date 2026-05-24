@@ -15,7 +15,15 @@ _dense_edge_index_cache: dict[int, torch.Tensor] = {}
 
 
 def get_dense_edge_index(n: int, device: torch.device) -> torch.Tensor:
-    """Return a cached fully-connected (no self-loops) edge index for n nodes."""
+    """Return a cached fully-connected (no self-loops) edge index for n nodes.
+
+    Args:
+        n: Number of nodes.
+        device: Device to place the tensor on.
+
+    Returns:
+        Edge index tensor of shape [2, n*(n-1)].
+    """
     if n not in _dense_edge_index_cache:
         row = torch.arange(n).repeat_interleave(n)
         col = torch.arange(n).repeat(n)
@@ -30,7 +38,14 @@ def get_dense_edge_index(n: int, device: torch.device) -> torch.Tensor:
 
 
 def compute_size_distribution(dataset) -> tuple[np.ndarray, np.ndarray]:
-    """Compute empirical atom-count distribution over the full underlying QM9 dataset."""
+    """Compute empirical atom-count distribution over the full underlying QM9 dataset.
+
+    Args:
+        dataset: PyTorch Geometric Dataset or Subset.
+
+    Returns:
+        Tuple of (unique_sizes, probabilities) as numpy arrays.
+    """
     underlying = dataset.dataset if hasattr(dataset, "dataset") else dataset
 
     if hasattr(underlying, "slices") and "pos" in underlying.slices:

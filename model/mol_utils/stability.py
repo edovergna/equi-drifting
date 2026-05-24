@@ -67,15 +67,16 @@ def batch_to_stability(
 def _per_atom_stability(
     positions: np.ndarray, atom_type_indices: np.ndarray
 ) -> np.ndarray:
-    """
-    Compute atom-level and molecule-level stability.
+    """Compute per-atom stability as a boolean mask.
 
     An atom is stable iff its bond count equals _STABLE_VALENCE for its element.
-    A molecule is stable iff every atom in it is stable.
+
+    Args:
+        positions: Atomic positions [n_atoms, 3] in Angstroms.
+        atom_type_indices: Atom type indices [n_atoms].
 
     Returns:
-        atom_stable_frac  — fraction of all atoms that are stable
-        mol_stable_frac   — fraction of molecules where all atoms are stable
+        Boolean array [n_atoms] where True means the atom is stable.
     """
     atom_names = [_ATOM_NAMES[int(i)] for i in atom_type_indices]
     atomic_nums = [_ATOMIC_NUMS[int(i)] for i in atom_type_indices]

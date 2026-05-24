@@ -1,3 +1,5 @@
+"""Callback for logging 3D molecule renders and atom-type distributions to WandB."""
+
 import io
 
 import matplotlib

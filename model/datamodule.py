@@ -119,6 +119,9 @@ class AtomCountBatchSampler(Sampler[list[int]]):
         """Yield batches of indices, one group at a time.
 
         Each batch contains molecules with the same number of atoms.
+
+        Yields:
+            List of dataset indices forming one batch.
         """
         if self.replacement:
             atom_counts = list(self.groups)
@@ -142,7 +145,11 @@ class AtomCountBatchSampler(Sampler[list[int]]):
                 yield batch
 
     def __len__(self) -> int:
-        """Return the total number of batches."""
+        """Return the total number of batches.
+
+        Returns:
+            Total number of batches.
+        """
         return self.num_batches
 
 

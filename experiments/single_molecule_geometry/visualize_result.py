@@ -1,3 +1,5 @@
+"""Visualize single-molecule geometry overfit results from train_single.py."""
+
 from __future__ import annotations
 
 import argparse
@@ -15,6 +17,11 @@ ATOM_COLORS = {
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command line arguments for the single-molecule geometry visualization.
+
+    Returns:
+        argparse.Namespace with visualization settings.
+    """
     parser = argparse.ArgumentParser(
         description="Visualize single-molecule geometry overfit outputs."
     )
@@ -29,6 +36,14 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_outputs(output_dir: Path) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Load target and final geometry tensors from a train_single.py output directory.
+
+    Args:
+        output_dir: Directory containing target.pt and final.xyz.
+
+    Returns:
+        A tuple of (target_pos, final_pos, z) tensors.
+    """
     target = torch.load(output_dir / "target.pt", map_location="cpu")
     final_xyz = output_dir / "final.xyz"
     if not final_xyz.exists():
@@ -47,6 +62,14 @@ def load_outputs(output_dir: Path) -> tuple[torch.Tensor, torch.Tensor, torch.Te
 
 
 def read_xyz_positions(path: Path) -> torch.Tensor:
+    """Parse atomic positions from an XYZ file.
+
+    Args:
+        path: Path to an XYZ-format file.
+
+    Returns:
+        Tensor of shape [n_atoms, 3] with xyz coordinates.
+    """
     rows = path.read_text(encoding="utf-8").splitlines()[2:]
     coords = []
     for row in rows:
@@ -56,6 +79,12 @@ def read_xyz_positions(path: Path) -> torch.Tensor:
 
 
 def set_equal_axes(ax, *positions: torch.Tensor) -> None:
+    """Set equal aspect ratio 3D axes bounds to encompass all given position tensors.
+
+    Args:
+        ax: Matplotlib 3D axes object.
+        *positions: Variable number of position tensors [n, 3].
+    """
     stacked = torch.cat([p.detach().cpu() for p in positions], dim=0)
     mins = stacked.min(dim=0).values
     maxs = stacked.max(dim=0).values
@@ -70,10 +99,24 @@ def set_equal_axes(ax, *positions: torch.Tensor) -> None:
 
 
 def atom_colors(z: torch.Tensor) -> list[str]:
+    """Map atomic numbers to hex color strings.
+
+    Args:
+        z: Tensor of atomic numbers [n_atoms].
+
+    Returns:
+        List of hex color strings, one per atom.
+    """
     return [ATOM_COLORS.get(int(v), "#aa00ff") for v in z.tolist()]
 
 
 def plot_geometry(output_dir: Path, prefix: str) -> None:
+    """Render and save side-by-side and overlay 3D geometry plots for a single molecule.
+
+    Args:
+        output_dir: Directory containing train_single.py outputs.
+        prefix: Filename prefix for saved PNG files.
+    """
     import matplotlib.pyplot as plt
 
     target_pos, final_pos, z = load_outputs(output_dir)
@@ -142,6 +185,7 @@ def plot_geometry(output_dir: Path, prefix: str) -> None:
 
 
 def main() -> None:
+    """Run the single-molecule geometry visualization."""
     args = parse_args()
     plot_geometry(Path(args.output_dir), args.prefix)
 

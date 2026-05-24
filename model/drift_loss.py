@@ -268,7 +268,8 @@ def _pairwise_geodesic_distance_and_log(
 def _calc_drift_direction(dist, diff, permutation, R, sigma, eps=1e-8, euclidean=True):
     """Calculate drift vector direction from distances and differences.
 
-    Computes kernel-weighted gradient and unaligns the gradient already!.
+    Computes kernel-weighted drift vectors and un-applies the alignment rotation
+    so the result is in the original (unaligned) coordinate frame.
 
     Args:
         dist: Distance matrix [N_gen, N_real].

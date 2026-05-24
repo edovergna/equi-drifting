@@ -1,3 +1,5 @@
+"""Overfit a single EGNN to multiple QM9 molecule geometries from a fixed prior batch."""
+
 from __future__ import annotations
 
 import argparse
@@ -21,6 +23,11 @@ from train_single import load_qm9, seed_everything, write_xyz
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command line arguments for the multi-molecule geometry overfit experiment.
+
+    Returns:
+        argparse.Namespace with experiment settings.
+    """
     parser = argparse.ArgumentParser(
         description="Overfit one fixed prior batch to multiple QM9 geometries."
     )
@@ -51,6 +58,14 @@ def parse_args() -> argparse.Namespace:
 
 
 def choose_device(name: str) -> torch.device:
+    """Resolve a device name string to a torch.device.
+
+    Args:
+        name: One of "auto", "cpu", "cuda", or "mps".
+
+    Returns:
+        The selected torch.device.
+    """
     if name == "auto":
         if torch.cuda.is_available():
             return torch.device("cuda")
@@ -63,6 +78,17 @@ def choose_device(name: str) -> torch.device:
 def select_molecules(
     dataset: QM9, start_index: int, n_molecules: int, max_num_atoms: int | None
 ) -> tuple[list[int], list]:
+    """Select a contiguous slice of QM9 molecules from the atom-count-filtered set.
+
+    Args:
+        dataset: The full QM9 dataset.
+        start_index: Starting offset within the filtered molecule list.
+        n_molecules: Number of molecules to select.
+        max_num_atoms: Maximum number of atoms per molecule; None means no filter.
+
+    Returns:
+        A tuple of (list of dataset indices, list of molecule data objects).
+    """
     candidates = [
         i
         for i, data in enumerate(dataset)
@@ -82,6 +108,16 @@ def build_fixed_batch(
     device: torch.device,
     prior_pos_clamp: float,
 ) -> dict[str, torch.Tensor]:
+    """Build a batched tensor dict of prior and target positions for all molecules.
+
+    Args:
+        molecules: List of QM9 molecule data objects.
+        device: Device to place all tensors on.
+        prior_pos_clamp: Maximum absolute value for clamping prior positions.
+
+    Returns:
+        Dict with keys x_prior, pos_prior, target_pos, batch_vec, z, edge_index, atom_counts.
+    """
     xs = []
     prior_positions = []
     target_positions = []
@@ -126,6 +162,16 @@ def build_fixed_batch(
 def per_molecule_rmsd(
     pos_gen: torch.Tensor, target_pos: torch.Tensor, batch_vec: torch.Tensor
 ) -> torch.Tensor:
+    """Compute per-molecule RMSD between generated and target positions.
+
+    Args:
+        pos_gen: Generated positions [total_nodes, 3].
+        target_pos: Target positions [total_nodes, 3].
+        batch_vec: Batch indices [total_nodes].
+
+    Returns:
+        RMSD values tensor of shape [n_molecules].
+    """
     err2 = (pos_gen - target_pos).pow(2).sum(dim=-1)
     rmsds = []
     for mol_idx in range(int(batch_vec.max().item()) + 1):
@@ -137,6 +183,16 @@ def per_molecule_rmsd(
 def per_molecule_loss(
     pos_gen: torch.Tensor, target_pos: torch.Tensor, batch_vec: torch.Tensor
 ) -> torch.Tensor:
+    """Compute the mean per-molecule MSE loss between generated and target positions.
+
+    Args:
+        pos_gen: Generated positions [total_nodes, 3].
+        target_pos: Target positions [total_nodes, 3].
+        batch_vec: Batch indices [total_nodes].
+
+    Returns:
+        Scalar mean loss over all molecules.
+    """
     err2 = (pos_gen - target_pos).pow(2).sum(dim=-1)
     losses = []
     for mol_idx in range(int(batch_vec.max().item()) + 1):
@@ -154,6 +210,17 @@ def save_example_xyzs(
     batch_vec: torch.Tensor,
     count: int,
 ) -> None:
+    """Write prior, target, and final XYZ files for the first `count` molecules.
+
+    Args:
+        out_dir: Output directory; an xyz_examples/ subdirectory is created inside it.
+        z: Atomic numbers [total_nodes].
+        target_pos: Target positions [total_nodes, 3].
+        prior_pos: Prior positions [total_nodes, 3].
+        final_pos: Final generated positions [total_nodes, 3].
+        batch_vec: Batch indices [total_nodes].
+        count: Maximum number of molecules to write.
+    """
     examples_dir = out_dir / "xyz_examples"
     examples_dir.mkdir(parents=True, exist_ok=True)
     n_graphs = min(count, int(batch_vec.max().item()) + 1)
@@ -180,6 +247,7 @@ def save_example_xyzs(
 
 
 def main() -> None:
+    """Run the multi-molecule geometry overfit experiment."""
     args = parse_args()
     seed_everything(args.seed)
 
@@ -217,12 +285,9 @@ def main() -> None:
     )
 
     model = EGNN(
-        hidden_nf=args.hidden_dim,
-        n_layers=args.num_layers,
         num_atom_types=5,
-        num_bond_types=5,
-        predict_bond_types=False,
-        predict_atom_types=False,
+        num_blocks=args.num_layers,
+        hidden_nf=args.hidden_dim,
     ).to(device)
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay

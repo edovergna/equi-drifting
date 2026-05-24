@@ -178,6 +178,13 @@ def _build_bo_table(n: int, dists: np.ndarray) -> np.ndarray:
 
     Uses vectorised numpy threshold comparisons over the full n×n distance matrix
     for each of the 25 QM9 type-pair combinations — no per-pair Python loop.
+
+    Args:
+        n: Number of atoms.
+        dists: Pairwise distance matrix [n, n] in Angstroms.
+
+    Returns:
+        Bond order table of shape [n, n, n_types, n_types].
     """
     n_types = 5
     bo_table = np.zeros((n, n, n_types, n_types), dtype=np.int8)
@@ -204,6 +211,12 @@ def _infer_types_stability_guided(positions: np.ndarray) -> np.ndarray:
 
     Precomputes all possible bond orders into a lookup table, then uses
     vectorised incremental delta updates — no per-pair loops in the refinement.
+
+    Args:
+        positions: Atomic positions [n_atoms, 3].
+
+    Returns:
+        Atom type indices [n_atoms].
     """
     types = _infer_types_heuristic(positions).copy()
     n = len(types)

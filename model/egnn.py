@@ -9,6 +9,12 @@ from torch import nn
 from torch_geometric.nn import MessagePassing
 
 class TypeGCN(MessagePassing):
+    """Graph convolution network for updating discrete atom type features.
+
+    Passes messages between neighbouring nodes using their type embeddings and
+    edge attributes, then applies an MLP update with optional attention gating.
+    """
+
     propagate_type = {"type_feat": torch.Tensor, "edge_attr": torch.Tensor}
 
     def __init__(
@@ -103,6 +109,12 @@ class TypeGCN(MessagePassing):
 
 
 class PosGCN(MessagePassing):
+    """Equivariant coordinate update network for computing position shifts.
+
+    Aggregates direction-weighted messages from neighbours to produce a
+    translation-equivariant position delta for each node.
+    """
+
     propagate_type = {
         "type_feat": torch.Tensor,
         "scaled_dir_vector": torch.Tensor,
@@ -211,6 +223,16 @@ class EquivariantBlock(nn.Module):
         coords_range: float = 15.0,
         aggr_type: str = "sum",
     ):
+        """Initialize the equivariant block with type and coordinate update layers.
+
+        Args:
+            hidden_nf: Hidden feature dimension.
+            n_layers: Number of TypeGCN layers per block.
+            attention: Whether TypeGCN layers use attention gating.
+            tanh_coord_updates: Whether PosGCN bounds updates with tanh.
+            coords_range: Maximum coordinate update magnitude.
+            aggr_type: Aggregation type for message passing.
+        """
         super().__init__()
 
         self.type_update = nn.ModuleList(
@@ -303,6 +325,18 @@ class EGNN(nn.Module):
         coords_range: float = 15.0,
         aggr_type: str = "sum",
     ):
+        """Initialize the EGNN generator.
+
+        Args:
+            num_atom_types: Number of distinct atom type classes.
+            num_blocks: Number of EquivariantBlock layers to stack.
+            hidden_nf: Hidden feature dimension.
+            num_layers_per_block: Number of TypeGCN layers inside each block.
+            attention: Whether TypeGCN layers use attention gating.
+            tanh_coord_updates: Whether PosGCN bounds coordinate updates with tanh.
+            coords_range: Maximum coordinate update magnitude per block.
+            aggr_type: Aggregation type for message passing.
+        """
         super().__init__()
         self.type_embedding = nn.Linear(num_atom_types, hidden_nf)
         self.type_embedding_out = nn.Linear(hidden_nf, num_atom_types)
@@ -336,9 +370,9 @@ class EGNN(nn.Module):
             return_change_in_pos: If True, also return intermediate position history.
 
         Returns:
-            gen_pos: Predicted new positions.
-            gen_types: Predicted type logits for each atom.
-            pos_list: Optional position history when return_change_in_pos is True.
+            2-tuple (gen_pos, gen_types) when return_change_in_pos is False;
+            3-tuple (gen_pos, gen_types, pos_list) when return_change_in_pos is True,
+            where pos_list is a list of intermediate position tensors.
         """
 
         gen_feats = self.type_embedding(type_noise)

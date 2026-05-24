@@ -1,3 +1,5 @@
+"""Bond length tables, covalent radii, and valence constants for QM9 atom types."""
+
 # QM9 atom ordering matches EncodeAtomTypesTransform: {H, C, N, O, F}
 _ATOMIC_NUMS = [1, 6, 7, 8, 9]
 _ATOM_NAMES = ["H", "C", "N", "O", "F"]

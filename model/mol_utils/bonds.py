@@ -8,10 +8,18 @@ _RDKIT_BOND_TYPES = [None, BondType.SINGLE, BondType.DOUBLE, BondType.TRIPLE]
 
 
 def get_bond_order(atom1: str, atom2: str, distance: float) -> int:
-    """Return bond order (0=none, 1=single, 2=double, 3=triple).
+    """Return bond order between two atoms based on their distance.
 
     Ported directly from the EDM/E-NF reference implementation.
-    distance must be in Angstroms; it is converted to pm internally.
+    Distance must be in Angstroms; it is converted to pm internally.
+
+    Args:
+        atom1: Element symbol of the first atom (e.g. "C", "H").
+        atom2: Element symbol of the second atom.
+        distance: Interatomic distance in Angstroms.
+
+    Returns:
+        Bond order: 0 = no bond, 1 = single, 2 = double, 3 = triple.
     """
     dist_pm = distance * 100
     if atom1 not in _BONDS1 or atom2 not in _BONDS1[atom1]:

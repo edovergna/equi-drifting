@@ -47,7 +47,19 @@ def save_and_log_model(
 
 
 def _download_component(run, remote_name: str, local_path: Path) -> bool:
-    """Download a single component file. Returns False if not found (404), raises on other errors."""
+    """Download a single component file from a wandb run.
+
+    Args:
+        run: W&B run object to download from.
+        remote_name: Filename within the individual_components directory.
+        local_path: Local path to save the downloaded file.
+
+    Returns:
+        True if the file was downloaded successfully, False if not found (404).
+
+    Raises:
+        wandb.errors.CommError: If the download fails for reasons other than 404.
+    """
     try:
         run.file(f"individual_components/{remote_name}").download(
             root=str(local_path.parent), replace=True
