@@ -225,3 +225,6 @@ checkpoints/
 
 ls
 notebooks/aligned_temperature_results/*
+
+*.png 
+*.xyz
