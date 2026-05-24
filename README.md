@@ -1,4 +1,4 @@
-# Equivariant drifting for molecule generation
+# 3D Molecular Generation via Equivariant Drifting
 
 Code for the Equivariant Drifting project. The main model trains an EGNN-based
 molecule generator on QM9: it samples noisy 3D atom positions and atom types,
@@ -17,15 +17,6 @@ the point of the equivariant generation setup: the model should learn that a
 single QM9 molecule can appear in many valid rotations, and generated versions
 should match the reference molecule up to orientation rather than only in one
 fixed coordinate frame.
-
-## Team
-
-- Edoardo Vergnano
-- Orin Pechler
-- Daniel Otero Gómez
-- Olivier Stam
-- Kristian Elde Johansen
-- Daniel Sleiman
 
 ## Environment
 
