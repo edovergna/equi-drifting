@@ -57,12 +57,18 @@ Activate the environment:
 source .venv/bin/activate
 ```
 
-## Running Training
+## Running Scripts
 
-The main entry point is `train.py`. On the first run, the QM9 dataset is
-downloaded and processed under `data/QM9`.
+The main entry points are `train.py` and `test.py`.
+On the first run, the QM9 dataset is downloaded and processed under `data/QM9`.
 
-Start a training run using this command:
+### Training
+
+`train.py` trains the EGNN-based drifting generator on QM9, logs metrics and
+visualizations to Weights & Biases, and saves generator weights for later
+evaluation or molecule generation.
+
+Start a training run using:
 
 ```bash
 python train.py \
@@ -89,18 +95,49 @@ On a SLURM-managed GPU cluster, submit the provided job script:
 sbatch jobs/train.sh
 ```
 
-Useful related scripts:
+### Testing
+
+`test.py` loads a trained generator from a W&B run and evaluates generated
+molecules by atom count. It reports validity, uniqueness, atom stability,
+molecule stability, and related counts in a console table.
+
+Run it with the W&B run ID from the training run:
 
 ```bash
-# Hyperparameter sweep for the aligned loss experiments
-python experiments/aligned_loss_sweep.py --smoke
-
-# Geometry-only overfit diagnostic
-python experiments/single_molecule_geometry/train_single.py \
-  --root data/QM9 \
-  --output_dir outputs/single_molecule_geometry \
-  --steps 5000
+python test.py \
+  --wandb_run_id <run-id> \
+  --wandb_variant best \
+  --n_per_size 512 \
+  --batch_size 256
 ```
+
+Use `--wandb_variant final` to evaluate the final saved generator instead of
+the best validation checkpoint.
+
+### Visualizing Generated Molecules
+
+`visualize_gen_mol.py` loads a trained generator from W&B, generates molecules,
+keeps stable samples, and exports them as `.xyz` files and PNG previews. The
+`.xyz` files can be opened and visualized with Avogadro.
+
+Run it with:
+
+```bash
+python visualize_gen_mol.py \
+  --wandb_run_id <run-id> \
+  --wandb_variant best \
+  --output_dir outputs/generated_molecules \
+  --n_molecules 100 \
+  --num_atoms 3
+```
+
+The exported files are written under:
+
+- `outputs/generated_molecules/xyz/`: stable generated molecules as `.xyz`
+  files for Avogadro.
+- `outputs/generated_molecules/png/`: quick PNG previews of the same stable
+  molecules.
+
 
 ## Repository Structure
 
