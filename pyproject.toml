@@ -6,7 +6,7 @@ dependencies = [
     "black>=26.3.1",
     "tqdm>=4.67.3",
     "wandb>=0.26.0",
-    "torch==2.8.0",
+    "torch==2.9.0",
     "isort>=8.0.1",
     "numpy>=2.4.4",
     "torch-geometric>=2.7.0",
@@ -23,18 +23,19 @@ dependencies = [
     "rdkit>=2026.3.1",
     "pillow>=12.2.0",
     "ipykernel>=7.2.0",
+    "torch-linear-assignment>=0.0.6",
 ]
 
 [tool.uv]
 # Tells uv where to look for the specialized wheels
-find-links = ["https://data.pyg.org/whl/torch-2.8.0+cu126.html"]
+find-links = ["https://data.pyg.org/whl/torch-2.9.0+cu128.html"]
 
 # Prevents uv from trying to build these from source if it can't find a wheel
 no-build-package = ["pyg-lib", "torch-scatter", "torch-sparse", "torch-cluster", "torch-spline-conv"]
 
 [[tool.uv.index]]
 name = "pytorch"
-url = "https://download.pytorch.org/whl/cu126"
+url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
 [tool.uv.sources]

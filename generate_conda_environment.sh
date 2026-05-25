@@ -58,17 +58,17 @@ CONDA_YAML_PATH="$REPO_DIR/conda_environment.yaml"
   echo "  - python=$PY_VER"
   echo "  - pip"
   echo "  - pip:"
-  # ---- PyTorch (CUDA 12.6) ----
-  echo '    - "torch==2.8.0"'
-  echo '    - "--index-url=https://download.pytorch.org/whl/cu126"'
+  # ---- PyTorch (CUDA 12.8) ----
+  echo '    - "--index-url=https://download.pytorch.org/whl/cu128"'
   echo '    - "--extra-index-url=https://pypi.org/simple"'
-  # ---- PyG ecosystem (Torch 2.8, CUDA 12.6) ----
+  echo '    - "torch==2.9.0"'
+  # ---- PyG ecosystem (Torch 2.9, CUDA 12.8) ----
+  echo '    - "--find-links=https://data.pyg.org/whl/torch-2.9.0+cu128.html"'
   echo '    - "pyg-lib"'
   echo '    - "torch-scatter"'
   echo '    - "torch-sparse"'
   echo '    - "torch-cluster"'
   echo '    - "torch-spline-conv"'
-  echo '    - "--find-links=https://data.pyg.org/whl/torch-2.8.0+cu126.html"'
 
   if [ -z "$PIP_FREEZE" ]; then
     echo "    # no additional pip packages detected"
