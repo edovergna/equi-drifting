@@ -24,6 +24,9 @@ dependencies = [
     "pillow>=12.2.0",
     "ipykernel>=7.2.0",
     "torch-linear-assignment>=0.0.6",
+    "ninja>=1.13.0",
+    "setuptools>=82.0.1",
+    "wheel>=0.47.0",
 ]
 
 [tool.uv]
