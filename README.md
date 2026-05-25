@@ -1,22 +1,18 @@
 # 3D Molecular Generation via Equivariant Drifting
 
-Code for the Equivariant Drifting project. The main model trains an EGNN-based
-molecule generator on QM9: it samples noisy 3D atom positions and atom types,
-then learns to drift them toward realistic molecules using an aligned drifting objective, with optional chemical refinement losses.
+Code for our project on 3D Molecular Generation via Equivariant Drifting. The main model trains an EGNN-based molecule generator on QM9: it samples noisy 3D atom positions and atom types, then learns to drift them toward realistic molecules using an aligned drifting objective, with optional chemical refinement losses.
 
 <p align="center">
-  <img src="resources/h2o_0.png" alt="Molecule rotation 1" width="22%">
-  <img src="resources/h2o_1.png" alt="Molecule rotation 2" width="22%">
-  <img src="resources/h2o_2.png" alt="Molecule rotation 3" width="22%">
-  <img src="resources/h2o_3.png" alt="Molecule rotation 4" width="22%">
+  <img src="resources/real.png" alt="H2O in QM9" width="22%">
+  <img src="resources/gen_1.png" alt="Molecule rotation 1" width="22%">
+  <img src="resources/gen_3.png" alt="Molecule rotation 2" width="22%">
+  <img src="resources/gen_7.png" alt="Molecule rotation 3" width="22%">
+  <img src="resources/gen_11.png" alt="Molecule rotation 4" width="22%">
+  <img src="resources/gen_14.png" alt="Molecule rotation 5" width="22%">
 </p>
 
-The four images show the exact same molecule in different orientations. They
-look different in 3D space, but the molecular structure is unchanged. This is
-the point of the equivariant generation setup: the model should learn that a
-single QM9 molecule can appear in many valid rotations, and generated versions
-should match the reference molecule up to orientation rather than only in one
-fixed coordinate frame.
+The six images show the exact same molecule in different orientations. The most left is the real sample present in the QM9 dataset, while the other five are generated samples. They look different in 3D space, but the molecular structure is unchanged. This is
+the point of the equivariant generation setup: the model should learn that a single QM9 molecule can appear in many valid rotations, and generated versions should match the reference molecule up to orientation rather than only in one fixed coordinate frame.
 
 ## Environment
 
