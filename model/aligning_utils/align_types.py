@@ -20,13 +20,10 @@ def _hungarian_method_batched(
     """Find optimal atom permutations using the Hungarian (linear assignment) algorithm.
 
     Args:
-        gen_types: Generated atom type embeddings, either [N_gen, N_atoms, D] or [N_gen, N_real, N_atoms, D].
+        gen_types: Generated atom type embeddings  [N_gen, N_atoms, D].
         real_types: Real atom types [N_real, N_atoms, D].
-        gen_pos: Generated positions, either [N_gen, N_atoms, 3] or [N_gen, N_real, N_atoms, 3].
-        real_pos: Real positions [N_real, N_atoms, 3].
         eps: Small constant for numerical stability.
-        t_weight: Weight for type distance in cost matrix.
-        p_weight: Weight for position distance in cost matrix.
+        weight: Weight for type distance in cost matrix.
 
     Returns:
         Assignment tensor [N_gen, N_real, N_atoms] where assignment[g, r, j] = i means
@@ -192,8 +189,6 @@ def find_permutation(gen_types, real_types, cfg):
     N_gen = gen_types.shape[0]
     N_real = real_types.shape[0]
     N_atoms = gen_types.shape[1]
-
-    old_g_types = _to_pairwise(g_types, N_real)
 
     assignment = _hungarian_method_batched(
         g_types,
