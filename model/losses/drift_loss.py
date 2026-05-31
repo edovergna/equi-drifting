@@ -7,7 +7,7 @@ align generated molecules to real molecules on both Euclidean and spherical mani
 import torch
 import torch.nn.functional as F
 
-from .spherical_utils import (
+from ..spherical_utils import (
     product_tangent_norm,
     sphere_exp,
     geodesic_distance,
@@ -15,7 +15,7 @@ from .spherical_utils import (
     sphere_project_tangent,
     sphere_to_probs,
 )
-from .align import (
+from ..aligning_utils.align import (
     find_rotation_and_permutation,
     permute_generated_to_real_order,
     apply_pairwise_rotation,

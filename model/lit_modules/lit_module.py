@@ -13,15 +13,15 @@ import wandb
 from lightning.pytorch import LightningModule
 from torch.optim.lr_scheduler import OneCycleLR
 
-from .drift_loss import (
+from ..losses.drift_loss import (
     TrainingDivergedException,
     compute_drift_loss
 )
-from .egnn import EGNN
-from .geometry import center_positions_per_graph, per_graph_center_norms
-from .sample_prior import compute_size_distribution, sample_prior_batch
+from ..egnn import EGNN
+from ..geometry import center_positions_per_graph, per_graph_center_norms
+from ..sample_prior import compute_size_distribution, sample_prior_batch
 
-from .spherical_utils import (probs_to_sphere, sphere_to_probs)
+from ..spherical_utils import (probs_to_sphere, sphere_to_probs)
 
 
 class MoleculeGenerator(LightningModule):

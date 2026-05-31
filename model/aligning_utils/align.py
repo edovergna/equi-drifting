@@ -8,7 +8,7 @@ registration and Hungarian algorithm for atom matching.
 # Adding Kabsch algorithm and Hungarian method
 import torch
 from torch_linear_assignment import batch_linear_assignment
-from .spherical_utils import sphere_normalize
+from ..spherical_utils import sphere_normalize
 from contextlib import nullcontext
 
 
