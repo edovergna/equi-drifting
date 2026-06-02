@@ -5,7 +5,7 @@
 #SBATCH --job-name=pos_cond
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
-#SBATCH --time=30:00:00
+#SBATCH --time=04:00:00
 #SBATCH --output=slurm_output_%A.out
 
 module purge
@@ -16,11 +16,16 @@ conda activate equi
 
 cd "$HOME/drifting-experiments"
 
+# Baseline on 3-atom molecules (HCN/H2O), no chem refinement.
+# Goal: confirm drift loss produces high validity + stability
+# before scaling up or enabling chem refinement.
 python train_conditional.py \
+  --min_num_atoms 3 \
+  --max_num_atoms 3 \
   --n_real_molecules 128 \
   --n_gen_molecules 128 \
-  --num_workers 8 \
-  --max_epochs 500 \
+  --num_workers 4 \
+  --max_epochs 1000 \
   --hidden_dim 256 \
   --num_layers 9 \
   --lr 2e-4 \
@@ -28,5 +33,6 @@ python train_conditional.py \
   --position_sigma 5.0 \
   --position_eta 0.4 \
   --position_weight 0.5 \
-  --check_val_every_n_epoch 5 \
-  --group_tag "conditional_full"
+  --types_weight 1.0 \
+  --check_val_every_n_epoch 25 \
+  --group_tag "conditional_h2o"

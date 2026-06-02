@@ -18,6 +18,7 @@ from .drift_loss_conditional import (
 )
 from .egnn_conditional import ConditionalEGNN
 from .geometry import center_positions_per_graph, per_graph_center_norms
+from .sample_prior import get_dense_edge_index
 
 
 class ConditionalMoleculeGenerator(LightningModule):
@@ -72,6 +73,7 @@ class ConditionalMoleculeGenerator(LightningModule):
             "p_tol": 1e-4,
             "p_weight": 1.0,
             "t_weight": 1.0,
+            "n_gen_molecules": 64,
             "pct_start": 0.1,
             "div_factor": 25.0,
             "final_div_factor": 1e4,
@@ -100,6 +102,7 @@ class ConditionalMoleculeGenerator(LightningModule):
         )
 
         self.eps = self.drift_cfg.get("eps", 1e-8)
+        self.n_gen_molecules = self.drift_cfg.get("n_gen_molecules", 64)
         self.chem_refinement = self.drift_cfg.get("chem_refinement", False)
         self.max_epochs = self.drift_cfg.get("max_epochs", 500)
         self.start_frac_epoch = self.drift_cfg.get("start_frac_epoch", 0.8)
@@ -129,11 +132,13 @@ class ConditionalMoleculeGenerator(LightningModule):
     # Forward pass
     # ------------------------------------------------------------------
 
-    def _forward(self, batch) -> tuple[torch.Tensor, torch.Tensor]:
-        """Run one conditional forward pass.
+    def _forward(self, batch) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Run one conditional forward pass with n_gen_molecules independent samples.
 
-        Samples Gaussian position noise, conditions the EGNN on real atom
-        types, and returns centered generated positions.
+        Randomly draws n_gen_molecules atom-type templates from the batch, samples
+        fresh Gaussian position noise for each, and returns centered generated positions.
+        Using more gen molecules than the real batch size gives a much better
+        drift estimate (same reason the joint model uses n_gen=128 >> n_real).
 
         Args:
             batch: PyTorch Geometric Data batch with attributes:
@@ -141,20 +146,40 @@ class ConditionalMoleculeGenerator(LightningModule):
                 dense_edge_index [2, E], batch [N_total].
 
         Returns:
-            Tuple of (gen_pos [N_total, 3], batch_vec [N_total]).
+            Tuple of (gen_pos [N_gen*num_atoms, 3],
+                      gen_batch_vec [N_gen*num_atoms],
+                      gen_types [N_gen*num_atoms, num_atom_types]).
         """
-        real_types = batch.real_atom_types.float()  # [N_total, num_atom_types]
-        batch_vec = batch.batch
-        edge_index = batch.dense_edge_index
+        num_atoms = self._batch_num_atoms(batch)
+        batch_size = int(batch.batch.max().item()) + 1
+        real_types_flat = batch.real_atom_types.float()  # [batch_size*num_atoms, 5]
 
-        # Sample position noise only; atom types are given, not sampled.
-        pos_noisy = torch.randn_like(batch.pos)
-        pos_noisy = center_positions_per_graph(pos_noisy, batch_vec)
+        # Randomly pick which real molecule's types to condition each gen molecule on.
+        mol_idx = torch.randint(0, batch_size, (self.n_gen_molecules,), device=self.device)
 
-        gen_pos = self.generator(pos_noisy, real_types, edge_index)
-        gen_pos = center_positions_per_graph(gen_pos, batch_vec)
+        # Gather types: reshape to [batch_size, num_atoms, 5], index, then flatten.
+        real_types_by_mol = real_types_flat.reshape(batch_size, num_atoms, -1)
+        gen_types = real_types_by_mol[mol_idx].reshape(self.n_gen_molecules * num_atoms, -1)
 
-        return gen_pos, batch_vec
+        # Build batch vector and fully-connected edge index for n_gen_molecules graphs.
+        gen_batch_vec = torch.repeat_interleave(
+            torch.arange(self.n_gen_molecules, device=self.device),
+            num_atoms,
+        )
+        parts, offset = [], 0
+        for _ in range(self.n_gen_molecules):
+            parts.append(get_dense_edge_index(num_atoms, self.device) + offset)
+            offset += num_atoms
+        gen_edge_index = torch.cat(parts, dim=1)
+
+        # Sample position noise only; types are given.
+        pos_noisy = torch.randn(self.n_gen_molecules * num_atoms, 3, device=self.device)
+        pos_noisy = center_positions_per_graph(pos_noisy, gen_batch_vec)
+
+        gen_pos = self.generator(pos_noisy, gen_types, gen_edge_index)
+        gen_pos = center_positions_per_graph(gen_pos, gen_batch_vec)
+
+        return gen_pos, gen_batch_vec, gen_types
 
     # ------------------------------------------------------------------
     # Epoch hooks
@@ -187,15 +212,16 @@ class ConditionalMoleculeGenerator(LightningModule):
             Scalar loss tensor.
         """
         num_atoms = self._batch_num_atoms(batch)
-        gen_pos, gen_batch_vec = self._forward(batch)
+        gen_pos, gen_batch_vec, gen_types = self._forward(batch)
         real_pos = batch.pos
-        atom_types = batch.real_atom_types
+        real_types = batch.real_atom_types
 
         try:
             loss, stats = compute_conditional_drift_loss(
                 gen_pos,
                 real_pos,
-                atom_types,
+                gen_types,
+                real_types,
                 num_atoms,
                 chem_refinement=self._use_chem_refinement(),
                 cfg=self.drift_cfg,
@@ -251,14 +277,15 @@ class ConditionalMoleculeGenerator(LightningModule):
             Dict with pos_gen, gen_atom_types, gen_batch_vec, etc.
         """
         num_atoms = self._batch_num_atoms(batch)
-        gen_pos, gen_batch_vec = self._forward(batch)
+        gen_pos, gen_batch_vec, gen_types = self._forward(batch)
         real_pos = batch.pos
-        atom_types = batch.real_atom_types
+        real_types = batch.real_atom_types
 
         val_loss, stats = compute_conditional_drift_loss(
             gen_pos,
             real_pos,
-            atom_types,
+            gen_types,
+            real_types,
             num_atoms,
             chem_refinement=self._use_chem_refinement(),
             cfg=self.drift_cfg,
@@ -306,10 +333,9 @@ class ConditionalMoleculeGenerator(LightningModule):
 
         return {
             "pos_gen": gen_pos.detach().cpu(),
-            # atom types are fixed (not predicted) — use real types for validity check.
-            "gen_atom_types": atom_types.argmax(dim=-1).detach().cpu(),
+            "gen_atom_types": gen_types.argmax(dim=-1).detach().cpu(),
             "pos_real": real_pos.detach().cpu(),
-            "real_atom_types": atom_types.detach().cpu(),
+            "real_atom_types": real_types.detach().cpu(),
             "gen_batch_vec": gen_batch_vec.detach().cpu(),
             "batch_vec": batch.batch.detach().cpu(),
         }
@@ -325,14 +351,15 @@ class ConditionalMoleculeGenerator(LightningModule):
             Scalar test loss.
         """
         num_atoms = self._batch_num_atoms(batch)
-        gen_pos, gen_batch_vec = self._forward(batch)
+        gen_pos, gen_batch_vec, gen_types = self._forward(batch)
         real_pos = batch.pos
-        atom_types = batch.real_atom_types
+        real_types = batch.real_atom_types
 
         test_loss, _ = compute_conditional_drift_loss(
             gen_pos,
             real_pos,
-            atom_types,
+            gen_types,
+            real_types,
             num_atoms,
             chem_refinement=False,
             cfg=self.drift_cfg,

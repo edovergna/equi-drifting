@@ -1,0 +1,26 @@
+name: equi-cpu
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - rdkit
+  - pip
+  - pip:
+    - "--index-url=https://download.pytorch.org/whl/cpu"
+    - "--extra-index-url=https://pypi.org/simple"
+    - "torch==2.6.0"
+    - "--find-links=https://data.pyg.org/whl/torch-2.6.0+cpu.html"
+    - "torch-scatter"
+    - "torch-sparse"
+    - "torch-cluster"
+    - "torch-spline-conv"
+    - "torch-geometric==2.7.0"
+    - "torch-linear-assignment"
+    - "lightning==2.6.4"
+    - "pytorch-lightning==2.6.4"
+    - "wandb"
+    - "numpy"
+    - "scipy"
+    - "matplotlib"
+    - "tqdm"
+    - "pyyaml"

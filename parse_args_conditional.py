@@ -30,6 +30,11 @@ def parse_args_conditional():
         "--n_real_molecules", type=int, default=64,
         help="Batch size (number of real molecules per step).",
     )
+    parser.add_argument(
+        "--n_gen_molecules", type=int, default=64,
+        help="Number of conditional molecules generated per training step. "
+        "Should be >= n_real_molecules for good drift statistics.",
+    )
     parser.add_argument("--num_workers", type=int, default=2)
 
     # --------------------------

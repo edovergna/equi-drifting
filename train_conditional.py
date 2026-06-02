@@ -91,7 +91,7 @@ def main(args):
 
     run = wandb.init(
         entity="equivariant-drifting",
-        project="conditional-drifting",
+        project="pos_dutch_daniel",
         group=args.group_tag,
         mode="offline" if args.offline else "online",
         config=vars(args),
@@ -120,6 +120,7 @@ def main(args):
             "p_tol": args.position_tol,
             "p_weight": args.position_weight,
             "t_weight": args.types_weight,
+            "n_gen_molecules": args.n_gen_molecules,
             "num_atom_types": args.num_atom_types,
             "pct_start": args.pct_start,
             "div_factor": args.div_factor,

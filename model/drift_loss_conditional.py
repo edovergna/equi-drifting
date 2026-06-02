@@ -26,7 +26,8 @@ from .spherical_utils import probs_to_sphere
 def compute_conditional_drift_loss(
     gen_pos: torch.Tensor,
     real_pos: torch.Tensor,
-    atom_types: torch.Tensor,
+    gen_types: torch.Tensor,
+    real_types: torch.Tensor,
     num_atoms: int,
     chem_refinement: bool,
     cfg: dict,
@@ -43,10 +44,10 @@ def compute_conditional_drift_loss(
     alignment to handle rotational and permutation symmetries.
 
     Args:
-        gen_pos: Generated positions [N_total, 3] or [B, N, 3].
-        real_pos: Target QM9 positions, same shape as gen_pos.
-        atom_types: Fixed one-hot atom types [N_total, num_types] or [B, N, num_types].
-            These are the SAME for generated and real molecules (conditional setting).
+        gen_pos: Generated positions [N_gen_total, 3].
+        real_pos: Target QM9 positions [N_real_total, 3].
+        gen_types: One-hot atom types for generated molecules [N_gen_total, num_types].
+        real_types: One-hot atom types for real molecules [N_real_total, num_types].
         num_atoms: Number of atoms per molecule (all molecules in a batch share this).
         chem_refinement: Whether to add a chemical validity penalty term.
         cfg: Hyperparameter dict. Required keys:
@@ -67,25 +68,25 @@ def compute_conditional_drift_loss(
     # Reshape to [B, N, D] for pairwise drift computation.
     gen_pos = gen_pos.reshape(-1, num_atoms, 3)
     real_pos = real_pos.reshape(-1, num_atoms, 3)
-    atom_types = atom_types.reshape(-1, num_atoms, atom_types.shape[-1]).float()
+    gen_types = gen_types.reshape(-1, num_atoms, gen_types.shape[-1]).float()
+    real_types = real_types.reshape(-1, num_atoms, real_types.shape[-1]).float()
 
     N_gen = gen_pos.shape[0]
     N_atoms = gen_pos.shape[1]
     sqrt_N_a = N_atoms ** 0.5
 
     # Project one-hot types to sphere for use as matching cues in alignment.
-    # One-hot vertex i maps to sphere basis vector e_i (already unit length),
-    # so same-type atoms have zero angular cost and different types have π/2.
-    types_sphere = probs_to_sphere(atom_types, eps)
+    gen_types_sphere = probs_to_sphere(gen_types, eps)
+    real_types_sphere = probs_to_sphere(real_types, eps)
 
     with torch.no_grad():
         # --- Positive alignment: each gen molecule → all real molecules ---
         permutation_pos, R_pos, _, _ = find_rotation_and_permutation(
-            gen_pos, real_pos, types_sphere, types_sphere, cfg
+            gen_pos, real_pos, gen_types_sphere, real_types_sphere, cfg
         )
         # --- Negative alignment: each gen molecule → all other gen molecules ---
         permutation_neg, R_neg, _, _ = find_rotation_and_permutation(
-            gen_pos, gen_pos, types_sphere, types_sphere, cfg
+            gen_pos, gen_pos, gen_types_sphere, gen_types_sphere, cfg
         )
 
         aligned_posit_pos = permute_generated_to_real_order(gen_pos, permutation_pos)
@@ -137,8 +138,7 @@ def compute_conditional_drift_loss(
     loss = (scale_eucl * molecule_position_dist).mean()
 
     if chem_refinement:
-        # atom_types is one-hot, which is already a valid probability simplex element.
-        chem_loss, chem_stats = compute_chem_loss(gen_pos, atom_types, cfg)
+        chem_loss, chem_stats = compute_chem_loss(gen_pos, gen_types, cfg)
         loss = loss + chem_loss
 
     if not torch.isfinite(loss):

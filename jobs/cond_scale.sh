@@ -16,7 +16,13 @@ conda activate equi
 
 cd "$HOME/drifting-experiments"
 
+# Scale run on 3-12 atoms, no chem refinement.
+# sigma=5 needed here: larger molecules start further from real
+# conformers under Gaussian noise, so the kernel must be wide enough
+# to provide a gradient signal at the start of training.
 python train_conditional.py \
+  --min_num_atoms 3 \
+  --max_num_atoms 12 \
   --n_real_molecules 128 \
   --n_gen_molecules 128 \
   --num_workers 8 \
@@ -28,5 +34,6 @@ python train_conditional.py \
   --position_sigma 5.0 \
   --position_eta 0.4 \
   --position_weight 0.5 \
+  --types_weight 1.0 \
   --check_val_every_n_epoch 5 \
-  --group_tag "conditional_full"
+  --group_tag "conditional_scale"
