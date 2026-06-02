@@ -42,6 +42,7 @@ from model import (
     QM9DataModule,
     initialize_training_config,
 )
+from model.callbacks.chemical_validity_per_size import AtomSizeValidityCallback
 from model.lit_module_conditional import ConditionalMoleculeGenerator
 from parse_args_conditional import parse_args_conditional
 
@@ -143,6 +144,7 @@ def main(args):
         callbacks = [
             GradientMonitorCallback(),
             ChemicalValidityCallback(),
+            AtomSizeValidityCallback(),
             gen_ckpt,
         ]
 

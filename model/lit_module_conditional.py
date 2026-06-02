@@ -338,6 +338,7 @@ class ConditionalMoleculeGenerator(LightningModule):
             "real_atom_types": real_types.detach().cpu(),
             "gen_batch_vec": gen_batch_vec.detach().cpu(),
             "batch_vec": batch.batch.detach().cpu(),
+            "num_atoms": num_atoms,
         }
 
     def test_step(self, batch, batch_idx):

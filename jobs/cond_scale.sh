@@ -26,7 +26,7 @@ python train_conditional.py \
   --n_real_molecules 128 \
   --n_gen_molecules 128 \
   --num_workers 8 \
-  --max_epochs 500 \
+  --max_epochs 100 \
   --hidden_dim 256 \
   --num_layers 9 \
   --lr 2e-4 \
