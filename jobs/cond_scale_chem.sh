@@ -27,7 +27,7 @@ python train_conditional.py \
   --n_real_molecules 128 \
   --n_gen_molecules 128 \
   --num_workers 8 \
-  --max_epochs 500 \
+  --max_epochs 200 \
   --hidden_dim 256 \
   --num_layers 9 \
   --lr 2e-4 \
@@ -37,11 +37,11 @@ python train_conditional.py \
   --position_weight 0.5 \
   --types_weight 1.0 \
   --chem_refinement \
+  --start_frac_epoch 0.25 \
   --clash_threshold 0.5 \
   --lambda_clash 1.0 \
   --lambda_valence_excess 1.0 \
   --lambda_hydrogen_valence 1.0 \
   --bond_temperature 0.1 \
-  --start_frac_epoch 0.8 \
   --check_val_every_n_epoch 5 \
   --group_tag "conditional_scale_chem"
