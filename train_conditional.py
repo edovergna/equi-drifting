@@ -135,6 +135,7 @@ def main(args):
             "clash_threshold": args.clash_threshold,
             "bond_temperature": args.bond_temperature,
             "end_sigma": args.end_sigma,
+            "dynamic_sigma": args.dynamic_sigma,
         }
 
         model = ConditionalMoleculeGenerator(generator_cfg, drift_cfg)

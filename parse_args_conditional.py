@@ -92,7 +92,12 @@ def parse_args_conditional():
     # --------------------------
     parser.add_argument(
         "--position_sigma", type=float, default=1.0,
-        help="Kernel bandwidth for position drift.",
+        help="Kernel bandwidth for position drift (ignored when --dynamic_sigma is set).",
+    )
+    parser.add_argument(
+        "--dynamic_sigma", action="store_true",
+        help="Set sigma = num_atoms - 1 per batch, tuning the kernel bandwidth "
+        "to molecule size automatically.",
     )
     parser.add_argument(
         "--end_sigma", type=float, default=None,

@@ -106,6 +106,7 @@ class ConditionalMoleculeGenerator(LightningModule):
         self.chem_refinement = self.drift_cfg.get("chem_refinement", False)
         self.max_epochs = self.drift_cfg.get("max_epochs", 500)
         self.start_frac_epoch = self.drift_cfg.get("start_frac_epoch", 0.8)
+        self.dynamic_sigma = self.drift_cfg.get("dynamic_sigma", False)
 
         if self.drift_cfg.get("end_sigma") is not None:
             self.end_sigma = self.drift_cfg["end_sigma"]
@@ -127,6 +128,10 @@ class ConditionalMoleculeGenerator(LightningModule):
             self.chem_refinement
             and self.current_epoch > self.start_frac_epoch * self.max_epochs
         )
+
+    def _apply_dynamic_sigma(self, num_atoms: int) -> None:
+        if self.dynamic_sigma:
+            self.drift_cfg["p_sigma"] = max(0.5, float(num_atoms - 1))
 
     # ------------------------------------------------------------------
     # Forward pass
@@ -212,6 +217,7 @@ class ConditionalMoleculeGenerator(LightningModule):
             Scalar loss tensor.
         """
         num_atoms = self._batch_num_atoms(batch)
+        self._apply_dynamic_sigma(num_atoms)
         gen_pos, gen_batch_vec, gen_types = self._forward(batch)
         real_pos = batch.pos
         real_types = batch.real_atom_types
@@ -246,6 +252,8 @@ class ConditionalMoleculeGenerator(LightningModule):
             on_step=True,
             on_epoch=False,
         )
+        if self.dynamic_sigma:
+            self.log("drift/p_sigma", self.drift_cfg["p_sigma"], on_step=True, on_epoch=False)
 
         with torch.no_grad():
             pos_norms = gen_pos.norm(dim=-1)
@@ -277,6 +285,7 @@ class ConditionalMoleculeGenerator(LightningModule):
             Dict with pos_gen, gen_atom_types, gen_batch_vec, etc.
         """
         num_atoms = self._batch_num_atoms(batch)
+        self._apply_dynamic_sigma(num_atoms)
         gen_pos, gen_batch_vec, gen_types = self._forward(batch)
         real_pos = batch.pos
         real_types = batch.real_atom_types

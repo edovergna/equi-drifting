@@ -35,5 +35,6 @@ python train_conditional.py \
   --position_eta 0.4 \
   --position_weight 0.5 \
   --types_weight 1.0 \
+  --dynamic_sigma \
   --check_val_every_n_epoch 5 \
-  --group_tag "conditional_scale"
+  --group_tag "conditional_scale_dynsigma"
