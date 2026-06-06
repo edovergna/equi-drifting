@@ -54,8 +54,7 @@ def compute_types_drift_loss(
     real_types = real_types.float()
 
     eps = cfg["eps"]
-    eta = cfg["t_eta"]
-    scale = cfg["scale_spher"]
+    eta = cfg["eta"]
 
     # Reshape for loss
     gen_types_sphere = gen_types_sphere.reshape(-1, num_atoms, cfg["num_atom_types"])
@@ -101,14 +100,14 @@ def compute_types_drift_loss(
             types_dist_pos,
             types_diff_pos,
             permutation_pos,
-            sigma=cfg["t_sigma"],
+            sigma=cfg["sigma"],
             eps=eps,
         )
         V_types_neg = _calc_drift_direction(
             types_dist_neg,
             types_diff_neg,
             permutation_neg,
-            sigma=cfg["t_sigma"],
+            sigma=cfg["sigma"],
             eps=eps,
         )
 
@@ -127,7 +126,7 @@ def compute_types_drift_loss(
     )  # shape: [N_gen]
 
     loss = (
-        scale * molecule_types_dist
+        molecule_types_dist
     ).mean()
 
     if not torch.isfinite(loss):

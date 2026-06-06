@@ -120,49 +120,29 @@ def parse_args():
     )
 
     # -----------------------
+    # Transformer Args
+    # -----------------------
+
+    # -----------------------
     # Drift Loss Args
     # -----------------------
     parser.add_argument(
-        "--position_sigma",
+        "--sigma",
         type=float,
         default=1.0,
-        help="Sigma value for the drifting field of positions.",
-    )
-    parser.add_argument(
-        "--types_sigma",
-        type=float,
-        default=1.0,
-        help="Sigma value for the drifting field of types."
+        help="Sigma value for the drifting field.",
     )
     parser.add_argument(
         "--end_sigma",
         type=float,
         default=None,
-        help="If set, then sigma values will be annealed to the specified end value using cosine annealing."
+        help="If set, then sigma value will be annealed to the specified end value using cosine annealing."
     )
     parser.add_argument(
-        "--position_eta",
+        "--eta",
         type=float,
         default=1.0,
-        help="Step-size for the drifting field of positions."
-    )
-    parser.add_argument(
-        "--types_eta",
-        type=float,
-        default=1.0,
-        help="Step-size for the drifting field of types."
-    )
-    parser.add_argument(
-        "--scale_euclidean",
-        type=float,
-        default=1.0,
-        help="Scale Euclidean loss within combined loss."
-    )
-    parser.add_argument(
-        "--scale_spherical",
-        type=float,
-        default=1.0,
-        help="Scale spherical loss within combined loss."
+        help="Step-size for the drifting field."
     )
     parser.add_argument(
         "--epsilon",
@@ -218,30 +198,32 @@ def parse_args():
     # --------------------
     # Aligning Args
     # --------------------
-    parser.add_argument(
-        "--max_iter",
-        type=int,
-        default=10,
-        help="Max number of iterations the alignment is ran for."
-    )
-    parser.add_argument(
-        "--position_tol",
-        type=float,
-        default=1e-4,
-        help="Distance tolerance for considering alignment to be converged"
-    )
-    parser.add_argument(
-        "--position_weight",
-        type=float,
-        default=1.0,
-        help="Weight of positional cost in cost matrix for the Hungarian method."
-    )
-    parser.add_argument(
-        "--types_weight",
-        type=float,
-        default=1.0,
-        help="Weight of types cost in cost matrix for the Hungarian method."
-    )
+
+    # Most likely can all be removed
+    # parser.add_argument(
+    #     "--max_iter",
+    #     type=int,
+    #     default=10,
+    #     help="Max number of iterations the alignment is ran for."
+    # )
+    # parser.add_argument(
+    #     "--position_tol",
+    #     type=float,
+    #     default=1e-4,
+    #     help="Distance tolerance for considering alignment to be converged"
+    # )
+    # parser.add_argument(
+    #     "--position_weight",
+    #     type=float,
+    #     default=1.0,
+    #     help="Weight of positional cost in cost matrix for the Hungarian method."
+    # )
+    # parser.add_argument(
+    #     "--types_weight",
+    #     type=float,
+    #     default=1.0,
+    #     help="Weight of types cost in cost matrix for the Hungarian method."
+    # )
 
     # --------------------
     # Wandb Args
