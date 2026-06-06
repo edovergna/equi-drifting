@@ -10,12 +10,11 @@ from torch_linear_assignment import batch_linear_assignment
 from ..spherical_utils import sphere_normalize
 from contextlib import nullcontext
 
-
-def _hungarian_method_batched(
+@torch.no_grad()
+def hungarian_method_batched(
     gen_types,
     real_types,
     eps,
-    weight=1.0,
 ):
     """Find optimal atom permutations using the Hungarian (linear assignment) algorithm.
 
@@ -33,7 +32,6 @@ def _hungarian_method_batched(
         gen_types=gen_types,
         real_types=real_types,
         eps=eps,
-        weight=weight,
     )
 
     N_gen = cost_matrix.shape[0]
@@ -54,20 +52,19 @@ def _build_cost_matrix(
     gen_types,
     real_types,
     eps,
-    weight=1.0,
 ):
     """Build cost matrix for Hungarian algorithm based on type differences.
 
     Cost combines spherical distance on atom type embeddings, weighted by weight.
 
     cost[g, r, j_real, i_gen] =
-        type_weight * spherical_distance(type_real_j, type_gen_i)^2
+        spherical_distance(type_real_j, type_gen_i)^2
 
     Args:
         gen_types: Generated types [N_gen, N_atoms, D] or [N_gen, N_real, N_atoms, D].
         real_types: Real types [N_real, N_atoms, D].
         eps: Numerical stability constant.
-        weight: Weight for type cost.
+
 
     Returns:
         Cost matrix [N_gen, N_real, N_atoms, N_atoms_gen] for assignment.
@@ -92,7 +89,7 @@ def _build_cost_matrix(
     type_dist = torch.acos(dot)
     type_cost = type_dist.pow(2)
 
-    cost_matrix = weight * type_cost
+    cost_matrix = type_cost
 
     return cost_matrix
 
@@ -161,40 +158,3 @@ def unpermute_real_order_to_gen_order(x_perm, assignment):
     x.scatter_(dim=2, index=idx, src=x_perm)
 
     return x
-
-
-@torch.no_grad()
-def find_permutation(gen_types, real_types, cfg):
-    """Iteratively find optimal rotation and atom permutation via Kabsch + Hungarian.
-
-    Alternates between finding optimal atom assignment via Hungarian algorithm and
-    optimal rotation via Kabsch algorithm until convergence (position tolerance).
-
-    Args:
-        gen_pos: Generated positions [N_gen, N_atoms, 3].
-        real_pos: Real positions [N_real, N_atoms, 3].
-        gen_types: Generated atom types [N_gen, N_atoms, D].
-        real_types: Real atom types [N_real, N_atoms, D].
-        cfg: Config dict with eps, max_iter, p_tol, p_weight, t_weight.
-
-    Returns:
-        Tuple of (assignment, total_R, final_pos, final_types).
-    """
-
-    eps = cfg["eps"]
-    weight = cfg["t_weight"]
-
-    g_types = gen_types.clone()
-
-    N_gen = gen_types.shape[0]
-    N_real = real_types.shape[0]
-    N_atoms = gen_types.shape[1]
-
-    assignment = _hungarian_method_batched(
-        g_types,
-        real_types,
-        eps=eps,
-        weight=weight,
-    )
-
-    return assignment

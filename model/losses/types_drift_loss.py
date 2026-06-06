@@ -16,7 +16,7 @@ from ..spherical_utils import (
 )
 
 from ..aligning_utils.align_types import (
-    find_permutation,
+    hungarian_method_batched,
     permute_generated_to_real_order,
     unpermute_real_order_to_gen_order,
 )
@@ -67,10 +67,10 @@ def compute_types_drift_loss(
     sqrt_N_a = N_atoms**0.5
 
     with torch.no_grad():
-        permutation_pos = find_permutation(
+        permutation_pos = hungarian_method_batched(
             gen_types_sphere, real_types, cfg
         )
-        permutation_neg = find_permutation(
+        permutation_neg = hungarian_method_batched(
             gen_types_sphere, gen_types_sphere, cfg
         )
 

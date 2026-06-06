@@ -1,6 +1,6 @@
 """PyTorch Lightning module for molecular generation using drift-based training.
 
-This module implements MoleculeGenerator, a LightningModule that combines an EGNN
+This module implements MoleculeGenerator, a LightningModule that combines a Transformer
 architecture with drift loss for generative modeling types.
 """
 
@@ -17,8 +17,7 @@ from ..losses.types_drift_loss import (
     TrainingDivergedException,
     compute_types_drift_loss
 )
-from ..egnn import EGNN
-from ..geometry import center_positions_per_graph, per_graph_center_norms
+from ..transformer import Transformer
 from ..sample_prior import compute_size_distribution, sample_prior_batch
 
 from ..spherical_utils import (probs_to_sphere, sphere_to_probs)
@@ -27,8 +26,8 @@ from ..spherical_utils import (probs_to_sphere, sphere_to_probs)
 class TypesGenerator(LightningModule):
     """PyTorch Lightning module for training and inference of molecule generators.
 
-    Uses an EGNN backbone with drift loss to learn the distribution over molecular
-    geometries and atom types.
+    Uses a Transformer backbone with drift loss to learn the distribution over molecular
+    atom types.
     """
     _SAVE_COMPONENTS = ["generator"]
     _LOAD_COMPONENTS = ["generator"]

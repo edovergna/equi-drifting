@@ -122,6 +122,30 @@ def parse_args():
     # -----------------------
     # Transformer Args
     # -----------------------
+    parser.add_argument(
+        "--embedding_dim",
+        type=int,
+        default=128,
+        help="Hidden dimension for transformer."
+    )
+    parser.add_argument(
+        "--num_heads",
+        type=int,
+        default=8,
+        help="Number of heads for transformer."
+    )
+    parser.add_argument(
+        "--num_layers",
+        type=int,
+        default=6,
+        help="Number of transformer layers."
+    )
+    parser.add_argument(
+        "--dropout",
+        type=float,
+        default=0.1,
+        help="Dropout applied to transformer"
+    )
 
     # -----------------------
     # Drift Loss Args
