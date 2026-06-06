@@ -40,8 +40,8 @@ def parse_args():
     parser.add_argument(
         "--max_num_atoms",
         type=int,
-        default=None,
-        help="Keep only molecules with at most this many atoms (inclusive). None means no filter.",
+        default=29,
+        help="Keep only molecules with at most this many atoms (inclusive). 29 means no filter for QM9.",
     )
     parser.add_argument(
         "--seed", type=int, default=42, help="Random seed for reproducibility."
