@@ -163,33 +163,34 @@ class Transformer(nn.Module):
         output = self.final_linear(output)
         return output
     
-    def make_noise_mask(self, max_num_atoms, num_atoms, batch_size=None):
-        """
-        Create a boolean mask of shape `[batch_size, max_num_atoms]` where the first
-        `num_atoms` positions are True for every batch element.
 
-        Args:
-            max_num_atoms (int): maximum number of atoms (S).
-            num_atoms (int): number of valid atoms per example in the batch.
-            batch_size (int, optional): batch size B. Required.
+def make_noise_mask(max_num_atoms, num_atoms, batch_size=None):
+    """
+    Create a boolean mask of shape `[batch_size, max_num_atoms]` where the first
+    `num_atoms` positions are True for every batch element.
 
-        Returns:
-            torch.BoolTensor: mask of shape `[B, S]` with True for valid positions.
-        """
-        if batch_size is None:
-            raise ValueError("batch_size must be provided")
+    Args:
+        max_num_atoms (int): maximum number of atoms (S).
+        num_atoms (int): number of valid atoms per example in the batch.
+        batch_size (int, optional): batch size B. Required.
 
-        # allow 0-dim tensors for ints
-        if torch.is_tensor(max_num_atoms) and max_num_atoms.dim() == 0:
-            max_num_atoms = int(max_num_atoms.item())
-        if torch.is_tensor(num_atoms) and num_atoms.dim() == 0:
-            num_atoms = int(num_atoms.item())
+    Returns:
+        torch.BoolTensor: mask of shape `[B, S]` with True for valid positions.
+    """
+    if batch_size is None:
+        raise ValueError("batch_size must be provided")
 
-        if not isinstance(max_num_atoms, int) or not isinstance(num_atoms, int):
-            raise ValueError("max_num_atoms and num_atoms must be ints")
+    # allow 0-dim tensors for ints
+    if torch.is_tensor(max_num_atoms) and max_num_atoms.dim() == 0:
+        max_num_atoms = int(max_num_atoms.item())
+    if torch.is_tensor(num_atoms) and num_atoms.dim() == 0:
+        num_atoms = int(num_atoms.item())
 
-        if num_atoms < 0 or num_atoms > max_num_atoms:
-            raise ValueError(f"num_atoms must be in [0, {max_num_atoms}], got {num_atoms}")
-        idx = torch.arange(max_num_atoms)
-        mask = (idx.unsqueeze(0) < num_atoms).expand(batch_size, max_num_atoms).to(torch.bool)
-        return mask
+    if not isinstance(max_num_atoms, int) or not isinstance(num_atoms, int):
+        raise ValueError("max_num_atoms and num_atoms must be ints")
+
+    if num_atoms < 0 or num_atoms > max_num_atoms:
+        raise ValueError(f"num_atoms must be in [0, {max_num_atoms}], got {num_atoms}")
+    idx = torch.arange(max_num_atoms)
+    mask = (idx.unsqueeze(0) < num_atoms).expand(batch_size, max_num_atoms).to(torch.bool)
+    return mask
