@@ -68,10 +68,10 @@ def compute_types_drift_loss(
 
     with torch.no_grad():
         permutation_pos = hungarian_method_batched(
-            gen_types_sphere, real_types, cfg
+            gen_types_sphere, real_types, eps
         )
         permutation_neg = hungarian_method_batched(
-            gen_types_sphere, gen_types_sphere, cfg
+            gen_types_sphere, gen_types_sphere, eps
         )
 
         aligned_types_pos = permute_generated_to_real_order(

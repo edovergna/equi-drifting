@@ -10,5 +10,6 @@ from .callbacks import (AtomTypeDistributionCallback, ChemicalValidityCallback,
                         SizeDistributionCallback)
 from .datamodule import QM9DataModule
 from .lit_modules.lit_module import MoleculeGenerator
+from .lit_modules.types_lit_module import TypesGenerator
 from .train_utils import initialize_training_config
 

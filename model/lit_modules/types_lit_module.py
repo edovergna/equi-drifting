@@ -15,7 +15,7 @@ from torch.optim.lr_scheduler import OneCycleLR
 
 from ..losses.types_drift_loss import (
     TrainingDivergedException,
-    compute_types_drift_loss
+    compute_types_drift_loss,
 )
 from ..transformer import Transformer, make_noise_mask
 from ..sample_prior import compute_size_distribution
@@ -141,7 +141,7 @@ class TypesGenerator(LightningModule):
         return noise, noise_mask
 
     def _forward(self, batch, num_atoms):
-        """Shared forward pass: sample prior → EGNN → center positions → sphere embeddings.
+        """Shared forward pass: sample prior → Transformer → sphere embeddings.
 
         Args:
             batch: Unused; kept for a uniform training-step signature.

@@ -87,12 +87,12 @@ def parse_args():
         default=256,
         help="Hidden dimension for the EGNN model.",
     )
-    parser.add_argument(
-        "--num_layers",
-        type=int,
-        default=9,
-        help="Number of layers for the EGNN model.",
-    )
+    # parser.add_argument(
+    #     "--num_layers",
+    #     type=int,
+    #     default=9,
+    #     help="Number of layers for the EGNN model.",
+    # )
     parser.add_argument(
         "--aggr_type",
         type=str,
