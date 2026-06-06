@@ -81,6 +81,12 @@ class TypesGenerator(LightningModule):
         self.max_num_atoms = self.drift_cfg.get("max_num_atoms", 29)
         self.num_types = self.drift_cfg.get("num_atom_types", 5)
 
+        self._init_size_distribution()
+
+        if self.max_num_atoms is None:
+            # If max_num_atoms is not manually set, then get the max value from data
+            self.max_num_atoms = int(self._size_values.max().item())
+
         self.max_epochs = self.drift_cfg.get("max_epochs", 100)
 
         self.eps = self.drift_cfg.get("eps", 1e-8)
