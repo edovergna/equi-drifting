@@ -148,7 +148,7 @@ class TypesGenerator(LightningModule):
             num_atoms: Number of atoms per molecule.
 
         Returns:
-            Tuple of (gen_pos, gen_types_sphere, gen_batch_vec).
+            gen_types_sphere.
         """
         # Sample from the prior distribution
         noise, noise_mask = self._sample_prior_batch(num_atoms)
@@ -165,9 +165,7 @@ class TypesGenerator(LightningModule):
         # And project to the sphere
         gen_types_sphere = probs_to_sphere(gen_types_prob, self.eps)
 
-        return (
-            gen_types_sphere,
-        )
+        return gen_types_sphere
 
     def on_after_backward(self):
         """Log gradient-related metrics after backpropagation."""
