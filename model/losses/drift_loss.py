@@ -21,7 +21,7 @@ from ..aligning_utils.align import (
     apply_pairwise_rotation,
     unpermute_real_order_to_gen_order,
 )
-from .chem_loss import compute_chem_loss
+from ..chem_loss import compute_chem_loss
 
 
 class TrainingDivergedException(Exception):

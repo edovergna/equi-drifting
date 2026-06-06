@@ -6,7 +6,7 @@ from pathlib import Path
 
 import wandb
 
-from .lit_module import MoleculeGenerator
+from .lit_modules.lit_module import MoleculeGenerator
 
 WANDB_ENTITY = "equivariant-drifting"
 WANDB_PROJECT = "aligned-drifting"

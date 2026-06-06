@@ -1,7 +1,7 @@
 """PyTorch Lightning module for molecular generation using drift-based training.
 
 This module implements MoleculeGenerator, a LightningModule that combines an EGNN
-architecture with drift loss for generative modeling of molecular geometries and types.
+architecture with drift loss for generative modeling types.
 """
 
 from pathlib import Path
@@ -13,9 +13,9 @@ import wandb
 from lightning.pytorch import LightningModule
 from torch.optim.lr_scheduler import OneCycleLR
 
-from ..losses.drift_loss import (
+from ..losses.types_drift_loss import (
     TrainingDivergedException,
-    compute_drift_loss
+    compute_types_drift_loss
 )
 from ..egnn import EGNN
 from ..geometry import center_positions_per_graph, per_graph_center_norms
@@ -24,7 +24,7 @@ from ..sample_prior import compute_size_distribution, sample_prior_batch
 from ..spherical_utils import (probs_to_sphere, sphere_to_probs)
 
 
-class MoleculeGenerator(LightningModule):
+class TypesGenerator(LightningModule):
     """PyTorch Lightning module for training and inference of molecule generators.
 
     Uses an EGNN backbone with drift loss to learn the distribution over molecular
