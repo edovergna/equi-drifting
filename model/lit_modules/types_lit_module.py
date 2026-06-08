@@ -304,6 +304,7 @@ class TypesGenerator(LightningModule):
             gen_types_prob = sphere_to_probs(gen_types_sphere, self.eps)
 
         return {
+            "gen_types_prob": gen_types_prob.detach().cpu(),
             "gen_atom_types": gen_types_prob.detach().cpu().argmax(dim=-1),
             "real_atom_types": batch.real_atom_types.detach().cpu(),
         }
