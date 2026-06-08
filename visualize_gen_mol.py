@@ -25,6 +25,7 @@ from matplotlib.ticker import MaxNLocator
 
 _ATOM_COLORS = ["lightgray", "dimgray", "steelblue", "tomato", "limegreen"]
 
+# TO BE UPDATED FOR NEW STRUCTURE
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(

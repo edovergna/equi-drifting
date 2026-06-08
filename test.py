@@ -18,6 +18,7 @@ from model.geometry import center_positions_per_graph
 from model.mol_utils import batch_to_stability, batch_to_validity, heavy_atom_counts
 from model.wandb_utils import load_config, load_pretrained_generator
 
+# TO BE UPDATED FOR NEW STRUCTURE
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
