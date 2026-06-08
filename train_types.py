@@ -25,6 +25,7 @@ from model import (
     GradientMonitorCallback,
     QM9DataModule,
     SizeDistributionCallback,
+    AtomTypesCallback, 
     initialize_training_config,
 )
 from model.wandb_utils import load_pretrained_generator
@@ -93,6 +94,7 @@ def main(args: argparse.Namespace):
 
         callbacks = [
             GradientMonitorCallback(),
+            AtomTypesCallback(),
             gen_ckpt,
         ]
 

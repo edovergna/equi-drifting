@@ -7,7 +7,7 @@ module so users can import them from the model package namespace.
 from .callbacks import (AtomTypeDistributionCallback, ChemicalValidityCallback,
                         GeneratorCheckpointCallback,
                         GradientMonitorCallback, MoleculeVisualizationCallback,
-                        SizeDistributionCallback)
+                        SizeDistributionCallback, AtomTypesCallback)
 from .datamodule import QM9DataModule
 from .lit_modules.lit_module import MoleculeGenerator
 from .lit_modules.types_lit_module import TypesGenerator

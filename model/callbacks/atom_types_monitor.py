@@ -1,4 +1,4 @@
-"""Callback for logging 3D molecule renders and atom-type distributions to WandB."""
+"""Callback for logging atom-type diagnostics for type-only generation."""
 
 import io
 from collections import defaultdict
@@ -16,9 +16,7 @@ import wandb
 
 _ATOM_NAMES = ["H", "C", "N", "O", "F"]
 
-class AtomTypesMonitor(Callback):
-
-
+class AtomTypesCallback(Callback):
     _REQUIRED_KEYS = {
         "real_atom_types",
         "gen_atom_types",
@@ -97,7 +95,7 @@ class AtomTypesMonitor(Callback):
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: LightningModule
     ) -> None:
-        """Render 3D visualizations and log to wandb at validation epoch end.
+        """Log atom-type diagnostics to wandb at validation epoch end.
 
         Args:
             trainer: PyTorch Lightning Trainer.
