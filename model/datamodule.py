@@ -133,6 +133,7 @@ class AtomCountBatchSampler(Sampler[list[int]]):
                 yield random.sample(indices, batch_size)
             return
 
+        batches = []
         for n_atoms, indices in self.groups.items():
             indices = indices.copy()
             if self.shuffle:
@@ -142,7 +143,12 @@ class AtomCountBatchSampler(Sampler[list[int]]):
                 batch = indices[start : start + self.batch_size]
                 if len(batch) < self.batch_size and self.drop_last:
                     continue
-                yield batch
+                batches.append(batch)
+
+        if self.shuffle:
+            random.shuffle(batches)
+
+        yield from batches
 
     def __len__(self) -> int:
         """Return the total number of batches.
