@@ -134,11 +134,26 @@ def compute_types_drift_loss(
 
     stats: dict[str, float] = {}
     with torch.no_grad():
-        stats["mean_spherical_distance"] = molecule_types_dist.mean().item()
-        stats["std_spherical_distance"] = molecule_types_dist.std().item()
+        stats["max_per_molecule_loss"] = molecule_types_dist.max().item()
+        stats["min_per_molecule_loss"] = molecule_types_dist.min().item()
+        stats["std_molecule_loss"] = molecule_types_dist.std().item()
         stats["norm_V_types"] = product_tangent_norm(V_types, eps).mean().item()
+        stats["sq_norm_V_types"] = product_tangent_norm(V_types, eps).pow(2).mean().item()
         stats["mean_V_types_pos"] = product_tangent_norm(V_types_pos, eps).mean().item()
         stats["mean_V_types_neg"] = product_tangent_norm(V_types_neg, eps).mean().item()
+
+        stats["mean_positive_distances"] = types_dist_pos.mean().item()
+        stats["std_positive_distances"] = types_dist_pos.std().item()
+        stats["max_positive_distances"] = types_dist_pos.max().item()
+        stats["min_positive_distances"] = types_dist_pos.min().item()
+
+        neg_mask = ~torch.eye(types_dist_neg.size(0), device=types_dist_neg.device, dtype=torch.bool)
+        stats["mean_negative_distances"] = types_dist_neg[neg_mask].mean().item()
+        stats["std_negative_distances"] = types_dist_neg[neg_mask].std().item()
+        stats["max_negative_distances"] = types_dist_neg[neg_mask].max().item()
+        stats["min_negative_distances"] = types_dist_neg[neg_mask].min().item()
+
+        stats["num_atoms"] = num_atoms
 
     return loss, stats
 
