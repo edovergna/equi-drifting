@@ -1,4 +1,67 @@
 import torch
+from .align import kabsch_align_pairwise
+
+
+def compute_pairwise_drifting_field(
+    gen_pos: torch.Tensor,
+    target_pos: torch.Tensor,
+    sigma: float = 1.0,
+    exclude_self: bool = False,
+) -> torch.Tensor:
+    """Drift field with a separate Kabsch alignment per (gen, target) pair.
+
+    For each pair (i, j):
+      1. Rotate gen[i] to target[j]'s frame via R[i,j]
+      2. Compute diff = target[j] - gen[i] @ R[i,j]  (in aligned frame)
+      3. Rotate diff back: diff @ R[i,j]^T          (in original gen frame)
+      4. Weight by Gaussian kernel of the per-pair aligned distance
+
+    Both gen_pos and target_pos must be zero-centered (CoM = 0) before calling.
+
+    Args:
+        gen_pos: [N_gen, N_atoms, 3]
+        target_pos: [N_target, N_atoms, 3]
+        sigma: Gaussian kernel bandwidth (acts on sum-of-squared atom distances)
+        exclude_self: mask the diagonal; requires N_gen == N_target (for gen-vs-gen)
+
+    Returns:
+        field: [N_gen, N_atoms, 3] drift vectors in the original gen frame
+    """
+    N_gen = gen_pos.shape[0]
+
+    with torch.no_grad():
+        R, aligned = kabsch_align_pairwise(gen_pos, target_pos)
+
+    # diff[g, r] = target[r] - gen[g] @ R[g,r]  (in aligned frame)
+    # [N_gen, N_target, N_atoms, 3]
+    diff = target_pos[None, :, :, :] - aligned
+
+    # [N_gen, N_target]
+    sq_dist = (diff ** 2).sum(dim=-1).sum(dim=-1)
+    kernel = torch.exp(-sq_dist / (2 * sigma ** 2))
+
+    if exclude_self:
+        assert gen_pos.shape[0] == target_pos.shape[0], "exclude_self requires N_gen == N_target"
+        eye = torch.eye(N_gen, device=gen_pos.device, dtype=torch.bool)
+        kernel = kernel.masked_fill(eye, 0.0)
+
+    # Rotate each per-pair contribution back to the original gen frame.
+    # diff[g,r] is in the frame where gen[g] was rotated by R[g,r], so the
+    # inverse is R[g,r]^T.
+    
+    # [N_gen, N_target, 3, 3]
+    inv_R = R.transpose(-2, -1)
+    # [N_gen, N_target, N_atoms, 3]
+    weighted_diff = diff * kernel[:, :, None, None]
+    # [N_gen, N_target, N_atoms, 3]
+    field_back = weighted_diff @ inv_R
+
+    # [N_gen]
+    Z = kernel.sum(dim=1).clamp_min(1e-8)
+    
+    # [N_gen, N_atoms, 3]
+    return field_back.sum(dim=1) / Z[:, None, None]
+
 
 def compute_individual_drifting_field(
     gen_mol: torch.Tensor,
@@ -11,7 +74,7 @@ def compute_individual_drifting_field(
     
     Keyword arguments:
         gen_mol -- [N_gen, D] tensor of generated molecule positions
-        real_mol -- [N_real, D] tensor of real molecule positions
+        target_mol -- [N_target, D] tensor of target molecule positions
         sigma -- bandwidth parameter for the Gaussian kernel
         R -- Optional [N_total, 3, 3] tensor of rotation matrices to apply to the field
         casadeval -- Whether to scale the field by 1/sigma^2 to match Esteban-Casadeval's definition.

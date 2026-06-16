@@ -40,6 +40,11 @@ class MolData:
         if self.n_gen_mols > self.n_real_mols:
             return self.real.pos.repeat(self.n_gen_mols // self.n_real_mols, 1)
         return self.real.pos
+    
+    @property
+    def real_pos_3d(self) -> torch.Tensor:
+        """Real positions reshaped to (n_mols, num_atoms, 3)."""
+        return self.real.pos.view(self.n_real_mols, self.real.num_atoms, 3)
 
     @property
     def real_pos_flattened(self) -> torch.Tensor:
