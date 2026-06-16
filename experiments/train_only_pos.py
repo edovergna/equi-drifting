@@ -9,7 +9,7 @@ from src.data import MolData, load_and_filter_data
 from src.utils import center_positions_per_mol, get_sorted_mols
 from src.model import EGNN
 from src.align import kabsch_align, kabsch_align_pyg
-from src.drifting_loss import compute_individual_drifting_field
+from src.drifting_loss import compute_positive_field, compute_negative_field
 from src.chem_eval import evaluate_generated_molecules
 from src.viz import plot_loss, visualize_progression_with_real
 
@@ -25,17 +25,14 @@ def plot_closest_generated_molecule(
         )
 
     gen_pos = center_positions_per_mol(gen_pos, data.gen.batch)
-    gen_pos, _ = kabsch_align_pyg(
-        gen_pos,
-        data.real_pos_repeated,
-        data.gen.batch,
-        data.n_gen_mols,
-    )
 
+    # Compare centered (but unaligned) gen positions against the selected real mol.
+    # Aligning each gen mol to a single paired real mol before searching introduces
+    # frame mismatch: gen mols paired to a different real end up in the wrong frame
+    # when compared against selected_real_mol_idx.
+    real_mol_flat = data.real.pos.view(data.n_real_mols, -1)[selected_real_mol_idx].unsqueeze(0)
     gen_pos_flattened = gen_pos.view(data.n_gen_mols, -1)
-    _, closest_indices = get_sorted_mols(
-        gen_pos_flattened, data.real_pos_flattened[selected_real_mol_idx].unsqueeze(0)
-    )
+    _, closest_indices = get_sorted_mols(gen_pos_flattened, real_mol_flat)
     gen_selected_idx = closest_indices[0].item()
 
     num_atoms = data.real.num_atoms
@@ -74,7 +71,7 @@ def parse_args():
     parser.add_argument("--attention", action="store_true")
     parser.add_argument("--aggr_type", type=str, default="mean")
     parser.add_argument("--num_iters", type=int, default=13000)
-    parser.add_argument("--lr", type=float, default=0.1)
+    parser.add_argument("--lr", type=float, default=0.01)
     parser.add_argument("--momentum", type=float, default=0.9)
     parser.add_argument("--offline", action="store_true")
     return parser.parse_args()
@@ -106,74 +103,46 @@ def main(args: argparse.Namespace):
     model = model.to(device)
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
 
+    real_pos_3d = data.real.pos.view(data.n_real_mols, data.gen.num_atoms, 3)
+
     loss_list = []
     for iter in range(args.num_iters):
         optimizer.zero_grad()
 
-        # Forward pass
-        gen_pos = model(data.gen.pos, data.gen.atom_types, data.gen.edge_index)
-        # Center generated and align positions per molecule
-        gen_pos = center_positions_per_mol(gen_pos, data.gen.batch)
-        
-        # Shuffle molecule order to align each generated molecule with a different
-        # generated molecule
-        while True:
-            p = torch.randperm(data.n_gen_mols, device=device)
-            if (p != data.mol_indices).any():
-                break
-        target_gen_pos = gen_pos.view(data.n_gen_mols, data.gen.num_atoms, 3)
-        target_gen_pos = target_gen_pos[p]
-        target_gen_pos = target_gen_pos.view(-1, 3)
+        # Forward pass + center
+        gen_pos_flat = model(data.gen.pos, data.gen.atom_types, data.gen.edge_index)
+        gen_pos_flat = center_positions_per_mol(gen_pos_flat, data.gen.batch)
 
-        aligned_gen_neg, R_neg = kabsch_align_pyg(
-            gen_pos,
-            target_gen_pos,
-            data.gen.batch,
-            data.n_gen_mols,
-        )
-        
-        aligned_gen_pos, R_pos = kabsch_align_pyg(
-            gen_pos,
-            data.real_pos_repeated,
-            data.gen.batch,
-            data.n_gen_mols,
-        )
+        # Flat refers to [n_mols * num_atoms, 3], 3D refers to [n_mols, num_atoms, 3]
+        gen_pos_3d = gen_pos_flat.view(data.n_gen_mols, data.gen.num_atoms, 3)
 
-        # Reshape to get right positions
-        gen_pos = gen_pos.view(data.n_gen_mols, -1)
-        target_gen_pos = target_gen_pos.view(data.n_gen_mols, -1)
-        aligned_gen_neg = aligned_gen_neg.view(data.n_gen_mols, -1)
-        aligned_gen_pos = aligned_gen_pos.view(data.n_gen_mols, -1)
+        V_pos = compute_positive_field(gen_pos_3d, real_pos_3d, sigma=8.0)
+        V_neg = compute_negative_field(gen_pos_3d, sigma=8.0)
 
-        # We apply the inverse rotation of the field within the drifting field
-        # computation. This way the field is applied in the original (unaligned)
-        # space.
-        V_neg = compute_individual_drifting_field(
-            aligned_gen_neg, target_gen_pos, sigma=8.0, R=R_neg
-        )
-        V_pos = compute_individual_drifting_field(
-            aligned_gen_pos, data.real_pos_flattened, sigma=8.0, R=R_pos
-        )
-        field = V_pos - V_neg
+        field = V_pos - V_neg  # [N_gen, N_atoms, 3]
 
-        # Create targets and compute loss
-        target_pos = (gen_pos + field).detach()
-        loss = F.mse_loss(gen_pos, target_pos)
+        # Target is the field-displaced position; detach so loss gradient only
+        # flows through gen_pos_3d, not through the field computation.
+        target_pos = (gen_pos_3d + field).detach()
+        loss = F.mse_loss(gen_pos_3d, target_pos)
 
         loss.backward()
         optimizer.step()
         loss_list.append(loss.mean().item())
 
-        field_norm = field.view(data.n_gen_mols, -1, 3).norm(dim=1).mean()
+        field_norm = field.norm(dim=-1).mean()
         wandb.log({"loss": loss.mean().item(), "field_norm": field_norm.item()}, step=iter)
 
-        if torch.allclose(field_norm, torch.tensor(0.0), atol=1e-5):
+        if torch.allclose(field_norm, torch.tensor(0.0), atol=1e-6):
             print("The drifting field has become zero. Stopping training.")
+            breakpoint()
+            V_pos = compute_positive_field(gen_pos_3d, real_pos_3d, sigma=8.0)
+            V_neg = compute_negative_field(gen_pos_3d, sigma=8.0)
             break
 
         if (iter + 1) % 500 == 0:
             print(f"Iter {iter}: Loss = {loss.mean().item()} | Field norm = {field_norm.item():.4f}")
-            evaluate_generated_molecules(gen_pos.view(-1, 3), data.gen.atom_types, data.gen.batch)
+            evaluate_generated_molecules(gen_pos_flat, data.gen.atom_types, data.gen.batch)
 
     plot_loss(loss_list)
 

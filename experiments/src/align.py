@@ -91,44 +91,40 @@ def kabsch_mse_pyg(P, Q, batch, n_mols):
     return ((P_aligned - Q) ** 2).mean()
 
 
-def kabsch_align_pairwise(
+def kabsch_rotations_pairwise(
     gen_pos: torch.Tensor,
-    real_pos: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Compute Kabsch rotation for every (gen, real) pair simultaneously.
+    target_pos: torch.Tensor,
+) -> torch.Tensor:
+    """Find the optimal Kabsch rotation for every (gen, target) pair.
 
     Both inputs must be zero-centered (CoM = 0); no translation is applied.
 
     Args:
         gen_pos: [N_gen, N_atoms, 3]
-        real_pos: [N_real, N_atoms, 3]
+        target_pos: [N_target, N_atoms, 3]
 
     Returns:
-        R: [N_gen, N_real, 3, 3] — rotation such that gen @ R ≈ real
-        aligned: [N_gen, N_real, N_atoms, 3] — gen rotated into each real's frame
+        R: [N_gen, N_target, 3, 3] — rotation matrices such that gen @ R ≈ target
     """
     N_gen = gen_pos.shape[0]
-    N_real = real_pos.shape[0]
+    N_target = target_pos.shape[0]
 
-    # Cross-covariance H[g, r] = gen[g]^T @ real[r]
-    # [N_gen, N_real, 3, 3]
-    H = torch.einsum("gni,rnj->grij", gen_pos, real_pos)
+    # Cross-covariance: H[g, t] = gen[g]^T @ target[t]
+    # [N_gen, N_target, 3, 3]
+    H = torch.einsum("gni,tnj->gtij", gen_pos, target_pos)
+    # [N_gen * N_target, 3, 3]
     H_flat = H.reshape(-1, 3, 3)
 
-    U, S, Vh = torch.linalg.svd(H_flat)
+    U, _, Vh = torch.linalg.svd(H_flat)
 
     # Reflection correction: ensure det(R) = +1
+    # [N_gen * N_target]
     det = torch.linalg.det(Vh.transpose(-2, -1) @ U.transpose(-2, -1))
-    D = torch.eye(3, device=gen_pos.device, dtype=gen_pos.dtype).unsqueeze(0).expand(N_gen * N_real, -1, -1).clone()
+    # [N_gen * N_target, 3, 3]
+    D = torch.eye(3, device=gen_pos.device, dtype=gen_pos.dtype).unsqueeze(0).expand(N_gen * N_target, -1, -1).clone()
     D[:, 2, 2] = torch.sign(det)
 
-    R_flat = Vh.transpose(-2, -1) @ D @ U.transpose(-2, -1)  # [N_gen*N_real, 3, 3]
-    R = R_flat.reshape(N_gen, N_real, 3, 3)
-
-    # Apply each rotation: gen[g] @ R[g, r] for all (g, r)
-    # [N_gen, N_real, N_atoms, 3]
-    gen_expanded = gen_pos[:, None, :, :].expand(-1, N_real, -1, -1)
-    # [N_gen, N_real, N_atoms, 3]
-    aligned = gen_expanded @ R
-
-    return R, aligned
+    # [N_gen * N_target, 3, 3]
+    R_flat = Vh.transpose(-2, -1) @ D @ U.transpose(-2, -1)
+    # [N_gen, N_target, 3, 3]
+    return R_flat.reshape(N_gen, N_target, 3, 3)

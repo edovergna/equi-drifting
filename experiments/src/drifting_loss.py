@@ -1,66 +1,101 @@
 import torch
-from .align import kabsch_align_pairwise
+from .align import kabsch_rotations_pairwise
 
 
-def compute_pairwise_drifting_field(
+def _pairwise_field(
     gen_pos: torch.Tensor,
     target_pos: torch.Tensor,
-    sigma: float = 1.0,
-    exclude_self: bool = False,
+    R: torch.Tensor,
+    sigma: float,
+    valid_mask: torch.Tensor = None,
 ) -> torch.Tensor:
-    """Drift field with a separate Kabsch alignment per (gen, target) pair.
+    """Core pairwise drift field computation given pre-computed rotation matrices.
 
-    For each pair (i, j):
-      1. Rotate gen[i] to target[j]'s frame via R[i,j]
-      2. Compute diff = target[j] - gen[i] @ R[i,j]  (in aligned frame)
-      3. Rotate diff back: diff @ R[i,j]^T          (in original gen frame)
-      4. Weight by Gaussian kernel of the per-pair aligned distance
+    For each (gen, target) pair:
+      1. gen[g] @ R[g, t]                   — rotate gen into target's frame
+      2. target[t] - aligned                 — residual diff in aligned frame
+      3. kernel weight by aligned distance
+      4. weighted_diff @ R[g,t]^T            — rotate contribution back to gen's frame
+    Then aggregate over targets.
 
-    Both gen_pos and target_pos must be zero-centered (CoM = 0) before calling.
+    Both gen_pos and target_pos must be zero-centered.
 
     Args:
         gen_pos: [N_gen, N_atoms, 3]
         target_pos: [N_target, N_atoms, 3]
-        sigma: Gaussian kernel bandwidth (acts on sum-of-squared atom distances)
-        exclude_self: mask the diagonal; requires N_gen == N_target (for gen-vs-gen)
+        R: [N_gen, N_target, 3, 3]
+        sigma: Gaussian kernel bandwidth
+        valid_mask: [N_gen, N_target] bool — True = include pair (default: all True)
 
     Returns:
-        field: [N_gen, N_atoms, 3] drift vectors in the original gen frame
+        field: [N_gen, N_atoms, 3]
     """
-    N_gen = gen_pos.shape[0]
-
-    with torch.no_grad():
-        R, aligned = kabsch_align_pairwise(gen_pos, target_pos)
-
-    # diff[g, r] = target[r] - gen[g] @ R[g,r]  (in aligned frame)
     # [N_gen, N_target, N_atoms, 3]
-    diff = target_pos[None, :, :, :] - aligned
+    aligned = gen_pos[:, None] @ R
+
+    # [N_gen, N_target, N_atoms, 3]
+    diff = target_pos[None] - aligned
 
     # [N_gen, N_target]
     sq_dist = (diff ** 2).sum(dim=-1).sum(dim=-1)
+    # [N_gen, N_target]
     kernel = torch.exp(-sq_dist / (2 * sigma ** 2))
 
-    if exclude_self:
-        assert gen_pos.shape[0] == target_pos.shape[0], "exclude_self requires N_gen == N_target"
-        eye = torch.eye(N_gen, device=gen_pos.device, dtype=torch.bool)
-        kernel = kernel.masked_fill(eye, 0.0)
+    if valid_mask is not None:
+        kernel = kernel.masked_fill(~valid_mask, 0.0)
 
-    # Rotate each per-pair contribution back to the original gen frame.
-    # diff[g,r] is in the frame where gen[g] was rotated by R[g,r], so the
-    # inverse is R[g,r]^T.
-    
     # [N_gen, N_target, 3, 3]
     inv_R = R.transpose(-2, -1)
     # [N_gen, N_target, N_atoms, 3]
-    weighted_diff = diff * kernel[:, :, None, None]
-    # [N_gen, N_target, N_atoms, 3]
-    field_back = weighted_diff @ inv_R
+    field_back = (diff * kernel[:, :, None, None]) @ inv_R
 
     # [N_gen]
     Z = kernel.sum(dim=1).clamp_min(1e-8)
-    
     # [N_gen, N_atoms, 3]
     return field_back.sum(dim=1) / Z[:, None, None]
+
+
+def compute_positive_field(
+    gen_pos: torch.Tensor,
+    target_pos: torch.Tensor,
+    sigma: float,
+) -> torch.Tensor:
+    """Attractive drift field: each gen mol pulled toward every target mol.
+
+    Args:
+        gen_pos: [N_gen, N_atoms, 3] zero-centered
+        target_pos: [N_target, N_atoms, 3] zero-centered
+        sigma: Gaussian kernel bandwidth
+
+    Returns:
+        field: [N_gen, N_atoms, 3]
+    """
+    with torch.no_grad():
+        R = kabsch_rotations_pairwise(gen_pos, target_pos)
+    return _pairwise_field(gen_pos, target_pos, R, sigma)
+
+
+def compute_negative_field(
+    gen_pos: torch.Tensor,
+    sigma: float,
+) -> torch.Tensor:
+    """Repulsive drift field: each gen mol pushed away from every other gen mol.
+
+    Self-pairs are excluded via a diagonal mask so gen[i] does not repel itself.
+
+    Args:
+        gen_pos: [N_gen, N_atoms, 3] zero-centered
+        sigma: Gaussian kernel bandwidth
+
+    Returns:
+        field: [N_gen, N_atoms, 3]
+    """
+    N_gen = gen_pos.shape[0]
+    with torch.no_grad():
+        R = kabsch_rotations_pairwise(gen_pos, gen_pos)
+    # [N_gen, N_gen]
+    valid_mask = ~torch.eye(N_gen, device=gen_pos.device, dtype=torch.bool)
+    return _pairwise_field(gen_pos, gen_pos, R, sigma, valid_mask=valid_mask)
 
 
 def compute_individual_drifting_field(
