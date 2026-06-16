@@ -115,9 +115,10 @@ def visualize_both_molecules_with_atom_types(
     plt.show()
 
 
-def plot_loss(loss_list):
+def plot_loss(loss_list, show: bool = False):
     plt.plot(loss_list)
     plt.xlabel("Iteration")
     plt.ylabel("Loss")
     plt.title("Training Loss")
-    plt.show()
+    if show:
+        plt.show()

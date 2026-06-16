@@ -32,15 +32,14 @@ class MolData:
     gen: MolBatch
     n_real_mols: int
     n_gen_mols: int
-
-    @property
-    def total_mols(self) -> int:
-        return self.n_gen_mols * self.n_real_mols
+    mol_indices: torch.Tensor
 
     @property
     def real_pos_repeated(self) -> torch.Tensor:
         """Real positions repeated once per gen mol: (total_mols * num_atoms, 3)."""
-        return self.real.pos.repeat(self.n_gen_mols, 1)
+        if self.n_gen_mols > self.n_real_mols:
+            return self.real.pos.repeat(self.n_gen_mols // self.n_real_mols, 1)
+        return self.real.pos
 
     @property
     def real_pos_flattened(self) -> torch.Tensor:
@@ -64,6 +63,8 @@ def load_and_filter_data(
     Returns:
         A MolData object containing the real and generated molecule batches.
     """
+    assert n_gen_mols % n_real_mols == 0, "n_gen_mols must be a multiple of n_real_mols for proper batching."
+    
     dataset = QM9(DATA_ROOT)
 
     keep = []
@@ -94,21 +95,24 @@ def load_and_filter_data(
 
     # Repeat the real molecule types for each generated molecule.
     # This way we can align each generated molecule to each real molecule during training.
-    gen_atom_types = one_hot_real_types.repeat(n_gen_mols)
+    if n_gen_mols > n_real_mols:
+        gen_atom_types = one_hot_real_types.repeat(n_gen_mols // n_real_mols)
+    else:
+        gen_atom_types = one_hot_real_types
     print(f"Gen atom types shape: {gen_atom_types.shape}")
 
     # Sample noise once with the same shape as the real molecules.
     # We generate N_GEN_MOLS for each of the N_REAL_MOLS,
     # so we need to repeat the noise accordingly.
-    gen_batch_vec = torch.arange(n_gen_mols * n_real_mols, device=device).repeat_interleave(num_atoms)
-    pos_noise = torch.randn((n_gen_mols * n_real_mols * num_atoms, 3), device=device)
+    gen_batch_vec = torch.arange(n_gen_mols, device=device).repeat_interleave(num_atoms)
+    pos_noise = torch.randn((n_gen_mols * num_atoms, 3), device=device)
     pos_noise = center_positions_per_mol(pos_noise, gen_batch_vec)
     print(f"Pos noise shape: {pos_noise.shape}")
     print(f"Gen batch vec shape: {gen_batch_vec.shape}")
 
     # Build edge index for all (n_gen_mols * n_real_mols) generated molecules
     edge_index_list = []
-    for offset in range(n_gen_mols):
+    for offset in range(n_gen_mols // n_real_mols):
         offset_edge_index = filtered_dataset.dense_edge_index + offset * num_atoms
         edge_index_list.append(offset_edge_index)
     dense_edge_index = torch.cat(edge_index_list, dim=1).to(device)
@@ -118,7 +122,15 @@ def load_and_filter_data(
         atom_types=gen_atom_types,
         batch=gen_batch_vec,
         edge_index=dense_edge_index,
-        n_mols=n_gen_mols * n_real_mols,
+        n_mols=n_gen_mols,
         num_atoms=num_atoms,
     )
-    return MolData(real=real, gen=gen, n_real_mols=n_real_mols, n_gen_mols=n_gen_mols)
+    
+    mol_indices = torch.arange(n_gen_mols, device=device)
+    return MolData(
+        real=real,
+        gen=gen,
+        n_real_mols=n_real_mols,
+        n_gen_mols=n_gen_mols,
+        mol_indices=mol_indices
+    )

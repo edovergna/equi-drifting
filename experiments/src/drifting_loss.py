@@ -1,5 +1,60 @@
 import torch
 
+def compute_individual_drifting_field(
+    gen_mol: torch.Tensor,
+    target_mol: torch.Tensor,
+    sigma: float = 1.0,
+    R: torch.Tensor = None,
+    casadeval: bool = False
+) -> torch.Tensor:
+    """Computes the drifting field between real and generated molecules
+    
+    Keyword arguments:
+        gen_mol -- [N_gen, D] tensor of generated molecule positions
+        real_mol -- [N_real, D] tensor of real molecule positions
+        sigma -- bandwidth parameter for the Gaussian kernel
+        R -- Optional [N_total, 3, 3] tensor of rotation matrices to apply to the field
+        casadeval -- Whether to scale the field by 1/sigma^2 to match Esteban-Casadeval's definition.
+    Return:
+        field -- [N_gen, D] tensor of the drifting field for each generated molecule
+    """
+
+    n_gen = gen_mol.size(0)
+
+    # [N_gen, N_targets, D]
+    diffs = target_mol.unsqueeze(0) - gen_mol.unsqueeze(1)
+
+    # [N_gen, N_targets]
+    sq_dists = (diffs * diffs).sum(dim=-1)
+
+    # [N_gen, N_targets]
+    kernel = torch.exp(-sq_dists / (2 * sigma**2))
+
+    # [N_gen, N_targets, D]
+    weighted_diffs = kernel.unsqueeze(-1) * diffs 
+
+    # We add the division by sigma^2 here to match the
+    # gradient of the Gaussian kernel, matching
+    # Esteban-Casadeval's definition.
+    if casadeval:
+        # NOTE: This seems to be scaling the field too aggressively
+        # for the positions. It isn't even able to overfit to a single
+        # sample.
+        weighted_diffs = weighted_diffs / (sigma**2)
+        
+    # [N_gen, 1]
+    Z = kernel.sum(dim=1, keepdim=True)
+    
+    # [N_gen, D]
+    field = weighted_diffs.sum(dim=1) / (Z + 1e-8)
+
+    if R is not None:
+        # When a rotation matrix is provided then we rotate the field
+        # R is [N_total, 3, 3], we need to reshape the field to apply the rotation per node
+        field = torch.einsum('nji,nj->ni', R, field.view(-1, 3)).view(n_gen, -1)
+    
+    return field
+
 def compute_euclidean_drifting_field(
     gen_mol: torch.Tensor,
     real_mol: torch.Tensor,
