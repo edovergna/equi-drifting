@@ -1,7 +1,9 @@
 
 import argparse
+import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
+import wandb
 
 from src.data import MolData, load_and_filter_data
 from src.utils import center_positions_per_mol, get_sorted_mols
@@ -48,13 +50,15 @@ def plot_closest_generated_molecule(
         step = kabsch_align(step, selected_real_pos)
         selected_pos_list.append(step)
 
-    visualize_progression_with_real(
+    fig = visualize_progression_with_real(
         pos_list=selected_pos_list,
         gen_types=gen_selected_types.to(torch.float32),
         real_pos=selected_real_pos,
         real_types=selected_real_types.to(torch.float32),
         max_steps=len(selected_pos_list),
+        show=False,
     )
+    return fig
 
 
 def parse_args():
@@ -72,12 +76,15 @@ def parse_args():
     parser.add_argument("--num_iters", type=int, default=13000)
     parser.add_argument("--lr", type=float, default=0.1)
     parser.add_argument("--momentum", type=float, default=0.9)
+    parser.add_argument("--offline", action="store_true")
     return parser.parse_args()
 
 def main(args: argparse.Namespace):
 
+    wandb.init(project="only-pos", config=vars(args), mode="offline" if args.offline else "online")
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
+
     # Debugging prints
     print(f"Number of generated molecule: {args.n_gen_mols}")
     print(f"Number of real molecule: {args.n_real_mols}")
@@ -133,6 +140,8 @@ def main(args: argparse.Namespace):
         loss_list.append(loss.mean().item())
 
         V_pos_norm = V_pos.view(data.total_mols, -1, 3).norm(dim=1).mean()
+        wandb.log({"loss": loss.mean().item(), "V_pos_norm": V_pos_norm.item()}, step=iter)
+
         if torch.allclose(V_pos_norm, torch.tensor(0.0), atol=1e-5):
             print("The drifting field has become zero. Stopping training.")
             break
@@ -142,7 +151,12 @@ def main(args: argparse.Namespace):
             evaluate_generated_molecules(gen_pos.view(-1, 3), data.gen.atom_types, data.gen.batch)
 
     plot_loss(loss_list)
-    plot_closest_generated_molecule(model, data)
+
+    fig = plot_closest_generated_molecule(model, data)
+    wandb.log({"closest_generated_molecule": wandb.Image(fig)})
+    plt.close(fig)
+
+    wandb.finish()
 
 if __name__ == "__main__":
     args = parse_args()

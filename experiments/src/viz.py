@@ -48,7 +48,8 @@ def visualize_progression_with_real(
     real_pos: torch.Tensor,
     real_types: torch.Tensor,
     step_indices: list[int] | None = None,
-    max_steps: int = 5
+    max_steps: int = 5,
+    show: bool = True,
 ):
     if step_indices is None:
         total = len(pos_list)
@@ -100,8 +101,9 @@ def visualize_progression_with_real(
     ax_overlap.legend(fontsize=7)
     _enforce_limits(ax_overlap)
 
-    plt.tight_layout()
-    plt.show()
+    if show:
+        plt.show()
+    return fig
 
 
 def visualize_both_molecules_with_atom_types(
