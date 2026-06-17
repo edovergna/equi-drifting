@@ -8,6 +8,7 @@ def _pairwise_field(
     R: torch.Tensor,
     sigma: float,
     valid_mask: torch.Tensor = None,
+    casadeval: bool = False
 ) -> torch.Tensor:
     """Core pairwise drift field computation given pre-computed rotation matrices.
 
@@ -41,8 +42,11 @@ def _pairwise_field(
     diff = diff @ R.transpose(-2, -1)
 
     # [N_gen, N_target]
-    sq_dist = (diff ** 2).sum(dim=-1).sum(dim=-1)
-    # [N_gen, N_target]
+    # We replace the last sum by a mean. We noticed that the overall
+    # squared distance depends on the number of atoms (duh!), hence,
+    # to define a consistent kernel bandwidth sigma we need to average
+    # the squared distance per atom count.
+    sq_dist = (diff ** 2).sum(dim=-1).mean(dim=-1)
     kernel = torch.exp(-sq_dist / (2 * sigma ** 2))
 
     if valid_mask is not None:
@@ -50,6 +54,15 @@ def _pairwise_field(
 
     # [N_gen, N_target, N_atoms, 3]
     weighted_diff = diff * kernel[:, :, None, None]
+    
+    # We add the division by sigma^2 here to match the
+    # gradient of the Gaussian kernel, matching
+    # Esteban-Casadeval's definition.
+    if casadeval:
+        # NOTE: This seems to be scaling the field too aggressively
+        # for the positions. It isn't even able to overfit to a single
+        # sample.
+        weighted_diff = weighted_diff / (sigma**2)
 
     # [N_gen]
     Z = kernel.sum(dim=1).clamp_min(1e-8)
@@ -64,6 +77,7 @@ def compute_positive_field(
     gen_pos: torch.Tensor,
     target_pos: torch.Tensor,
     sigma: float,
+    casadeval: bool = False
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Attractive drift field: each gen mol pulled toward every target mol.
 
@@ -78,12 +92,13 @@ def compute_positive_field(
     """
     with torch.no_grad():
         R = kabsch_rotations_pairwise(gen_pos, target_pos)
-    return _pairwise_field(gen_pos, target_pos, R, sigma)
+    return _pairwise_field(gen_pos, target_pos, R, sigma, casadeval=casadeval)
 
 
 def compute_negative_field(
     gen_pos: torch.Tensor,
     sigma: float,
+    casadeval: bool = False
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Repulsive drift field: each gen mol pushed away from every other gen mol.
 
@@ -102,7 +117,7 @@ def compute_negative_field(
         R = kabsch_rotations_pairwise(gen_pos, gen_pos)
     # [N_gen, N_gen]
     valid_mask = ~torch.eye(N_gen, device=gen_pos.device, dtype=torch.bool)
-    return _pairwise_field(gen_pos, gen_pos, R, sigma, valid_mask=valid_mask)
+    return _pairwise_field(gen_pos, gen_pos, R, sigma, valid_mask=valid_mask, casadeval=casadeval)
 
 
 def compute_individual_drifting_field(

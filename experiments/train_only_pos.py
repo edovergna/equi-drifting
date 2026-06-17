@@ -75,6 +75,7 @@ def parse_args():
     parser.add_argument("--aggr_type", type=str, default="mean")
     parser.add_argument("--num_iters", type=int, default=13000)
     parser.add_argument("--sigma", type=float, default=1.0)
+    parser.add_argument("--casadeval", action="store_true", help="Whether to scale the field by 1/sigma^2 to match Esteban-Casadeval's definition.")
     parser.add_argument("--lr", type=float, default=0.01)
     parser.add_argument("--momentum", type=float, default=0.9)
     parser.add_argument("--offline", action="store_true")
@@ -120,8 +121,8 @@ def main(args: argparse.Namespace):
         # Flat refers to [n_mols * num_atoms, 3], 3D refers to [n_mols, num_atoms, 3]
         gen_pos_3d = gen_pos_flat.view(data.n_gen_mols, data.gen.num_atoms, 3)
 
-        V_pos, pos_sq_dist = compute_positive_field(gen_pos_3d, real_pos_3d, sigma=args.sigma)
-        V_neg, neg_sq_dist = compute_negative_field(gen_pos_3d, sigma=args.sigma)
+        V_pos, pos_sq_dist = compute_positive_field(gen_pos_3d, real_pos_3d, sigma=args.sigma, casadeval=args.casadeval)
+        V_neg, neg_sq_dist = compute_negative_field(gen_pos_3d, sigma=args.sigma, casadeval=args.casadeval)
 
         field = V_pos - V_neg  # [N_gen, N_atoms, 3]
 
@@ -141,14 +142,21 @@ def main(args: argparse.Namespace):
             "mean_pos_sq_dist": pos_sq_dist.mean().item(),
             "mean_neg_sq_dist": neg_sq_dist.mean().item(),
         }, step=iter)
+        
 
         if torch.allclose(field_norm, torch.tensor(0.0), atol=1e-6):
             print("The drifting field has become zero. Stopping training.")
+            breakpoint()
+            V_pos, pos_sq_dist = compute_positive_field(gen_pos_3d, real_pos_3d, sigma=args.sigma, casadeval=args.casadeval)
+            V_neg, neg_sq_dist = compute_negative_field(gen_pos_3d, sigma=args.sigma, casadeval=args.casadeval)            
             break
 
         if (iter + 1) % 500 == 0:
-            print(f"Iter {iter}: Loss = {loss.mean().item()} | Field norm = {field_norm.item():.4f}")
-            evaluate_generated_molecules(gen_pos_flat, data.gen.atom_types, data.gen.batch)
+            print(f"Iter {iter}: Loss = {loss.mean().item()} | Field norm = {field_norm.item():.4f} |"
+                  f" Mean pos sq dist = {pos_sq_dist.mean().item():.4f} | Mean neg sq dist = {neg_sq_dist.mean().item():.4f}"
+            )
+            chemical_metrics = evaluate_generated_molecules(gen_pos_flat, data.gen.atom_types, data.gen.batch, show=True)
+            wandb.log(chemical_metrics, step=iter)
 
     plot_loss(loss_list)
 
