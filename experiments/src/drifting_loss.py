@@ -35,6 +35,10 @@ def _pairwise_field(
 
     # [N_gen, N_target, N_atoms, 3]
     diff = target_pos[None] - aligned
+    
+    # Rotate back the diff to gen's frame
+    # [N_gen, N_target, N_atoms, 3]
+    diff = diff @ R.transpose(-2, -1)
 
     # [N_gen, N_target]
     sq_dist = (diff ** 2).sum(dim=-1).sum(dim=-1)
@@ -44,15 +48,16 @@ def _pairwise_field(
     if valid_mask is not None:
         kernel = kernel.masked_fill(~valid_mask, 0.0)
 
-    # [N_gen, N_target, 3, 3]
-    inv_R = R.transpose(-2, -1)
     # [N_gen, N_target, N_atoms, 3]
-    field_back = (diff * kernel[:, :, None, None]) @ inv_R
+    weighted_diff = diff * kernel[:, :, None, None]
 
     # [N_gen]
     Z = kernel.sum(dim=1).clamp_min(1e-8)
+
     # [N_gen, N_atoms, 3]
-    return field_back.sum(dim=1) / Z[:, None, None], sq_dist
+    field = weighted_diff.sum(dim=1) / Z[:, None, None]
+    
+    return field, sq_dist
 
 
 def compute_positive_field(
