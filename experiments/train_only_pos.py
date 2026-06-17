@@ -135,10 +135,14 @@ def main(args: argparse.Namespace):
         optimizer.step()
         loss_list.append(loss.mean().item())
 
+        pos_field_norm = V_pos.norm(dim=-1).mean()
+        neg_field_norm = V_neg.norm(dim=-1).mean()
         field_norm = field.norm(dim=-1).mean()
         wandb.log({
             "loss": loss.mean().item(),
             "field_norm": field_norm.item(),
+            "pos_field_norm": pos_field_norm.item(),
+            "neg_field_norm": neg_field_norm.item(),
             "mean_pos_sq_dist": pos_sq_dist.mean().item(),
             "mean_neg_sq_dist": neg_sq_dist.mean().item(),
         }, step=iter)
@@ -146,23 +150,20 @@ def main(args: argparse.Namespace):
 
         if torch.allclose(field_norm, torch.tensor(0.0), atol=1e-6):
             print("The drifting field has become zero. Stopping training.")
-            breakpoint()
-            V_pos, pos_sq_dist = compute_positive_field(gen_pos_3d, real_pos_3d, sigma=args.sigma, casadeval=args.casadeval)
-            V_neg, neg_sq_dist = compute_negative_field(gen_pos_3d, sigma=args.sigma, casadeval=args.casadeval)            
             break
 
         if (iter + 1) % 500 == 0:
-            print(f"Iter {iter}: Loss = {loss.mean().item()} | Field norm = {field_norm.item():.4f} |"
-                  f" Mean pos sq dist = {pos_sq_dist.mean().item():.4f} | Mean neg sq dist = {neg_sq_dist.mean().item():.4f}"
+            print(f"Iter {iter}: Loss = {loss.mean().item()} | Field norm = {field_norm.item():.4f} |\n"
+                  f"          Pos field norm = {pos_field_norm.item():.4f} | Neg field norm = {neg_field_norm.item():.4f} |\n"
+                  f"          Mean pos sq dist = {pos_sq_dist.mean().item():.4f} | Mean neg sq dist = {neg_sq_dist.mean().item():.4f}"
             )
             chemical_metrics = evaluate_generated_molecules(gen_pos_flat, data.gen.atom_types, data.gen.batch, show=True)
             wandb.log(chemical_metrics, step=iter)
+            fig = plot_closest_generated_molecule(model, data)
+            wandb.log({"closest_generated_molecule": wandb.Image(fig)}, step=iter)
+            plt.close(fig)
 
     plot_loss(loss_list)
-
-    fig = plot_closest_generated_molecule(model, data)
-    wandb.log({"closest_generated_molecule": wandb.Image(fig)})
-    plt.close(fig)
 
     wandb.finish()
 
