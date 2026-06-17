@@ -52,14 +52,14 @@ def _pairwise_field(
     # [N_gen]
     Z = kernel.sum(dim=1).clamp_min(1e-8)
     # [N_gen, N_atoms, 3]
-    return field_back.sum(dim=1) / Z[:, None, None]
+    return field_back.sum(dim=1) / Z[:, None, None], sq_dist
 
 
 def compute_positive_field(
     gen_pos: torch.Tensor,
     target_pos: torch.Tensor,
     sigma: float,
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Attractive drift field: each gen mol pulled toward every target mol.
 
     Args:
@@ -69,6 +69,7 @@ def compute_positive_field(
 
     Returns:
         field: [N_gen, N_atoms, 3]
+        sq_dist: [N_gen, N_target] squared distances between each gen and target mol
     """
     with torch.no_grad():
         R = kabsch_rotations_pairwise(gen_pos, target_pos)
@@ -78,7 +79,7 @@ def compute_positive_field(
 def compute_negative_field(
     gen_pos: torch.Tensor,
     sigma: float,
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Repulsive drift field: each gen mol pushed away from every other gen mol.
 
     Self-pairs are excluded via a diagonal mask so gen[i] does not repel itself.
@@ -89,6 +90,7 @@ def compute_negative_field(
 
     Returns:
         field: [N_gen, N_atoms, 3]
+        sq_dist: [N_gen, N_target] squared distances between each gen and target mol
     """
     N_gen = gen_pos.shape[0]
     with torch.no_grad():
