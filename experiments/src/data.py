@@ -23,6 +23,12 @@ class MolBatch:
     def pos_flat(self) -> torch.Tensor:
         """Positions reshaped to (n_mols, num_atoms * 3)."""
         return self.pos.view(self.n_mols, -1)
+    
+    def sample_pos_noise(self) -> torch.Tensor:
+        """Sample noise with the same shape as pos."""
+        pos_noise = torch.randn((self.n_mols * self.num_atoms, 3), device=self.edge_index.device)
+        pos_noise = center_positions_per_mol(pos_noise, self.batch)
+        return pos_noise
 
 
 @dataclass
@@ -79,6 +85,9 @@ def load_and_filter_data(
         if len(keep) >= n_real_mols:
             break
     filtered_dataset = dataset.index_select(keep)
+    
+    if len(filtered_dataset) < n_real_mols:
+        raise ValueError(f"Not enough molecules with {num_atoms} atoms. Found {len(filtered_dataset)}, required {n_real_mols}.")
 
     # Create batch vector for real molecules and center their positions
     real_batch_vec = torch.arange(n_real_mols, device=device).repeat_interleave(num_atoms)
@@ -113,6 +122,7 @@ def load_and_filter_data(
     pos_noise = torch.randn((n_gen_mols * num_atoms, 3), device=device)
     pos_noise = center_positions_per_mol(pos_noise, gen_batch_vec)
     print(f"Pos noise shape: {pos_noise.shape}")
+    
     print(f"Gen batch vec shape: {gen_batch_vec.shape}")
 
     # Build edge index for all (n_gen_mols * n_real_mols) generated molecules

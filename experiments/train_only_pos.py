@@ -8,7 +8,7 @@ import wandb
 from src.data import MolData, load_and_filter_data
 from src.utils import center_positions_per_mol, get_sorted_mols
 from src.model import EGNN
-from src.align import kabsch_align, kabsch_align_pyg, kabsch_rotations_pairwise
+from src.align import kabsch_align, kabsch_rotations_pairwise
 from src.drifting_loss import compute_positive_field, compute_negative_field
 from src.chem_eval import evaluate_generated_molecules
 from src.viz import plot_loss, visualize_progression_with_real
@@ -21,7 +21,7 @@ def plot_closest_generated_molecule(
     model.eval()
     with torch.no_grad():
         gen_pos, pos_list = model(
-            data.gen.pos, data.gen.atom_types, data.gen.edge_index, return_change_in_pos=True
+            data.gen.sample_pos_noise(), data.gen.atom_types, data.gen.edge_index, return_change_in_pos=True
         )
 
     gen_pos = center_positions_per_mol(gen_pos, data.gen.batch)
@@ -79,6 +79,7 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=0.01)
     parser.add_argument("--momentum", type=float, default=0.9)
     parser.add_argument("--offline", action="store_true")
+    parser.add_argument("--sample_pos_noise", action="store_true", help="Whether to sample new noise for each iteration.")
     return parser.parse_args()
 
 def main(args: argparse.Namespace):
@@ -115,7 +116,12 @@ def main(args: argparse.Namespace):
         optimizer.zero_grad()
 
         # Forward pass + center
-        gen_pos_flat = model(data.gen.pos, data.gen.atom_types, data.gen.edge_index)
+        if args.sample_pos_noise:
+            pos_noise = data.gen.sample_pos_noise()
+        else:
+            pos_noise = data.gen.pos
+
+        gen_pos_flat = model(pos_noise, data.gen.atom_types, data.gen.edge_index)
         gen_pos_flat = center_positions_per_mol(gen_pos_flat, data.gen.batch)
 
         # Flat refers to [n_mols * num_atoms, 3], 3D refers to [n_mols, num_atoms, 3]
@@ -146,7 +152,7 @@ def main(args: argparse.Namespace):
             "mean_pos_sq_dist": pos_sq_dist.mean().item(),
             "mean_neg_sq_dist": neg_sq_dist.mean().item(),
         }, step=iter)
-        
+
 
         if torch.allclose(field_norm, torch.tensor(0.0), atol=1e-6):
             print("The drifting field has become zero. Stopping training.")
