@@ -47,6 +47,8 @@ def _pairwise_field(
     # to define a consistent kernel bandwidth sigma we need to average
     # the squared distance per atom count.
     sq_dist = (diff ** 2).sum(dim=-1).mean(dim=-1)
+    # avoid overflow in exp
+    sq_dist = sq_dist.clamp_max(1e3)
     kernel = torch.exp(-sq_dist / (2 * sigma ** 2))
 
     if valid_mask is not None:
