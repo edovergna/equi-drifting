@@ -9,7 +9,7 @@ import wandb
 from .lit_modules.types_lit_module import TypesGenerator
 
 WANDB_ENTITY = "equivariant-drifting"
-WANDB_PROJECT = "drifting-for-types"
+WANDB_PROJECT = "drifting-for-positions"
 WANDB_PATH = f"{WANDB_ENTITY}/{WANDB_PROJECT}"
 
 

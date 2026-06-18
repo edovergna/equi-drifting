@@ -17,7 +17,7 @@ class TrainingDivergedException(Exception):
 
     pass
 
-def compute_drift_loss(
+def compute_pos_drift_loss(
     gen_pos: torch.Tensor,
     real_pos: torch.Tensor,
     num_atoms: int,
@@ -46,7 +46,7 @@ def compute_drift_loss(
     """
 
     eps = cfg["eps"]
-    eta = cfg["p_eta"]
+    eta = cfg["eta"]
 
     # Reshape for loss
     gen_pos = gen_pos.reshape(-1, num_atoms, 3)

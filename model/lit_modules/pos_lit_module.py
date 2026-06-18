@@ -203,13 +203,13 @@ class PositionGenerator(LightningModule):
         """
         # Sample from the prior distribution
         types, pos_prior, gen_batch_vec, gen_dense_edge_index = (
-            self._sample_prior_batch(self.n_gen_molecules, num_atoms)
+            self._sample_prior_batch(batch, num_atoms)
         )
 
         pos_prior = center_positions_per_graph(pos_prior, gen_batch_vec)
-
+        types_idx = types.argmax(dim=-1).long()
         # Generate molecule with EGNN
-        gen_pos = self.generator(pos_prior, types, gen_dense_edge_index)
+        gen_pos = self.generator(pos_prior, types_idx, gen_dense_edge_index)
 
         # Center positions
         gen_pos = center_positions_per_graph(gen_pos, gen_batch_vec)
