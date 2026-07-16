@@ -14,7 +14,7 @@ module load Anaconda3/2025.06-1
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate equi
 
-cd "$HOME/drifting-experiments"
+cd "$HOME/equi-drifting"
 
 python train.py \
   --n_real_molecules 128 \
