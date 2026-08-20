@@ -162,7 +162,16 @@ def parse_args():
         "--scale_spherical",
         type=float,
         default=1.0,
-        help="Scale spherical loss within combined loss."
+        help="Scale atom-type loss (spherical or Euclidean) within combined loss."
+    )
+    parser.add_argument(
+        "--spherical_space",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Use spherical geometry for atom types. Disable with "
+            "--no-spherical_space to use probability-space Euclidean geometry."
+        ),
     )
     parser.add_argument(
         "--epsilon",
@@ -215,32 +224,44 @@ def parse_args():
         help="Temperature used in bond loss."
     )
 
-    # --------------------
-    # Aligning Args
-    # --------------------
+    # ------------------------------------------------------------------
+    # Legacy alignment args (accepted for old scripts/configs, but unused)
+    # ------------------------------------------------------------------
     parser.add_argument(
         "--max_iter",
         type=int,
         default=10,
-        help="Max number of iterations the alignment is ran for."
+        help=(
+            "Deprecated compatibility option; the drift loss does not align "
+            "molecules."
+        ),
     )
     parser.add_argument(
         "--position_tol",
         type=float,
         default=1e-4,
-        help="Distance tolerance for considering alignment to be converged"
+        help=(
+            "Deprecated compatibility option; the drift loss does not align "
+            "molecules."
+        ),
     )
     parser.add_argument(
         "--position_weight",
         type=float,
         default=1.0,
-        help="Weight of positional cost in cost matrix for the Hungarian method."
+        help=(
+            "Deprecated compatibility option; the drift loss does not permute "
+            "atoms."
+        ),
     )
     parser.add_argument(
         "--types_weight",
         type=float,
         default=1.0,
-        help="Weight of types cost in cost matrix for the Hungarian method."
+        help=(
+            "Deprecated compatibility option; the drift loss does not permute "
+            "atoms."
+        ),
     )
 
     # --------------------

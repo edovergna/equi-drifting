@@ -89,6 +89,9 @@ python train.py \
   --chem_refinement
 ```
 
+Atom types use spherical geometry by default. Pass `--no-spherical_space` to
+train with Euclidean geometry directly in probability space instead.
+
 On a SLURM-managed GPU cluster, submit the provided job script:
 
 ```bash

@@ -9,7 +9,7 @@ import wandb
 from .lit_module import MoleculeGenerator
 
 WANDB_ENTITY = "equivariant-drifting"
-WANDB_PROJECT = "aligned-drifting"
+WANDB_PROJECT = "unnormalized-drifting"
 WANDB_PATH = f"{WANDB_ENTITY}/{WANDB_PROJECT}"
 
 

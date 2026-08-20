@@ -80,6 +80,7 @@ def main(args: argparse.Namespace):
             "t_eta": args.types_eta,
             "scale_eucl": args.scale_euclidean,
             "scale_spher": args.scale_spherical,
+            "spherical_space": args.spherical_space,
             "eps": args.epsilon,
             "max_iter": args.max_iter,
             "p_tol": args.position_tol,

@@ -86,6 +86,7 @@ def build_model_from_wandb_config(config: dict) -> MoleculeGenerator:
         "n_gen_molecules": config.get("n_gen_molecules", 64),
         "num_atom_types": config.get("num_atom_types", 5),
         "eps": config.get("epsilon", 1e-8),
+        "spherical_space": config.get("spherical_space", True),
     }
 
     return MoleculeGenerator(generator_cfg=generator_cfg, drift_cfg=drift_cfg)

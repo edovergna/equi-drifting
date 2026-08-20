@@ -59,6 +59,7 @@ class MoleculeGenerator(LightningModule):
             "t_eta": 1.0,
             "scale_eucl": 1.0,
             "scale_spher": 1.0,
+            "spherical_space": True,
             "eps": 1e-8,
             "max_iter": 10,
             "p_tol": 1e-4,
@@ -96,6 +97,7 @@ class MoleculeGenerator(LightningModule):
         self.chem_refinement = self.drift_cfg.get("chem_refinement", False)
         self.max_epochs = self.drift_cfg.get("max_epochs", 100)
         self.start_frac_epoch = self.drift_cfg.get("start_frac_epoch", 0.8)
+        self.spherical_space = self.drift_cfg.get("spherical_space", True)
 
         self.eps = self.drift_cfg.get("eps", 1e-8)
 
@@ -180,15 +182,27 @@ class MoleculeGenerator(LightningModule):
         self._last_sampled_atom_probs = x.detach().cpu().numpy()
         return x, pos, batch_vec, dense_edge_index
 
+    def _types_to_model_space(self, probabilities: torch.Tensor) -> torch.Tensor:
+        """Map atom-type probabilities to the configured loss representation."""
+        if self.spherical_space:
+            return probs_to_sphere(probabilities, self.eps)
+        return probabilities
+
+    def _types_to_probabilities(self, representation: torch.Tensor) -> torch.Tensor:
+        """Map the configured atom-type representation back to probabilities."""
+        if self.spherical_space:
+            return sphere_to_probs(representation, self.eps)
+        return representation
+
     def _forward(self, batch, num_atoms):
-        """Shared forward pass: sample prior → EGNN → center positions → sphere embeddings.
+        """Run the generator and map atom types to the configured loss space.
 
         Args:
             batch: Unused; kept for a uniform training-step signature.
             num_atoms: Number of atoms per molecule.
 
         Returns:
-            Tuple of (gen_pos, gen_types_sphere, gen_batch_vec).
+            Tuple of (generated positions, represented atom types, batch vector).
         """
         # Sample from the prior distribution
         x_prior, pos_prior, gen_batch_vec, gen_dense_edge_index = (
@@ -206,12 +220,11 @@ class MoleculeGenerator(LightningModule):
         # Turn x_logits into probabilites
         gen_types_prob = F.softmax(gen_types, dim=-1)
 
-        # And project to the sphere
-        gen_types_sphere = probs_to_sphere(gen_types_prob, self.eps)
+        gen_types_repr = self._types_to_model_space(gen_types_prob)
 
         return (
             gen_pos,
-            gen_types_sphere,
+            gen_types_repr,
             gen_batch_vec,
         )
 
@@ -270,18 +283,18 @@ class MoleculeGenerator(LightningModule):
             Scalar loss tensor for backpropagation.
         """
         num_atoms = self._batch_num_atoms(batch)
-        gen_pos, gen_types_sphere, gen_batch_vec = self._forward(batch, num_atoms)
+        gen_pos, gen_types_repr, gen_batch_vec = self._forward(batch, num_atoms)
 
         real_pos, real_types = batch.pos, batch.real_atom_types
 
         try:
             if self.chem_refinement and (self.current_epoch > self.start_frac_epoch * self.max_epochs):
                 loss, stats = compute_drift_loss(
-                    gen_pos, real_pos, gen_types_sphere, real_types, num_atoms, chem_refinement=True, cfg=self.drift_cfg
+                    gen_pos, real_pos, gen_types_repr, real_types, num_atoms, chem_refinement=True, cfg=self.drift_cfg
                 )
             else:
                 loss, stats = compute_drift_loss(
-                    gen_pos, real_pos, gen_types_sphere, real_types, num_atoms, chem_refinement=False, cfg=self.drift_cfg
+                    gen_pos, real_pos, gen_types_repr, real_types, num_atoms, chem_refinement=False, cfg=self.drift_cfg
                 )
         except TrainingDivergedException as e:
             self.print(f"\n[Step {self.global_step}] {e}\nStopping training.")
@@ -340,17 +353,17 @@ class MoleculeGenerator(LightningModule):
             Dictionary of generated and real positions/types for downstream callbacks.
         """
         num_atoms = self._batch_num_atoms(batch)
-        gen_pos, gen_types_sphere, gen_batch_vec = self._forward(batch, num_atoms)
+        gen_pos, gen_types_repr, gen_batch_vec = self._forward(batch, num_atoms)
 
         real_pos, real_types = batch.pos, batch.real_atom_types
 
         if self.chem_refinement and (self.current_epoch > self.start_frac_epoch * self.max_epochs):
             val_loss, stats = compute_drift_loss(
-                gen_pos, real_pos, gen_types_sphere, real_types, num_atoms, chem_refinement=True, cfg=self.drift_cfg
+                gen_pos, real_pos, gen_types_repr, real_types, num_atoms, chem_refinement=True, cfg=self.drift_cfg
             )
         else:
             val_loss, stats = compute_drift_loss(
-                gen_pos, real_pos, gen_types_sphere, real_types, num_atoms, chem_refinement=False, cfg=self.drift_cfg
+                gen_pos, real_pos, gen_types_repr, real_types, num_atoms, chem_refinement=False, cfg=self.drift_cfg
             )
 
         bs = self.n_gen_molecules
@@ -396,9 +409,8 @@ class MoleculeGenerator(LightningModule):
             sync_dist=True,
         )
 
-        # Project sphere embeddings back to probabilities
         with torch.no_grad():
-            gen_types_prob = sphere_to_probs(gen_types_sphere, self.eps)
+            gen_types_prob = self._types_to_probabilities(gen_types_repr)
 
         return {
             "pos_gen": gen_pos.detach().cpu(),
@@ -434,16 +446,16 @@ class MoleculeGenerator(LightningModule):
             Scalar test loss tensor.
         """
         num_atoms = self._batch_num_atoms(batch)
-        gen_pos, gen_types_sphere, gen_batch_vec = self._forward(batch, num_atoms)
+        gen_pos, gen_types_repr, gen_batch_vec = self._forward(batch, num_atoms)
         real_pos, real_types = batch.pos, batch.real_atom_types
 
         if self.chem_refinement and (self.current_epoch > self.start_frac_epoch * self.max_epochs):
             test_loss, stats = compute_drift_loss(
-                gen_pos, real_pos, gen_types_sphere, real_types, num_atoms, chem_refinement=True, cfg=self.drift_cfg
+                gen_pos, real_pos, gen_types_repr, real_types, num_atoms, chem_refinement=True, cfg=self.drift_cfg
             )
         else:
             test_loss, stats = compute_drift_loss(
-                gen_pos, real_pos, gen_types_sphere, real_types, num_atoms, chem_refinement=False, cfg=self.drift_cfg
+                gen_pos, real_pos, gen_types_repr, real_types, num_atoms, chem_refinement=False, cfg=self.drift_cfg
             )
 
         bs = self.n_gen_molecules
