@@ -1,11 +1,11 @@
 #!/bin/bash
 
-#SBATCH --partition=gpu_mig
+#SBATCH --partition=gpu_h100
 #SBATCH --gpus=1
 #SBATCH --job-name=ins_env
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
-#SBATCH --time=00:10:00
+#SBATCH --time=02:00:00
 #SBATCH --output=slurm_output_%A.out
 
 module purge
@@ -18,3 +18,4 @@ conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/ma
 conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
 
 conda env create -f conda_environment.yaml
+
