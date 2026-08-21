@@ -225,7 +225,7 @@ def _pairwise_geodesic_distance_and_log(
     For Spherical: Uses arccos to compute angles on sphere.
 
     Args:
-        x: [N_x, N_y, N_atoms, D] pairwise tensor or [N_x, N_atoms, D] batch tensor.
+        x: Generated batch [N_x, N_atoms, D].
         y: [N_y, N_atoms, D] reference tensor.
         manifold: "euclidean" or "spherical".
         eps: Small constant for numerical stability.
@@ -235,30 +235,36 @@ def _pairwise_geodesic_distance_and_log(
     """
 
     if manifold == "euclidean":
-        diff = x - y[None, :, :, :]  # shape: (N_x, N_y, N_atoms, z)
+        diff = x[:, None, :, :] - y[None, :, :, :]
         sq_dist_per_atom = (diff**2).sum(dim=-1)  # shape: (N_x, N_y, N_atoms)
 
         sq_distances = sq_dist_per_atom.sum(dim=-1)  # shape: (N_x, N_y)
     elif manifold == "spherical":
-        x = sphere_normalize(x, eps)
-        y = sphere_normalize(y.unsqueeze(0), eps)
+        x_normalized = sphere_normalize(x, eps)
+        y_normalized = sphere_normalize(y, eps)
+        x_pairwise = x_normalized[:, None, :, :]
+        y_pairwise = y_normalized[None, :, :, :]
 
-        dot = (x * y).sum(dim=-1).clamp(-1.0 + 1e-7, 1.0 - 1e-7)
+        dot = (x_pairwise * y_pairwise).sum(dim=-1).clamp(
+            -1.0 + 1e-7, 1.0 - 1e-7
+        )
         theta = torch.acos(dot)  # [N_x, N_y, N_atoms]
 
         sq_distances = theta.pow(2).sum(dim=-1).clamp_min(eps)  # [N_x, N_y]
 
-        u = y - dot.unsqueeze(-1) * x  # [N_x, N_y, N_atoms, z]
+        u = y_pairwise - dot.unsqueeze(-1) * x_pairwise
         u_norm = u.norm(dim=-1, keepdim=True)
 
         scale = theta.unsqueeze(-1) / u_norm.clamp_min(eps)
         out = scale * u
 
         small = theta.unsqueeze(-1) < 1e-5
-        first_order = sphere_project_tangent(x, y - x)
+        first_order = sphere_project_tangent(
+            x_pairwise, y_pairwise - x_pairwise
+        )
 
         out = torch.where(small, first_order, out)
-        diff = sphere_project_tangent(x, out)  # shape: (N_x, N_y, N_atoms, z)
+        diff = sphere_project_tangent(x_pairwise, out)
     else:
         raise ValueError("Undefined manifold.")
     return sq_distances, diff
